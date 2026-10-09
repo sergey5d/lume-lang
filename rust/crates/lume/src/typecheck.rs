@@ -4895,6 +4895,9 @@ impl<'a> Checker<'a> {
                 base
             }
             Expr::RecordLiteral { fields, values, .. } => {
+                if fields.is_empty() && values.is_empty() && expected == &Ty::unit() {
+                    return Ty::unit();
+                }
                 if let Ty::Named(name, _) = expected
                     && self
                         .lookup_any_type(name)
@@ -5890,6 +5893,11 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|bound| substitute_type(bound, &subst))
             .collect();
+        sig.generic_conditions = sig
+            .generic_conditions
+            .iter()
+            .map(|condition| substitute_generic_condition(condition, &subst))
+            .collect();
         sig.type_params.clear();
 
         let structural_record_arg = call_uses_structural_record_arg(args, uses_brace_syntax);
@@ -6301,6 +6309,8 @@ impl<'a> Checker<'a> {
             | Expr::Continue { .. }
             | Expr::Unit { .. }
             | Expr::ForYield { .. } => {}
+            Expr::RecordLiteral { fields, values, .. }
+                if fields.is_empty() && values.is_empty() => {}
             Expr::Group { inner, .. } => self.check_discarded_expr_after_unit_expected(inner),
             Expr::Block { .. } => {}
             Expr::If {
@@ -6395,6 +6405,10 @@ impl<'a> Checker<'a> {
             &selection.explicit_type_args,
             span,
         );
+        self.infer_type_subst_from_generic_conditions(
+            &selection.sig.generic_conditions,
+            &mut subst,
+        );
         if !matches!(expected, Ty::Unknown) {
             infer_type_subst(&selection.sig.ret, expected, &mut subst);
         }
@@ -6436,6 +6450,30 @@ impl<'a> Checker<'a> {
             );
         }
         ret
+    }
+
+    fn infer_type_subst_from_generic_conditions(
+        &self,
+        conditions: &[GenericConditionSig],
+        subst: &mut HashMap<String, Ty>,
+    ) {
+        for condition in conditions {
+            let GenericConditionSig::Bound { subject, bound } = condition else {
+                continue;
+            };
+            let subject = substitute_type(subject, subst);
+            let bound = substitute_type(bound, subst);
+            let Ty::Named(bound_name, bound_args) = bound else {
+                continue;
+            };
+            if bound_name != "Iterable" || bound_args.len() != 1 {
+                continue;
+            }
+            let Some(item) = self.known_iterable_item_type(&subject) else {
+                continue;
+            };
+            infer_type_subst(&bound_args[0], &item, subst);
+        }
     }
 
     fn check_call_generic_conditions(
@@ -9181,7 +9219,14 @@ impl<'a> Checker<'a> {
     ) -> Ty {
         let value_ty = self.check_expr(value);
         let inner = self.unwrap_inner_type(&value_ty);
-        if inner == Ty::Unknown && !matches!(value_ty, Ty::Unknown) {
+        let lifted = matches!(
+            &value_ty,
+            Ty::Named(name, args)
+                if (name == "Option" && args.len() == 1)
+                    || (name == "Result" && !args.is_empty())
+                    || (name == "Either" && args.len() == 2)
+        );
+        if inner == Ty::Unknown && !matches!(value_ty, Ty::Unknown) && !lifted {
             self.add_error(
                 "invalid_extract_or",
                 format!(
@@ -9194,7 +9239,11 @@ impl<'a> Checker<'a> {
             return Ty::Unknown;
         }
 
-        let fallback_ty = self.check_expr_against(fallback, &inner);
+        let fallback_ty = if inner == Ty::Unknown {
+            self.check_expr(fallback)
+        } else {
+            self.check_expr_against(fallback, &inner)
+        };
         self.require_assignable(
             &fallback_ty,
             &inner,
@@ -9206,7 +9255,11 @@ impl<'a> Checker<'a> {
                 self.diagnostic_type_phrase(&inner)
             ),
         );
-        inner
+        if lifted && inner == Ty::Unknown {
+            materialize_type(&fallback_ty)
+        } else {
+            inner
+        }
     }
 
     fn check_return_control_expr(&mut self, value: Option<&Expr>, span: crate::source::Span) -> Ty {
@@ -10185,6 +10238,16 @@ impl<'a> Checker<'a> {
     }
 
     fn unknown_member_message(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> String {
+        if name == "getOr"
+            && !matches!(receiver_ty, Ty::Unknown)
+            && self.unwrap_known_lifted_type(receiver_ty).is_some()
+        {
+            return format!(
+                "method 'getOr' was removed from '{}'; use '<value> ?? fallback' for lazy fallback extraction",
+                receiver_ty.describe(),
+            );
+        }
+
         if name == "orPanic"
             && !matches!(receiver_ty, Ty::Unknown)
             && self.unwrap_known_lifted_type(receiver_ty).is_some()
@@ -16697,6 +16760,75 @@ def main() Unit {
     }
 
     #[test]
+    fn checks_empty_braces_from_expression_context() {
+        let program = parse_inline(
+            r#"
+class EmptyClass {}
+
+class DefaultedClass {
+    value Int = 7
+}
+
+shape EmptyShape {}
+
+def noop() Unit = {}
+
+def makeEmpty() EmptyClass = {}
+
+def main() Unit {
+    instance EmptyClass = {}
+    defaulted DefaultedClass = {}
+    marker EmptyShape = {}
+    values Vector[Str] = {}
+    lookup Map[Str, Int] = {}
+    set Set[Str] = {}
+    nothing Unit = {}
+    anonymous = {}
+    callback fn() Unit = () => {}
+    shapeCallback = () => {}
+    callbackResult = { ...shapeCallback(), value: 1 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn empty_braces_do_not_bypass_required_construction_or_turn_bodies_into_values() {
+        let program = parse_inline(
+            r#"
+class Required {
+    value Int
+}
+
+def constructed() Required = {}
+
+def body() Required {}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "no_matching_overload"
+                    && diagnostic
+                        .message
+                        .contains("missing required field 'value'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "invalid_return_type"),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn allows_field_braces_and_forced_braces_across_contexts() {
         let program = parse_inline(
             r#"
@@ -18578,6 +18710,7 @@ def nestedValue() Option[Option[Int]] = ^^9
 def nestedNone() Option[Option[Int]] = ^None
 def choose(flag Bool) Option[Int] = if flag { ^1 } else { ^2 }
 def consume(value Option[Int]) Int = value ?? 0
+def inferred(values [Int]) Int = values.flatMap(value => [value]).at(0) ?? 0
 
 def main() Unit {
     inferred = ^1
@@ -18804,6 +18937,7 @@ def main() Unit {
     explicitSet Set[Str] = Set[Str]()
     contextualSet Set[Str] = Set()
     contextualNewSet Set[Str] = new()
+    contextualBraceSet Set[Str] = new {}
     inferredSet = Set[Str]()
     anySet Set[Any] = Set[Any]()
 
@@ -18820,6 +18954,7 @@ def main() Unit {
         explicitSet.size,
         contextualSet.size,
         contextualNewSet.size,
+        contextualBraceSet.size,
         inferredSet.size,
         anySet.size,
         explicitMap.size,
@@ -18835,6 +18970,26 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_contextual_collection_braces_with_named_fields() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values Set[Str] = new { item: "Ada" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "no_matching_overload"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -19219,6 +19374,28 @@ def fromEither(value Either[Str, Int]) Int = value.orPanic()
                 diag.code == "unknown_member"
                     && diag.message.contains("method 'orPanic' was removed")
                     && diag.message.contains("postfix '!'")
+            })
+            .count();
+        assert_eq!(removed, 3, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_removed_get_or_methods_on_lifted_values() {
+        let program = parse_inline(
+            r#"
+def fromOption(value Option[Int]) Int = value.getOr(0)
+def fromResult(value Result[Int, Str]) Int = value.getOr(0)
+def fromEither(value Either[Str, Int]) Int = value.getOr(0)
+"#,
+        );
+        let result = check_program(&program);
+        let removed = result
+            .diagnostics
+            .iter()
+            .filter(|diag| {
+                diag.code == "unknown_member"
+                    && diag.message.contains("method 'getOr' was removed")
+                    && diag.message.contains("?? fallback")
             })
             .count();
         assert_eq!(removed, 3, "{:#?}", result.diagnostics);

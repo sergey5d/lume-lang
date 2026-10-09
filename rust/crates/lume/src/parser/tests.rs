@@ -2270,6 +2270,40 @@ fn parses_contextual_new_forms() {
 }
 
 #[test]
+fn parses_empty_braces_as_construction_in_expression_positions() {
+    assert!(matches!(
+        parse_expr_only("{}"),
+        Expr::RecordLiteral { fields, values, .. }
+            if fields.is_empty() && values.is_empty()
+    ));
+
+    let result = parse(
+        r#"
+class Empty {}
+
+def expressionBody() Empty = {}
+def blockBody() Unit {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let Item::Function(expression_body) = &program.items[1] else {
+        panic!("expected expressionBody function");
+    };
+    assert!(matches!(
+        expression_body.body,
+        CallableBody::Expr(Expr::RecordLiteral { ref fields, ref values, .. })
+            if fields.is_empty() && values.is_empty()
+    ));
+
+    let Item::Function(block_body) = &program.items[2] else {
+        panic!("expected blockBody function");
+    };
+    assert!(matches!(block_body.body, CallableBody::Block(_)));
+}
+
+#[test]
 fn rejects_expression_level_shape_forms() {
     for source in [
         r#"def main() Unit = shape { x: 10 }"#,

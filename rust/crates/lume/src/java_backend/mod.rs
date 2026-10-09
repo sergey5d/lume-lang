@@ -2642,6 +2642,119 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_supports_synchronous_file_io() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping file I/O Java test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-file-io");
+        let source = temp.join("file_io.lum");
+        let data = temp.join("input.txt");
+        let invalid = temp.join("invalid.txt");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(&data, "alpha\n\nomega").expect("write input file");
+        fs::write(&invalid, [0xff]).expect("write invalid input file");
+        fs::write(
+            &source,
+            r#"
+module demo/files
+
+def main() Unit {
+    path = OS.args[0]
+    println(File.readText(path)!.size)
+
+    stream = File.open(path)!
+    println(stream.path == path, stream.position, stream.closed)
+    println(stream.read(5)!.size, stream.position)
+    println(stream.seek(-5, SeekFrom.End)!, stream.readToEnd()!.size)
+    streamClosed = stream.close()!
+    println(stream.closed)
+    match stream.read(1) {
+        case Ok(_) => println("open")
+        case Err(Closed { path: _ }) => println("closed")
+        case Err(_) => println("error")
+    }
+
+    reader = File.openText(path)!
+    first = reader.readLine()!!
+    blank = reader.readLine()!!
+    last = reader.readLine()!!
+    end = reader.readLine()!
+    println(first, blank.size, last, end.isEmpty)
+    readerClosed = reader.close()!
+
+    match File.readText(OS.args[1]) {
+        case Err(InvalidEncoding { offset }) => println("invalid", offset)
+        case _ => println("unexpected")
+    }
+
+    invalidReader = File.openText(OS.args[1])!
+    match invalidReader.readLine() {
+        case Err(InvalidEncoding { offset }) => println("stream invalid", offset)
+        case _ => println("unexpected stream")
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let arguments = vec![
+            data.to_string_lossy().into_owned(),
+            invalid.to_string_lossy().into_owned(),
+        ];
+        let interpreted =
+            run_path_with_args(&source, None, &arguments).expect("run interpreter with file");
+        assert!(interpreted.diagnostics.is_empty());
+        let expected = interpreter_stdout(interpreted);
+        assert_eq!(
+            expected,
+            "12\ntrue 0 false\n5 5\n7 5\ntrue\nclosed\nalpha 0 omega true\ninvalid 0\nstream invalid 0\n"
+        );
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let module = fs::read_to_string(out.join("demo/files/FilesModule.java"))
+            .expect("read generated module");
+        assert!(module.contains("LumeFile.readText(path)"));
+        assert!(module.contains("LumeFile.open(path)"));
+        assert!(module.contains("LumeFile.openText(path)"));
+        assert!(module.contains("SeekFrom.End.INSTANCE"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.files.FilesMain")
+                .arg(&data)
+                .arg(&invalid),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            expected
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn discovers_nested_local_imports_from_source_root() {
         let temp = temp_path("lume-java-nested-imports");
         let source = temp.join("main.lum");
@@ -3630,7 +3743,7 @@ def forwarded(values [Int]) Int = collect(...values).size
 
 def direct() Int = collect(1, 2, 3).size
 
-def typeName[reified T]() Str = typeOf[T].name.getOr("?")
+def typeName[reified T]() Str = typeOf[T].name ?? "?"
 
 def concreteTypeName() Str = typeName[Int]()
 
@@ -3819,6 +3932,14 @@ class LabeledWorker {
     }
 }
 
+class EmptyWorker {
+    value Int
+
+    new() {
+        this.value = 9
+    }
+}
+
 interface Printable {
     def print() Str
 }
@@ -3833,6 +3954,14 @@ def main() Unit {
     position Position = new(3, 4)
     anonymous = new { x, y }
     empty = new {}
+    bareEmpty = {}
+    emptyWorker EmptyWorker = {}
+    emptySet Set[Str] = {}
+    nothing Unit = {}
+    callback fn() Unit = () => {}
+    shapeCallback = () => {}
+    callbackResult = { ...shapeCallback(), value: 4 }
+    callback()
     widened Any = new { x, y }
     base = 10
     printable Printable = object with Printable {
@@ -3848,6 +3977,7 @@ def main() Unit {
     println(position.x + position.y)
     println(printable.print())
     println(punned.x + anonymous.y)
+    println(emptyWorker.value, emptySet.size, callbackResult.value)
 }
 "#,
         )
@@ -3869,6 +3999,14 @@ def main() Unit {
         );
         assert!(
             module.contains("LabeledWorker labeled = new LabeledWorker(\"Ben\")"),
+            "{module}"
+        );
+        assert!(
+            module.contains("EmptyWorker emptyWorker = new EmptyWorker()"),
+            "{module}"
+        );
+        assert!(
+            module.contains("LumeSet<String> emptySet = LumeSet.empty()"),
             "{module}"
         );
         assert!(
@@ -3900,7 +4038,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("Java stdout utf8"),
-            "30\nAda 42\nBen!\n7\n10:12\n7\n"
+            "30\nAda 42\nBen!\n7\n10:12\n7\n9 0 4\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -3998,7 +4136,7 @@ def calculate(value Int) Result[Int, Str] = {
     })
 }
 
-def main() Int = calculate(4).getOr(0)
+def main() Int = calculate(4) ?? 0
 "#,
         )
         .expect("write source");
@@ -4138,7 +4276,7 @@ def direct(useFallback Bool) Int =
 
 def optionValue() Int {
     present Int? = Some(3)
-    present.getOr(fallback())
+    present ?? fallback()
 }
 
 def main() Unit {
@@ -4158,7 +4296,7 @@ def main() Unit {
             .expect("read module Java");
         assert!(module.contains("choose(useFallback, value)"), "{module}");
         assert!(module.contains("() -> fallback()"), "{module}");
-        assert!(module.contains(".getOr(() -> fallback())"), "{module}");
+        assert!(module.contains("instanceof Option.Some"), "{module}");
         assert!(!module.contains("__block"), "{module}");
 
         if command_available("javac") && command_available("java") {
@@ -4348,7 +4486,7 @@ def increment(value Str) Result[Int, Str] {
 }
 
 def main() Unit {
-    println(increment("4").getOr(0))
+    println(increment("4") ?? 0)
     println(increment("bad").getError())
 }
 "#,
@@ -4442,7 +4580,7 @@ def captured(flag Bool, value Option[Int]) Int = {
     let Some { value as item } = value else return 0
     selected Int = if flag { item } else if item > 0 { item + 1 } else { item - 1 }
     result Option[Int] = Some(0).map(_ => selected + item)
-    result.getOr(0)
+    result ?? 0
 }
 
 def compute(flag Bool) Result[Int, Str] = {
@@ -4466,8 +4604,8 @@ def compute(flag Bool) Result[Int, Str] = {
 
 def main() Unit = {
     observe(None)
-    println(compute(true).getOr(0))
-    println(compute(false).getOr(0))
+    println(compute(true) ?? 0)
+    println(compute(false) ?? 0)
     println(choiceValue(Choice.First(7)))
     println(captured(true, Some(3)))
     println(captured(false, Some(3)))
@@ -4808,7 +4946,7 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
                     "case Err<?, ?> __case",
                     "default <X> Result<X, E> map(Function<T, X> f)",
                     "default <X> Result<X, E> flatMap(Function<T, Result<X, E>> f)",
-                    "return ((T) __case",
+                    "default E getError()",
                 ],
             ),
             (
@@ -6387,10 +6525,10 @@ module demo/object_reified
 object Cache {
 
     def label(targetType Type[_]) Str =
-        targetType.name.getOr("?")
+        targetType.name ?? "?"
 
     def reifiedLabel[reified T]() Str =
-        typeOf[T].name.getOr("?")
+        typeOf[T].name ?? "?"
 }
 
 
@@ -6753,13 +6891,14 @@ class Box[T] {
 }
 
 def main() Unit {
-    set Set[Str] = Set()
+    set Set[Str] = new {}
     map Map[Str, Int] = Map[Str, Int]()
     inferred = Box("hello")
     contextual Box[Str] = new("world")
 
+    println(set.isEmpty, set.nonEmpty)
     set.add("Ada")
-    println(set.size, map.size, inferred.value, contextual.value)
+    println(set.isEmpty, set.nonEmpty, set.size, map.size, inferred.value, contextual.value)
 }
 "#,
         )
@@ -6798,7 +6937,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "1 0 hello world\n"
+            "true false\nfalse true 1 0 hello world\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7176,6 +7315,12 @@ def main() Unit {
     vectorInserted Unit = values.insertAt(1, 4) !
     println(values.removeAt(2) !)
     println(values[0])
+    println(values.contains(4))
+    println(values.contains(2))
+    println(values.first ?? 0)
+    println(values.last ?? 0)
+    empty [Int] = []
+    println(empty.last ?? -1)
     match values.removeAt(9) {
         case Err { error } => {
             println(error.index)
@@ -7210,6 +7355,7 @@ def main() Unit {
             .expect("read module");
         assert!(module.contains("import lume.core.LumeLinkedList;"));
         assert!(module.contains("LumeRuntime.extractSuccessValue"));
+        assert!(module.contains("values.last()"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -7228,7 +7374,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Bob\nBob\nAda\n4\n1\n2\n3\n9\n2\n5\n5\n7\n7\n11\n"
+            "Bob\nBob\nAda\n4\n1\n2\n3\ntrue\nfalse\n3\n4\n-1\n9\n2\n5\n5\n7\n7\n11\n"
         );
 
         let _ = fs::remove_dir_all(temp);

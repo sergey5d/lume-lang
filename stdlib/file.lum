@@ -1,0 +1,106 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+# Byte is an API-level distinction for now. A range-checked primitive can replace
+# this alias later without changing the file API.
+type Byte = Int
+
+type FileError =
+    class NotFound {
+        path Str
+    }
+    | class AccessDenied {
+        path Str
+    }
+    | class Closed {
+        path Str
+    }
+    | class InvalidEncoding {
+        path Str
+        offset Int
+    }
+    | class IoFailure {
+        operation Str
+        path Str
+        message Str
+    }
+
+type SeekFrom =
+    object Start {}
+    | object Current {}
+    | object End {}
+
+interface Closeable {
+    def closed Bool
+    def close() Result[Unit, FileError]
+}
+
+interface ByteReader {
+    def read(maxBytes Int) Result[[Byte], FileError]
+    def readToEnd() Result[[Byte], FileError]
+}
+
+interface Seekable {
+    def position Int
+    def seek(offset Int) Result[Int, FileError]
+    def seek(offset Int, from SeekFrom) Result[Int, FileError]
+}
+
+interface TextReader with Closeable {
+    def readLine() Result[Str?, FileError]
+    def readToEnd() Result[Str, FileError]
+}
+
+class FileStream with ByteReader, Seekable, Closeable {
+    private new() {}
+
+    def path Str = panic("FileStream is provided by the active runtime")
+    def position Int = panic("FileStream is provided by the active runtime")
+    def closed Bool = panic("FileStream is provided by the active runtime")
+
+    def read(maxBytes Int) Result[[Byte], FileError] =
+        panic("FileStream is provided by the active runtime")
+
+    def readToEnd() Result[[Byte], FileError] =
+        panic("FileStream is provided by the active runtime")
+
+    def seek(offset Int) Result[Int, FileError] =
+        panic("FileStream is provided by the active runtime")
+
+    def seek(offset Int, from SeekFrom) Result[Int, FileError] =
+        panic("FileStream is provided by the active runtime")
+
+    def close() Result[Unit, FileError] =
+        panic("FileStream is provided by the active runtime")
+}
+
+class TextFileReader with TextReader {
+    private new() {}
+
+    def path Str = panic("TextFileReader is provided by the active runtime")
+    def closed Bool = panic("TextFileReader is provided by the active runtime")
+
+    def readLine() Result[Str?, FileError] =
+        panic("TextFileReader is provided by the active runtime")
+
+    def readToEnd() Result[Str, FileError] =
+        panic("TextFileReader is provided by the active runtime")
+
+    def close() Result[Unit, FileError] =
+        panic("TextFileReader is provided by the active runtime")
+}
+
+object File {
+    def readBytes(path Str) Result[[Byte], FileError] =
+        panic("File is provided by the active runtime")
+
+    def readText(path Str) Result[Str, FileError] =
+        panic("File is provided by the active runtime")
+
+    def open(path Str) Result[FileStream, FileError] =
+        panic("File is provided by the active runtime")
+
+    def openText(path Str) Result[TextFileReader, FileError] =
+        panic("File is provided by the active runtime")
+}

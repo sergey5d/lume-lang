@@ -36,14 +36,14 @@ def main() Unit {
         first + third
     })
 
-    println(mapped.at(0).getOr(0))
-    println(mapped.at(1).getOr(0))
-    println(mapped.at(2).getOr(0))
+    println(mapped.at(0) ?? 0)
+    println(mapped.at(1) ?? 0)
+    println(mapped.at(2) ?? 0)
     println(applyTwice(inc, 2))
-    println(sizes.at(0).getOr(0))
-    println(pairMapped.at(0).getOr(0))
-    println(pairMapped.at(1).getOr(0))
-    println(mapMapped.at(1).getOr(0))
-    println(pairIgnored.at(1).getOr(0))
-    println(tuple4Mapped.at(1).getOr(0))
+    println(sizes.at(0) ?? 0)
+    println(pairMapped.at(0) ?? 0)
+    println(pairMapped.at(1) ?? 0)
+    println(mapMapped.at(1) ?? 0)
+    println(pairIgnored.at(1) ?? 0)
+    println(tuple4Mapped.at(1) ?? 0)
 }

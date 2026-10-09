@@ -32,7 +32,6 @@ pub(super) fn define() -> RuntimeType {
             ),
             builtin_method(3, "expectLeft", Vec::new(), either_expect_left),
             builtin_method(4, "expectRight", Vec::new(), either_expect_right),
-            builtin_method(5, "getOr", vec![ir::Type::Unknown], either_get_or),
             builtin_method(6, "orElse", vec![ir::Type::Unknown], either_or_else),
             builtin_method(7, "isSuccess", Vec::new(), either_is_right),
             builtin_method(
@@ -209,23 +208,6 @@ fn either_expect_right(
         Ok(first_field.expect("Either.Right payload"))
     } else {
         Err(interpreter.runtime_error(span, "Either has no right value"))
-    }
-}
-
-fn either_get_or(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "Either.getOr expects 1 argument"));
-    }
-    let (case_id, first_field) = either_case(&receiver);
-    if case_id == RIGHT_CASE {
-        Ok(first_field.expect("Either.Right payload"))
-    } else {
-        force_lazy_arg(interpreter, args[0].clone(), span)
     }
 }
 

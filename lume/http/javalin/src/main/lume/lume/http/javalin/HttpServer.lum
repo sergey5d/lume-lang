@@ -77,7 +77,7 @@ private def dispatchBody(
         if let Some { value as firstValue } = params.at(0) {
             first Param = firstValue
             paramType Type[_] = first.paramType
-            if paramType.name.getOr("") == "Context" {
+            if (paramType.name ?? "") == "Context" {
                 HttpResponder.render(ctx, dispatchController(method, controller, JavalinHttpContext(ctx)), contentType)
             } else {
                 HttpResponder.render(ctx, dispatchController(method, controller, ctx.body()), contentType)
@@ -199,7 +199,7 @@ class HttpServer {
 
         if let Some { value as controllerAnnotationValue } = controllerType.annotation[Controller]() {
             controllerAnnotation AnnotationValue = controllerAnnotationValue
-            prefix := controllerAnnotation.str("path").getOr("")
+            prefix := controllerAnnotation.str("path") ?? ""
         }
 
         methods [Method] = classType.methods
@@ -209,8 +209,8 @@ class HttpServer {
             if method.hasAnnotation[Get]() {
                 if let Some { value as routeValue } = method.annotation[Get]() {
                     route AnnotationValue = routeValue
-                    path Str = prefix + route.str("path").getOr("")
-                    contentType Str = route.str("contentType").getOr("text/plain")
+                    path Str = prefix + (route.str("path") ?? "")
+                    contentType Str = route.str("contentType") ?? "text/plain"
                     this.backend.get(path, contentType, controller, method)
                 }
             }
@@ -218,8 +218,8 @@ class HttpServer {
             if method.hasAnnotation[Post]() {
                 if let Some { value as routeValue } = method.annotation[Post]() {
                     route AnnotationValue = routeValue
-                    path Str = prefix + route.str("path").getOr("")
-                    contentType Str = route.str("contentType").getOr("text/plain")
+                    path Str = prefix + (route.str("path") ?? "")
+                    contentType Str = route.str("contentType") ?? "text/plain"
                     this.backend.post(path, contentType, controller, method)
                 }
             }
@@ -227,8 +227,8 @@ class HttpServer {
             if method.hasAnnotation[Put]() {
                 if let Some { value as routeValue } = method.annotation[Put]() {
                     route AnnotationValue = routeValue
-                    path Str = prefix + route.str("path").getOr("")
-                    contentType Str = route.str("contentType").getOr("text/plain")
+                    path Str = prefix + (route.str("path") ?? "")
+                    contentType Str = route.str("contentType") ?? "text/plain"
                     this.backend.put(path, contentType, controller, method)
                 }
             }
@@ -236,8 +236,8 @@ class HttpServer {
             if method.hasAnnotation[Patch]() {
                 if let Some { value as routeValue } = method.annotation[Patch]() {
                     route AnnotationValue = routeValue
-                    path Str = prefix + route.str("path").getOr("")
-                    contentType Str = route.str("contentType").getOr("text/plain")
+                    path Str = prefix + (route.str("path") ?? "")
+                    contentType Str = route.str("contentType") ?? "text/plain"
                     this.backend.patch(path, contentType, controller, method)
                 }
             }
@@ -245,8 +245,8 @@ class HttpServer {
             if method.hasAnnotation[Delete]() {
                 if let Some { value as routeValue } = method.annotation[Delete]() {
                     route AnnotationValue = routeValue
-                    path Str = prefix + route.str("path").getOr("")
-                    contentType Str = route.str("contentType").getOr("text/plain")
+                    path Str = prefix + (route.str("path") ?? "")
+                    contentType Str = route.str("contentType") ?? "text/plain"
                     this.backend.delete(path, contentType, controller, method)
                 }
             }

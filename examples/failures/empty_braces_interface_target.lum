@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*cannot assign value of type '\{\}' to binding 'declared' of type 'Named'.*
+
+interface Named {
+    def name Str
+}
+
+def main() Unit {
+    declared Named = {}
+}

@@ -2138,7 +2138,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_expression_brace_body(&mut self) -> Option<ExpressionBraceBody> {
         debug_assert!(self.at(TokenKind::LBrace));
-        if self.looks_like_brace_record_literal(false) {
+        if self.looks_like_brace_record_literal(true) {
             self.parse_brace_record_literal_expr()
                 .map(ExpressionBraceBody::Construction)
         } else {
@@ -2150,7 +2150,7 @@ impl<'a> Parser<'a> {
         &mut self,
     ) -> Option<ExpressionBraceBody> {
         debug_assert!(self.at(TokenKind::LBrace));
-        if self.looks_like_brace_record_literal(false) {
+        if self.looks_like_brace_record_literal(true) {
             self.parse_expr().map(ExpressionBraceBody::Construction)
         } else {
             self.parse_block().map(ExpressionBraceBody::Block)

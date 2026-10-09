@@ -1,0 +1,63 @@
+module lume/json
+
+annotation JsonName {
+    value Str
+}
+
+annotation JsonIgnore {}
+
+shape JsonField {
+    name Str
+    value JsonValue
+}
+
+type JsonValue =
+    object JsonNull {}
+    | class JsonBool { value Bool }
+    | class JsonNumber { value Str }
+    | class JsonString { value Str }
+    | class JsonArray { values [JsonValue] }
+    | class JsonObject { fields [JsonField] }
+
+ext JsonValue {
+    def stringify() Str = Json.stringify(this)
+}
+
+object Json {
+
+    def str(value Str) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def int(value Int) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def float(value Float) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def bool(value Bool) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def nil() JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def field(name Str, value JsonValue) JsonField =
+        panic("Json is provided by the Rust runtime")
+
+    def array(values [JsonValue] vararg) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def obj(fields [JsonField] vararg) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def obj(value Any) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def encode(value Any) JsonValue =
+        panic("Json is provided by the Rust runtime")
+
+    def stringify(value Any) Str =
+        panic("Json is provided by the Rust runtime")
+
+    def decode[reified T](text Str) Result[T, Str] =
+        panic("Json is provided by the Rust runtime")
+}

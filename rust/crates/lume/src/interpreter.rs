@@ -1,8 +1,9 @@
 use std::{
     cell::RefCell,
-    collections::{HashSet, hash_map::DefaultHasher},
-    fmt,
+    collections::{HashMap, HashSet, hash_map::DefaultHasher},
+    fmt, fs,
     hash::{Hash, Hasher},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom as IoSeekFrom},
     path::{Path, PathBuf},
     rc::Rc,
 };
@@ -905,6 +906,8 @@ pub(crate) enum Value {
     Aggregate(Rc<RefCell<AggregateValue>>),
     Iterator(Rc<RefCell<IteratorState>>),
     Closure(Rc<ClosureValue>),
+    FileStream(Rc<RefCell<FileStreamValue>>),
+    TextFileReader(Rc<RefCell<TextFileReaderValue>>),
     ReferenceId(ReferenceIdValue),
     RuntimeType(RuntimeTypeValue),
     RuntimeField {
@@ -929,7 +932,10 @@ pub(crate) enum Value {
 
 #[derive(Clone)]
 pub(crate) enum RuntimeTypeValue {
-    Runtime(runtime::RuntimeTypeId),
+    Runtime {
+        id: runtime::RuntimeTypeId,
+        args: Vec<ir::Type>,
+    },
     Primitive(String),
     Tuple(Vec<ir::Type>),
     Function {
@@ -943,6 +949,17 @@ pub(crate) enum RuntimeTypeValue {
 #[derive(Clone)]
 pub(crate) struct ReferenceIdValue {
     target: Box<Value>,
+}
+
+pub(crate) struct FileStreamValue {
+    path: String,
+    file: Option<fs::File>,
+}
+
+pub(crate) struct TextFileReaderValue {
+    path: String,
+    reader: Option<BufReader<fs::File>>,
+    position: u64,
 }
 
 impl Value {
@@ -1073,6 +1090,12 @@ impl Value {
             }
             Value::Iterator(_) => "<iterator>".to_string(),
             Value::Closure(_) => "<closure>".to_string(),
+            Value::FileStream(stream) => {
+                format!("FileStream({})", stream.borrow().path)
+            }
+            Value::TextFileReader(reader) => {
+                format!("TextFileReader({})", reader.borrow().path)
+            }
             Value::ReferenceId(_) => "<reference>".to_string(),
             Value::RuntimeType(runtime_type) => format!("type {}", runtime_type.render()),
             Value::RuntimeField { .. } => "<field>".to_string(),
@@ -1086,7 +1109,19 @@ impl Value {
 impl RuntimeTypeValue {
     fn render(&self) -> String {
         match self {
-            RuntimeTypeValue::Runtime(_) => "<runtime>".to_string(),
+            RuntimeTypeValue::Runtime { args, .. } => {
+                if args.is_empty() {
+                    "<runtime>".to_string()
+                } else {
+                    format!(
+                        "<runtime>[{}]",
+                        args.iter()
+                            .map(render_ir_type)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    )
+                }
+            }
             RuntimeTypeValue::Primitive(name) => name.clone(),
             RuntimeTypeValue::Tuple(items) => format!(
                 "({})",
@@ -2046,15 +2081,21 @@ impl<'a> Interpreter<'a> {
             ir::Type::Str => self
                 .runtime
                 .type_id_by_name_kind("Str", crate::ast::TypeKind::Class)
-                .map(RuntimeTypeValue::Runtime)
+                .map(|id| RuntimeTypeValue::Runtime {
+                    id,
+                    args: Vec::new(),
+                })
                 .unwrap_or_else(|| RuntimeTypeValue::Primitive("Str".to_string())),
             ir::Type::Named { name, .. } if is_primitive_type_name(name) => {
                 RuntimeTypeValue::Primitive(name.clone())
             }
-            ir::Type::Named { name, .. } => self
+            ir::Type::Named { name, args } => self
                 .runtime
                 .type_id_by_name_any_kind(name)
-                .map(RuntimeTypeValue::Runtime)
+                .map(|id| RuntimeTypeValue::Runtime {
+                    id,
+                    args: args.clone(),
+                })
                 .unwrap_or_else(|| RuntimeTypeValue::Primitive(name.clone())),
             ir::Type::Union(members) => RuntimeTypeValue::Primitive(
                 members
@@ -2089,6 +2130,12 @@ impl<'a> Interpreter<'a> {
             Value::ReferenceId(_) => {
                 self.runtime_type_value_for_ir_type(&ir::Type::named("ReferenceId"))
             }
+            Value::FileStream(_) => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("FileStream"))
+            }
+            Value::TextFileReader(_) => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("TextFileReader"))
+            }
             Value::RuntimeType(_) => self.runtime_type_value_for_ir_type(&ir::Type::Named {
                 name: "Type".to_string(),
                 args: vec![ir::Type::named("Any")],
@@ -2107,7 +2154,10 @@ impl<'a> Interpreter<'a> {
             }
             _ => self
                 .runtime_type_id_for_value(value)
-                .map(RuntimeTypeValue::Runtime)
+                .map(|id| RuntimeTypeValue::Runtime {
+                    id,
+                    args: Vec::new(),
+                })
                 .unwrap_or(RuntimeTypeValue::Unknown),
         }
     }
@@ -2138,6 +2188,7 @@ impl<'a> Interpreter<'a> {
             Value::ReferenceId(_) => self
                 .runtime
                 .type_id_by_name_kind("ReferenceId", crate::ast::TypeKind::Class),
+            Value::FileStream(_) | Value::TextFileReader(_) => None,
             Value::String(_) => self
                 .runtime
                 .type_id_by_name_kind("Str", crate::ast::TypeKind::Class),
@@ -2538,8 +2589,8 @@ impl<'a> Interpreter<'a> {
 
     fn runtime_type_name(&self, runtime_type: &RuntimeTypeValue) -> Option<String> {
         match runtime_type {
-            RuntimeTypeValue::Runtime(type_id) => {
-                self.runtime.type_by_id(*type_id).map(|ty| ty.name.clone())
+            RuntimeTypeValue::Runtime { id, .. } => {
+                self.runtime.type_by_id(*id).map(|ty| ty.name.clone())
             }
             RuntimeTypeValue::Primitive(name) => Some(name.clone()),
             RuntimeTypeValue::Unknown => Some("Unknown".to_string()),
@@ -2555,9 +2606,9 @@ impl<'a> Interpreter<'a> {
 
     fn runtime_type_kind_case(&self, runtime_type: &RuntimeTypeValue) -> &'static str {
         match runtime_type {
-            RuntimeTypeValue::Runtime(type_id) => self
+            RuntimeTypeValue::Runtime { id, .. } => self
                 .runtime
-                .type_by_id(*type_id)
+                .type_by_id(*id)
                 .map(|ty| match ty.kind {
                     crate::ast::TypeKind::Annotation => "Annotation",
                     crate::ast::TypeKind::Class => "Class",
@@ -2584,7 +2635,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn runtime_type_fields_value(&self, runtime_type: &RuntimeTypeValue) -> Value {
-        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+        let RuntimeTypeValue::Runtime { id: type_id, .. } = runtime_type else {
             return Value::list(Vec::new());
         };
         let fields = self
@@ -2605,7 +2656,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn runtime_type_methods_value(&self, runtime_type: &RuntimeTypeValue) -> Value {
-        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+        let RuntimeTypeValue::Runtime { id: type_id, .. } = runtime_type else {
             return Value::list(Vec::new());
         };
         let methods = self
@@ -2625,7 +2676,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn runtime_type_field_value(&self, runtime_type: &RuntimeTypeValue, name: &str) -> Value {
-        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+        let RuntimeTypeValue::Runtime { id: type_id, .. } = runtime_type else {
             return self.option_none();
         };
         self.runtime
@@ -2642,7 +2693,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn runtime_type_method_value(&self, runtime_type: &RuntimeTypeValue, name: &str) -> Value {
-        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+        let RuntimeTypeValue::Runtime { id: type_id, .. } = runtime_type else {
             return self.option_none();
         };
         self.runtime
@@ -2658,7 +2709,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn runtime_type_enum_cases_value(&self, runtime_type: &RuntimeTypeValue) -> Value {
-        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+        let RuntimeTypeValue::Runtime { id: type_id, .. } = runtime_type else {
             return Value::list(Vec::new());
         };
         let cases = self
@@ -2678,7 +2729,7 @@ impl<'a> Interpreter<'a> {
     }
 
     fn runtime_type_enum_case_value(&self, runtime_type: &RuntimeTypeValue, name: &str) -> Value {
-        let RuntimeTypeValue::Runtime(type_id) = runtime_type else {
+        let RuntimeTypeValue::Runtime { id: type_id, .. } = runtime_type else {
             return self.option_none();
         };
         self.runtime
@@ -3037,6 +3088,12 @@ impl<'a> Interpreter<'a> {
         if path[0] == "Math" && path.len() == 2 {
             return self.invoke_math_method(&path[1], args, span);
         }
+        if path[0] == "File" && path.len() == 2 {
+            return self.invoke_file_method(&path[1], args, span);
+        }
+        if path[0] == "Json" && path.len() == 2 {
+            return self.invoke_json_method(&path[1], args, span);
+        }
 
         if path[0] == "Array" && path.len() == 2 {
             let method = path[1].as_str();
@@ -3317,6 +3374,18 @@ impl<'a> Interpreter<'a> {
 
         if type_name == "OS" && matches!(member.as_str(), "stdout" | "stderr") && args.is_empty() {
             return self.lookup_singleton("OS", span);
+        }
+
+        if type_name == "SeekFrom"
+            && matches!(member.as_str(), "Start" | "Current" | "End")
+            && args.is_empty()
+        {
+            return Ok(Some(self.builtin_enum_variant(
+                "SeekFrom",
+                member,
+                &[],
+                Vec::new(),
+            )));
         }
 
         if self
@@ -4171,6 +4240,1086 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    fn invoke_file_method(
+        &mut self,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        if args.len() != 1 {
+            return Err(self.runtime_error(
+                span,
+                format!("File.{method} expects 1 argument, got {}", args.len()),
+            ));
+        }
+        let Value::String(path) = &args[0] else {
+            return Err(self.runtime_error(span, format!("File.{method} expects a Str path")));
+        };
+        let path = path.clone();
+
+        match method {
+            "readBytes" => match fs::read(&path) {
+                Ok(bytes) => Ok(self.result_ok(bytes_value(bytes))),
+                Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
+            },
+            "readText" => match fs::read(&path) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(text) => Ok(self.result_ok(Value::String(text))),
+                    Err(error) => Ok(self.result_err(
+                        self.file_invalid_encoding(&path, error.utf8_error().valid_up_to() as i64),
+                    )),
+                },
+                Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
+            },
+            "open" => match fs::File::open(&path) {
+                Ok(file) => Ok(self.result_ok(Value::FileStream(Rc::new(RefCell::new(
+                    FileStreamValue {
+                        path,
+                        file: Some(file),
+                    },
+                ))))),
+                Err(error) => Ok(self.result_err(self.file_io_error("open", &path, error))),
+            },
+            "openText" => match fs::File::open(&path) {
+                Ok(file) => Ok(self.result_ok(Value::TextFileReader(Rc::new(RefCell::new(
+                    TextFileReaderValue {
+                        path,
+                        reader: Some(BufReader::new(file)),
+                        position: 0,
+                    },
+                ))))),
+                Err(error) => Ok(self.result_err(self.file_io_error("open", &path, error))),
+            },
+            _ => Err(self.runtime_error(span, format!("unknown File method '{method}'"))),
+        }
+    }
+
+    fn invoke_file_stream_method(
+        &mut self,
+        stream: Rc<RefCell<FileStreamValue>>,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let path = stream.borrow().path.clone();
+        match method {
+            "path" => {
+                expect_runtime_arity(self, "FileStream.path", &args, 0, span)?;
+                Ok(Value::String(path))
+            }
+            "closed" => {
+                expect_runtime_arity(self, "FileStream.closed", &args, 0, span)?;
+                Ok(Value::Bool(stream.borrow().file.is_none()))
+            }
+            "position" => {
+                expect_runtime_arity(self, "FileStream.position", &args, 0, span)?;
+                let mut stream = stream.borrow_mut();
+                let Some(file) = stream.file.as_mut() else {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("cannot read the position of closed file '{path}'"),
+                    ));
+                };
+                match file.stream_position() {
+                    Ok(position) => i64::try_from(position).map(Value::Int).map_err(|_| {
+                        self.runtime_error(
+                            span,
+                            format!("position of file '{path}' exceeds the Int range"),
+                        )
+                    }),
+                    Err(error) => Err(self.runtime_error(
+                        span,
+                        format!("cannot read the position of file '{path}': {error}"),
+                    )),
+                }
+            }
+            "read" => {
+                expect_runtime_arity(self, "FileStream.read", &args, 1, span)?;
+                let max_bytes = args[0].as_int(self, span, "FileStream.read maxBytes")?;
+                if max_bytes < 0 {
+                    return Ok(self.result_err(self.file_io_failure(
+                        "read",
+                        &path,
+                        "maxBytes must be non-negative",
+                    )));
+                }
+                let Ok(max_bytes) = usize::try_from(max_bytes) else {
+                    return Ok(self.result_err(self.file_io_failure(
+                        "read",
+                        &path,
+                        "maxBytes is too large",
+                    )));
+                };
+                let mut stream = stream.borrow_mut();
+                let Some(file) = stream.file.as_mut() else {
+                    return Ok(self.result_err(self.file_closed(&path)));
+                };
+                let mut bytes = Vec::new();
+                if bytes.try_reserve_exact(max_bytes).is_err() {
+                    return Ok(self.result_err(self.file_io_failure(
+                        "read",
+                        &path,
+                        "maxBytes is too large",
+                    )));
+                }
+                bytes.resize(max_bytes, 0);
+                match file.read(&mut bytes) {
+                    Ok(read) => {
+                        bytes.truncate(read);
+                        Ok(self.result_ok(bytes_value(bytes)))
+                    }
+                    Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
+                }
+            }
+            "readToEnd" => {
+                expect_runtime_arity(self, "FileStream.readToEnd", &args, 0, span)?;
+                let mut stream = stream.borrow_mut();
+                let Some(file) = stream.file.as_mut() else {
+                    return Ok(self.result_err(self.file_closed(&path)));
+                };
+                let mut bytes = Vec::new();
+                match file.read_to_end(&mut bytes) {
+                    Ok(_) => Ok(self.result_ok(bytes_value(bytes))),
+                    Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
+                }
+            }
+            "seek" => {
+                if !matches!(args.len(), 1 | 2) {
+                    return Err(self.runtime_error(
+                        span,
+                        format!(
+                            "FileStream.seek expects 1 or 2 arguments, got {}",
+                            args.len()
+                        ),
+                    ));
+                }
+                let offset = args[0].as_int(self, span, "FileStream.seek offset")?;
+                let origin = if args.len() == 1 {
+                    "Start"
+                } else {
+                    seek_from_case(&args[1]).ok_or_else(|| {
+                        self.runtime_error(span, "FileStream.seek expects a SeekFrom value")
+                    })?
+                };
+                let seek = match origin {
+                    "Start" if offset >= 0 => IoSeekFrom::Start(offset as u64),
+                    "Start" => {
+                        return Ok(self.result_err(self.file_io_failure(
+                            "seek",
+                            &path,
+                            "a start-relative offset cannot be negative",
+                        )));
+                    }
+                    "Current" => IoSeekFrom::Current(offset),
+                    "End" => IoSeekFrom::End(offset),
+                    _ => unreachable!("validated SeekFrom case"),
+                };
+                let mut stream = stream.borrow_mut();
+                let Some(file) = stream.file.as_mut() else {
+                    return Ok(self.result_err(self.file_closed(&path)));
+                };
+                match file.seek(seek) {
+                    Ok(position) => match i64::try_from(position) {
+                        Ok(position) => Ok(self.result_ok(Value::Int(position))),
+                        Err(_) => Ok(self.result_err(self.file_io_failure(
+                            "seek",
+                            &path,
+                            "resulting position exceeds the Int range",
+                        ))),
+                    },
+                    Err(error) => Ok(self.result_err(self.file_io_error("seek", &path, error))),
+                }
+            }
+            "close" => {
+                expect_runtime_arity(self, "FileStream.close", &args, 0, span)?;
+                stream.borrow_mut().file.take();
+                Ok(self.result_ok(Value::Unit))
+            }
+            _ => Err(self.runtime_error(span, format!("unknown FileStream method '{method}'"))),
+        }
+    }
+
+    fn invoke_text_file_reader_method(
+        &mut self,
+        reader: Rc<RefCell<TextFileReaderValue>>,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let path = reader.borrow().path.clone();
+        match method {
+            "path" => {
+                expect_runtime_arity(self, "TextFileReader.path", &args, 0, span)?;
+                Ok(Value::String(path))
+            }
+            "closed" => {
+                expect_runtime_arity(self, "TextFileReader.closed", &args, 0, span)?;
+                Ok(Value::Bool(reader.borrow().reader.is_none()))
+            }
+            "readLine" => {
+                expect_runtime_arity(self, "TextFileReader.readLine", &args, 0, span)?;
+                let mut reader = reader.borrow_mut();
+                let start = reader.position;
+                let Some(buffered) = reader.reader.as_mut() else {
+                    return Ok(self.result_err(self.file_closed(&path)));
+                };
+                let mut bytes = Vec::new();
+                match buffered.read_until(b'\n', &mut bytes) {
+                    Ok(0) => Ok(self.result_ok(self.option_none())),
+                    Ok(read) => {
+                        reader.position += read as u64;
+                        if bytes.last() == Some(&b'\n') {
+                            bytes.pop();
+                            if bytes.last() == Some(&b'\r') {
+                                bytes.pop();
+                            }
+                        }
+                        match String::from_utf8(bytes) {
+                            Ok(line) => Ok(self.result_ok(self.option_some(Value::String(line)))),
+                            Err(error) => Ok(self.result_err(
+                                self.file_invalid_encoding(
+                                    &path,
+                                    i64::try_from(start)
+                                        .unwrap_or(i64::MAX)
+                                        .saturating_add(error.utf8_error().valid_up_to() as i64),
+                                ),
+                            )),
+                        }
+                    }
+                    Err(error) => Ok(self.result_err(self.file_io_error("readLine", &path, error))),
+                }
+            }
+            "readToEnd" => {
+                expect_runtime_arity(self, "TextFileReader.readToEnd", &args, 0, span)?;
+                let mut reader = reader.borrow_mut();
+                let start = reader.position;
+                let Some(buffered) = reader.reader.as_mut() else {
+                    return Ok(self.result_err(self.file_closed(&path)));
+                };
+                let mut bytes = Vec::new();
+                match buffered.read_to_end(&mut bytes) {
+                    Ok(read) => {
+                        reader.position += read as u64;
+                        match String::from_utf8(bytes) {
+                            Ok(text) => Ok(self.result_ok(Value::String(text))),
+                            Err(error) => Ok(self.result_err(
+                                self.file_invalid_encoding(
+                                    &path,
+                                    i64::try_from(start)
+                                        .unwrap_or(i64::MAX)
+                                        .saturating_add(error.utf8_error().valid_up_to() as i64),
+                                ),
+                            )),
+                        }
+                    }
+                    Err(error) => {
+                        Ok(self.result_err(self.file_io_error("readToEnd", &path, error)))
+                    }
+                }
+            }
+            "close" => {
+                expect_runtime_arity(self, "TextFileReader.close", &args, 0, span)?;
+                reader.borrow_mut().reader.take();
+                Ok(self.result_ok(Value::Unit))
+            }
+            _ => Err(self.runtime_error(span, format!("unknown TextFileReader method '{method}'"))),
+        }
+    }
+
+    fn file_closed(&self, path: &str) -> Value {
+        self.builtin_enum_variant(
+            "FileError",
+            "Closed",
+            &["path"],
+            vec![Value::String(path.to_string())],
+        )
+    }
+
+    fn file_invalid_encoding(&self, path: &str, offset: i64) -> Value {
+        self.builtin_enum_variant(
+            "FileError",
+            "InvalidEncoding",
+            &["path", "offset"],
+            vec![Value::String(path.to_string()), Value::Int(offset)],
+        )
+    }
+
+    fn file_io_failure(&self, operation: &str, path: &str, message: &str) -> Value {
+        self.builtin_enum_variant(
+            "FileError",
+            "IoFailure",
+            &["operation", "path", "message"],
+            vec![
+                Value::String(operation.to_string()),
+                Value::String(path.to_string()),
+                Value::String(message.to_string()),
+            ],
+        )
+    }
+
+    fn file_io_error(&self, operation: &str, path: &str, error: std::io::Error) -> Value {
+        match error.kind() {
+            std::io::ErrorKind::NotFound => self.builtin_enum_variant(
+                "FileError",
+                "NotFound",
+                &["path"],
+                vec![Value::String(path.to_string())],
+            ),
+            std::io::ErrorKind::PermissionDenied => self.builtin_enum_variant(
+                "FileError",
+                "AccessDenied",
+                &["path"],
+                vec![Value::String(path.to_string())],
+            ),
+            std::io::ErrorKind::InvalidData => self.file_invalid_encoding(path, -1),
+            _ => self.file_io_failure(operation, path, &error.to_string()),
+        }
+    }
+
+    fn invoke_json_method(
+        &mut self,
+        method: &str,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        match method {
+            "str" => {
+                expect_runtime_arity(self, "Json.str", &args, 1, span)?;
+                let Value::String(value) = &args[0] else {
+                    return Err(self.runtime_error(span, "Json.str expects Str"));
+                };
+                Ok(self.json_variant("JsonString", &["value"], vec![Value::String(value.clone())]))
+            }
+            "int" => {
+                expect_runtime_arity(self, "Json.int", &args, 1, span)?;
+                let value = args[0].as_int(self, span, "Json.int value")?;
+                Ok(self.json_number(value.to_string()))
+            }
+            "float" => {
+                expect_runtime_arity(self, "Json.float", &args, 1, span)?;
+                let Value::Float(value) = args[0] else {
+                    return Err(self.runtime_error(span, "Json.float expects Float"));
+                };
+                Ok(self.json_number(render_json_float(value)))
+            }
+            "bool" => {
+                expect_runtime_arity(self, "Json.bool", &args, 1, span)?;
+                let value = args[0].as_bool(self, span, "Json.bool value")?;
+                Ok(self.json_variant("JsonBool", &["value"], vec![Value::Bool(value)]))
+            }
+            "nil" => {
+                expect_runtime_arity(self, "Json.nil", &args, 0, span)?;
+                Ok(self.json_null())
+            }
+            "field" => {
+                expect_runtime_arity(self, "Json.field", &args, 2, span)?;
+                let Value::String(name) = &args[0] else {
+                    return Err(self.runtime_error(span, "Json.field name must be Str"));
+                };
+                if !self.is_json_value(&args[1]) {
+                    return Err(self.runtime_error(span, "Json.field value must be JsonValue"));
+                }
+                Ok(self.json_field(name.clone(), args[1].clone()))
+            }
+            "array" => {
+                let values = self.json_variadic_values(args, false);
+                if !values.iter().all(|value| self.is_json_value(value)) {
+                    return Err(self.runtime_error(span, "Json.array expects JsonValue arguments"));
+                }
+                Ok(self.json_array(values))
+            }
+            "obj" => {
+                let fields = self.json_variadic_values(args.clone(), true);
+                if !fields.is_empty() && fields.iter().all(|value| self.is_json_field(value)) {
+                    return Ok(self.json_object(fields));
+                }
+                if args.is_empty() {
+                    return Ok(self.json_object(Vec::new()));
+                }
+                expect_runtime_arity(self, "Json.obj", &args, 1, span)?;
+                Ok(self.json_encode(&args[0]))
+            }
+            "encode" => {
+                expect_runtime_arity(self, "Json.encode", &args, 1, span)?;
+                Ok(self.json_encode(&args[0]))
+            }
+            "stringify" => {
+                expect_runtime_arity(self, "Json.stringify", &args, 1, span)?;
+                let encoded = self.json_encode(&args[0]);
+                self.render_json_value(&encoded)
+                    .map(Value::String)
+                    .map_err(|message| self.runtime_error(span, message))
+            }
+            "decode" => {
+                expect_runtime_arity(self, "Json.decode", &args, 2, span)?;
+                let Value::String(text) = &args[0] else {
+                    return Err(self.runtime_error(span, "Json.decode text must be Str"));
+                };
+                let Value::RuntimeType(target) = &args[1] else {
+                    return Err(self
+                        .runtime_error(span, "Json.decode requires reified target type metadata"));
+                };
+                let parsed = match serde_json::from_str::<serde_json::Value>(text) {
+                    Ok(value) => value,
+                    Err(error) => return Ok(self.result_err(Value::String(error.to_string()))),
+                };
+                match self.decode_json_value(&parsed, target, span) {
+                    Ok(value) => Ok(self.result_ok(value)),
+                    Err(message) => Ok(self.result_err(Value::String(message))),
+                }
+            }
+            _ => Err(self.runtime_error(span, format!("unknown Json method '{method}'"))),
+        }
+    }
+
+    fn json_null(&self) -> Value {
+        self.json_variant("JsonNull", &[], Vec::new())
+    }
+
+    fn json_number(&self, value: String) -> Value {
+        self.json_variant("JsonNumber", &["value"], vec![Value::String(value)])
+    }
+
+    fn json_array(&self, values: Vec<Value>) -> Value {
+        self.json_variant("JsonArray", &["values"], vec![Value::list(values)])
+    }
+
+    fn json_object(&self, fields: Vec<Value>) -> Value {
+        self.json_variant("JsonObject", &["fields"], vec![Value::list(fields)])
+    }
+
+    fn json_variant(&self, case_name: &str, field_names: &[&str], fields: Vec<Value>) -> Value {
+        self.builtin_enum_variant("JsonValue", case_name, field_names, fields)
+    }
+
+    fn json_field(&self, name: String, value: Value) -> Value {
+        let runtime_type_id = self
+            .runtime
+            .type_id_by_name_kind("JsonField", crate::ast::TypeKind::Record);
+        Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
+            runtime_type_id,
+            type_name: "JsonField".to_string(),
+            kind: crate::ast::TypeKind::Record,
+            case_id: None,
+            case_name: None,
+            field_names: vec!["name".to_string(), "value".to_string()],
+            fields: vec![Value::String(name), value],
+        })))
+    }
+
+    fn is_json_value(&self, value: &Value) -> bool {
+        matches!(value, Value::Aggregate(value) if value.borrow().type_name == "JsonValue")
+    }
+
+    fn is_json_field(&self, value: &Value) -> bool {
+        matches!(value, Value::Aggregate(value) if value.borrow().type_name == "JsonField")
+    }
+
+    fn json_variadic_values(&self, args: Vec<Value>, fields: bool) -> Vec<Value> {
+        if args.len() == 1
+            && let Value::List(values) = &args[0]
+            && values.borrow().iter().all(|value| {
+                if fields {
+                    self.is_json_field(value)
+                } else {
+                    self.is_json_value(value)
+                }
+            })
+        {
+            return values.borrow().clone();
+        }
+        args
+    }
+
+    fn json_encode(&self, value: &Value) -> Value {
+        match value {
+            value if self.is_json_value(value) => value.clone(),
+            Value::Unit => self.json_null(),
+            Value::Bool(value) => {
+                self.json_variant("JsonBool", &["value"], vec![Value::Bool(*value)])
+            }
+            Value::Int(value) => self.json_number(value.to_string()),
+            Value::Float(value) => self.json_number(render_json_float(*value)),
+            Value::String(value) => {
+                self.json_variant("JsonString", &["value"], vec![Value::String(value.clone())])
+            }
+            Value::Rune(value) => self.json_variant(
+                "JsonString",
+                &["value"],
+                vec![Value::String(value.to_string())],
+            ),
+            Value::Tuple(values) => {
+                self.json_array(values.iter().map(|value| self.json_encode(value)).collect())
+            }
+            Value::List(values) | Value::Set(values) => self.json_array(
+                values
+                    .borrow()
+                    .iter()
+                    .map(|value| self.json_encode(value))
+                    .collect(),
+            ),
+            Value::Map(entries) => self.json_object(
+                entries
+                    .borrow()
+                    .iter()
+                    .map(|(key, value)| self.json_field(key.render(), self.json_encode(value)))
+                    .collect(),
+            ),
+            Value::Record(fields) => self.json_object(
+                fields
+                    .borrow()
+                    .iter()
+                    .map(|(name, value)| self.json_field(name.clone(), self.json_encode(value)))
+                    .collect(),
+            ),
+            Value::Aggregate(aggregate) => self.json_encode_aggregate(aggregate),
+            other => self.json_variant(
+                "JsonString",
+                &["value"],
+                vec![Value::String(other.render())],
+            ),
+        }
+    }
+
+    fn json_encode_aggregate(&self, aggregate: &Rc<RefCell<AggregateValue>>) -> Value {
+        let aggregate = aggregate.borrow();
+        if aggregate.type_name == "Option" {
+            return if aggregate.case_name.as_deref() == Some("Some") {
+                aggregate
+                    .fields
+                    .first()
+                    .map(|value| self.json_encode(value))
+                    .unwrap_or_else(|| self.json_null())
+            } else {
+                self.json_null()
+            };
+        }
+        if aggregate.kind == crate::ast::TypeKind::Enum {
+            let case_name = aggregate.case_name.clone().unwrap_or_default();
+            if aggregate.fields.is_empty() {
+                return self.json_variant("JsonString", &["value"], vec![Value::String(case_name)]);
+            }
+            let payload = self.json_object(
+                aggregate
+                    .field_names
+                    .iter()
+                    .zip(&aggregate.fields)
+                    .map(|(name, value)| self.json_field(name.clone(), self.json_encode(value)))
+                    .collect(),
+            );
+            return self.json_object(vec![self.json_field(case_name, payload)]);
+        }
+
+        let runtime_fields = aggregate
+            .runtime_type_id
+            .and_then(|type_id| self.runtime.type_by_id(type_id))
+            .map(|ty| ty.fields.clone());
+        let fields = aggregate
+            .field_names
+            .iter()
+            .zip(&aggregate.fields)
+            .enumerate()
+            .filter_map(|(index, (name, value))| {
+                let runtime_field = runtime_fields.as_ref().and_then(|fields| fields.get(index));
+                if runtime_field.is_some_and(|field| field.hidden) {
+                    return None;
+                }
+                if aggregate.runtime_type_id.is_some_and(|owner| {
+                    runtime_field
+                        .is_some_and(|field| self.json_field_is_ignored(owner, None, field.slot))
+                }) {
+                    return None;
+                }
+                let encoded_name = aggregate
+                    .runtime_type_id
+                    .and_then(|owner| {
+                        runtime_field.and_then(|field| {
+                            self.json_declared_field_name(owner, None, field.slot)
+                        })
+                    })
+                    .unwrap_or_else(|| name.clone());
+                Some(self.json_field(encoded_name, self.json_encode(value)))
+            })
+            .collect();
+        self.json_object(fields)
+    }
+
+    fn json_field_is_ignored(
+        &self,
+        owner: runtime::RuntimeTypeId,
+        case_id: Option<runtime::RuntimeEnumCaseId>,
+        slot: runtime::RuntimeFieldSlot,
+    ) -> bool {
+        self.runtime_ir_field(owner, case_id, slot)
+            .is_some_and(|field| {
+                field
+                    .annotations
+                    .iter()
+                    .any(|annotation| annotation_name_is(annotation, "JsonIgnore"))
+            })
+    }
+
+    fn json_declared_field_name(
+        &self,
+        owner: runtime::RuntimeTypeId,
+        case_id: Option<runtime::RuntimeEnumCaseId>,
+        slot: runtime::RuntimeFieldSlot,
+    ) -> Option<String> {
+        let annotations = &self.runtime_ir_field(owner, case_id, slot)?.annotations;
+        json_annotation_name(annotations)
+    }
+
+    fn runtime_ir_field(
+        &self,
+        owner: runtime::RuntimeTypeId,
+        case_id: Option<runtime::RuntimeEnumCaseId>,
+        slot: runtime::RuntimeFieldSlot,
+    ) -> Option<&ir::Field> {
+        let runtime_type = self.runtime.type_by_id(owner)?;
+        let ir_type = self.program.types.get(runtime_type.ir_type_id?.0)?;
+        match case_id {
+            Some(case_id) => ir_type.enum_cases.get(case_id.0)?.fields.get(slot.0),
+            None => ir_type.fields.get(slot.0),
+        }
+    }
+
+    fn render_json_value(&self, value: &Value) -> Result<String, String> {
+        let Value::Aggregate(aggregate) = value else {
+            return Err("Json.stringify expected a JsonValue".to_string());
+        };
+        let aggregate = aggregate.borrow();
+        if aggregate.type_name != "JsonValue" {
+            return Err("Json.stringify expected a JsonValue".to_string());
+        }
+        match aggregate.case_name.as_deref() {
+            Some("JsonNull") => Ok("null".to_string()),
+            Some("JsonBool") => match aggregate.fields.first() {
+                Some(Value::Bool(value)) => Ok(value.to_string()),
+                _ => Err("invalid JsonBool value".to_string()),
+            },
+            Some("JsonNumber") => match aggregate.fields.first() {
+                Some(Value::String(value)) => Ok(value.clone()),
+                _ => Err("invalid JsonNumber value".to_string()),
+            },
+            Some("JsonString") => match aggregate.fields.first() {
+                Some(Value::String(value)) => {
+                    serde_json::to_string(value).map_err(|error| error.to_string())
+                }
+                _ => Err("invalid JsonString value".to_string()),
+            },
+            Some("JsonArray") => {
+                let Some(Value::List(values)) = aggregate.fields.first() else {
+                    return Err("invalid JsonArray value".to_string());
+                };
+                let rendered = values
+                    .borrow()
+                    .iter()
+                    .map(|value| self.render_json_value(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(format!("[{}]", rendered.join(",")))
+            }
+            Some("JsonObject") => {
+                let Some(Value::List(fields)) = aggregate.fields.first() else {
+                    return Err("invalid JsonObject value".to_string());
+                };
+                let rendered = fields
+                    .borrow()
+                    .iter()
+                    .map(|field| {
+                        let Value::Aggregate(field) = field else {
+                            return Err("invalid JsonObject field".to_string());
+                        };
+                        let field = field.borrow();
+                        let [Value::String(name), value] = field.fields.as_slice() else {
+                            return Err("invalid JsonObject field".to_string());
+                        };
+                        let name =
+                            serde_json::to_string(name).map_err(|error| error.to_string())?;
+                        Ok(format!("{name}:{}", self.render_json_value(value)?))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                Ok(format!("{{{}}}", rendered.join(",")))
+            }
+            _ => Err("unknown JsonValue case".to_string()),
+        }
+    }
+
+    fn decode_json_value(
+        &mut self,
+        value: &serde_json::Value,
+        target: &RuntimeTypeValue,
+        span: Option<Span>,
+    ) -> Result<Value, String> {
+        match target {
+            RuntimeTypeValue::Primitive(name) => self.decode_json_primitive(value, name, span),
+            RuntimeTypeValue::Runtime { id, args } => {
+                self.decode_json_runtime(value, *id, args, span)
+            }
+            RuntimeTypeValue::Tuple(types) => {
+                let serde_json::Value::Array(values) = value else {
+                    return Err(format!("expected JSON array for {}", target.render()));
+                };
+                if values.len() != types.len() {
+                    return Err(format!(
+                        "expected {} tuple elements, got {}",
+                        types.len(),
+                        values.len()
+                    ));
+                }
+                values
+                    .iter()
+                    .zip(types)
+                    .map(|(value, ty)| self.decode_json_ir_type(value, ty, span))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Value::Tuple)
+            }
+            RuntimeTypeValue::AnonymousShape(fields) => {
+                let serde_json::Value::Object(values) = value else {
+                    return Err("expected JSON object for anonymous shape".to_string());
+                };
+                let fields = fields
+                    .iter()
+                    .map(|field| {
+                        let value = values.get(&field.name).ok_or_else(|| {
+                            format!("missing JSON field '{}' for anonymous shape", field.name)
+                        })?;
+                        Ok((
+                            field.name.clone(),
+                            self.decode_json_ir_type(value, &field.ty, span)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                Ok(Value::Record(Rc::new(RefCell::new(fields))))
+            }
+            RuntimeTypeValue::Function { .. } => {
+                Err("cannot decode JSON as a function type".to_string())
+            }
+            RuntimeTypeValue::Unknown => Ok(self.json_any_value(value)),
+        }
+    }
+
+    fn decode_json_ir_type(
+        &mut self,
+        value: &serde_json::Value,
+        ty: &ir::Type,
+        span: Option<Span>,
+    ) -> Result<Value, String> {
+        self.decode_json_value(value, &self.runtime_type_value_for_ir_type(ty), span)
+    }
+
+    fn decode_json_primitive(
+        &mut self,
+        value: &serde_json::Value,
+        name: &str,
+        span: Option<Span>,
+    ) -> Result<Value, String> {
+        match name {
+            "Any" | "Unknown" => Ok(self.json_any_value(value)),
+            "Unit" => value
+                .is_null()
+                .then_some(Value::Unit)
+                .ok_or_else(|| "expected JSON null for Unit".to_string()),
+            "Str" => Ok(Value::String(match value {
+                serde_json::Value::Null => String::new(),
+                serde_json::Value::String(value) => value.clone(),
+                other => other.to_string(),
+            })),
+            "Int" | "Int64" => json_i64(value)
+                .map(Value::Int)
+                .ok_or_else(|| format!("expected JSON integer for {name}")),
+            "Float" | "Float64" => json_f64(value)
+                .map(Value::Float)
+                .ok_or_else(|| format!("expected JSON number for {name}")),
+            "Bool" => json_bool(value)
+                .map(Value::Bool)
+                .ok_or_else(|| "expected JSON boolean for Bool".to_string()),
+            "Rune" => {
+                let code =
+                    json_i64(value).ok_or_else(|| "expected JSON integer for Rune".to_string())?;
+                let code = u32::try_from(code)
+                    .map_err(|_| format!("invalid Unicode scalar value {code}"))?;
+                char::from_u32(code)
+                    .map(Value::Rune)
+                    .ok_or_else(|| format!("invalid Unicode scalar value {code}"))
+            }
+            other => {
+                let Some(id) = self.runtime.type_id_by_name_any_kind(other) else {
+                    return Err(format!("cannot decode JSON as unresolved type '{other}'"));
+                };
+                self.decode_json_runtime(value, id, &[], span)
+            }
+        }
+    }
+
+    fn decode_json_runtime(
+        &mut self,
+        value: &serde_json::Value,
+        type_id: runtime::RuntimeTypeId,
+        type_args: &[ir::Type],
+        span: Option<Span>,
+    ) -> Result<Value, String> {
+        let runtime_type = self
+            .runtime
+            .type_by_id(type_id)
+            .cloned()
+            .ok_or_else(|| "JSON target type metadata is unavailable".to_string())?;
+        match runtime_type.name.as_str() {
+            "Str" | "Int" | "Int64" | "Float" | "Float64" | "Bool" | "Rune" => {
+                return self.decode_json_primitive(value, &runtime_type.name, span);
+            }
+            "Option" => {
+                if value.is_null() {
+                    return Ok(self.option_none());
+                }
+                let inner = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
+                let decoded = self.decode_json_ir_type(value, &inner, span)?;
+                return Ok(self.option_some(decoded));
+            }
+            "Vector" | "Array" | "LinkedList" => {
+                let serde_json::Value::Array(values) = value else {
+                    return Err(format!("expected JSON array for {}", runtime_type.name));
+                };
+                let inner = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
+                return values
+                    .iter()
+                    .map(|value| self.decode_json_ir_type(value, &inner, span))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Value::list);
+            }
+            "Set" => {
+                let serde_json::Value::Array(values) = value else {
+                    return Err("expected JSON array for Set".to_string());
+                };
+                let inner = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
+                return values
+                    .iter()
+                    .map(|value| self.decode_json_ir_type(value, &inner, span))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(Value::set);
+            }
+            "Map" => {
+                let serde_json::Value::Object(values) = value else {
+                    return Err("expected JSON object for Map".to_string());
+                };
+                let key_ty = type_args.first().cloned().unwrap_or(ir::Type::Str);
+                let value_ty = type_args.get(1).cloned().unwrap_or(ir::Type::Unknown);
+                let entries = values
+                    .iter()
+                    .map(|(key, value)| {
+                        let key = self.decode_json_ir_type(
+                            &serde_json::Value::String(key.clone()),
+                            &key_ty,
+                            span,
+                        )?;
+                        let value = self.decode_json_ir_type(value, &value_ty, span)?;
+                        Ok((key, value))
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                return Ok(Value::map(entries));
+            }
+            "JsonValue" => return Ok(self.json_value_from_serde(value)),
+            _ => {}
+        }
+
+        match runtime_type.kind {
+            crate::ast::TypeKind::Class | crate::ast::TypeKind::Record => {
+                self.decode_json_structured(value, &runtime_type, type_args, span)
+            }
+            crate::ast::TypeKind::Enum => {
+                self.decode_json_union(value, &runtime_type, type_args, span)
+            }
+            crate::ast::TypeKind::Object => self
+                .lookup_singleton(&runtime_type.name, span)
+                .map_err(|diagnostic| diagnostic.message)?
+                .ok_or_else(|| format!("object '{}' is unavailable", runtime_type.name)),
+            _ => Err(format!(
+                "cannot decode JSON as {} '{}'",
+                runtime_type_kind_name(runtime_type.kind),
+                runtime_type.name
+            )),
+        }
+    }
+
+    fn decode_json_structured(
+        &mut self,
+        value: &serde_json::Value,
+        runtime_type: &runtime::RuntimeType,
+        type_args: &[ir::Type],
+        span: Option<Span>,
+    ) -> Result<Value, String> {
+        let serde_json::Value::Object(values) = value else {
+            return Err(format!("expected JSON object for {}", runtime_type.name));
+        };
+        let substitutions = self.json_type_substitutions(runtime_type, type_args);
+        let mut args = Vec::new();
+        for field in runtime_type.fields.iter().filter(|field| !field.hidden) {
+            let field_ty = substitute_runtime_type(&field.ty, &substitutions);
+            let json_name = self
+                .json_declared_field_name(runtime_type.id, None, field.slot)
+                .unwrap_or_else(|| field.name.clone());
+            let decoded = match values.get(&json_name) {
+                Some(value) if !value.is_null() || is_option_ir_type(&field_ty) => {
+                    self.decode_json_ir_type(value, &field_ty, span)?
+                }
+                _ if field.has_initializer => self.runtime_field_default_value(field),
+                _ => self.json_default_for_type(&field_ty).ok_or_else(|| {
+                    format!(
+                        "missing JSON field '{}' for {}",
+                        json_name, runtime_type.name
+                    )
+                })?,
+            };
+            args.push(decoded);
+        }
+        self.construct_named_type(&runtime_type.name, args, span, false)
+            .map_err(|diagnostic| diagnostic.message)?
+            .ok_or_else(|| format!("cannot construct {} from JSON", runtime_type.name))
+    }
+
+    fn decode_json_union(
+        &mut self,
+        value: &serde_json::Value,
+        runtime_type: &runtime::RuntimeType,
+        type_args: &[ir::Type],
+        span: Option<Span>,
+    ) -> Result<Value, String> {
+        let substitutions = self.json_type_substitutions(runtime_type, type_args);
+        let (case_name, payload) = match value {
+            serde_json::Value::String(case_name) => (case_name.as_str(), None),
+            serde_json::Value::Object(values) if values.len() == 1 => {
+                let (case_name, payload) = values.iter().next().expect("one JSON union field");
+                (case_name.as_str(), Some(payload))
+            }
+            _ => {
+                return Err(format!(
+                    "expected case name or single-case object for {}",
+                    runtime_type.name
+                ));
+            }
+        };
+        let case = runtime_type
+            .enum_cases
+            .iter()
+            .find(|case| case.name == case_name)
+            .ok_or_else(|| format!("unknown {} case '{}'", runtime_type.name, case_name))?
+            .clone();
+        let args = if case.fields.is_empty() {
+            Vec::new()
+        } else {
+            let Some(serde_json::Value::Object(values)) = payload else {
+                return Err(format!(
+                    "expected JSON object payload for case '{case_name}'"
+                ));
+            };
+            case.fields
+                .iter()
+                .map(|field| {
+                    let value = values.get(&field.name).ok_or_else(|| {
+                        format!("missing JSON field '{}' for case '{case_name}'", field.name)
+                    })?;
+                    let ty = substitute_runtime_type(&field.ty, &substitutions);
+                    self.decode_json_ir_type(value, &ty, span)
+                })
+                .collect::<Result<Vec<_>, String>>()?
+        };
+        self.construct_enum_case(Some(&runtime_type.name), case_name, args, span, false)
+            .map_err(|diagnostic| diagnostic.message)
+    }
+
+    fn json_type_substitutions(
+        &self,
+        runtime_type: &runtime::RuntimeType,
+        type_args: &[ir::Type],
+    ) -> HashMap<String, ir::Type> {
+        let Some(ir_type_id) = runtime_type.ir_type_id else {
+            return HashMap::new();
+        };
+        self.program
+            .types
+            .get(ir_type_id.0)
+            .map(|ty| {
+                ty.type_params
+                    .iter()
+                    .cloned()
+                    .zip(type_args.iter().cloned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn json_default_for_type(&self, ty: &ir::Type) -> Option<Value> {
+        match ty {
+            ir::Type::Unit
+            | ir::Type::Bool
+            | ir::Type::Int
+            | ir::Type::Float
+            | ir::Type::Str
+            | ir::Type::Tuple(_)
+            | ir::Type::Record(_) => Some(self.default_value_for_type(ty)),
+            ir::Type::Named { name, .. }
+                if matches!(
+                    name.as_str(),
+                    "Rune" | "Option" | "Vector" | "Array" | "LinkedList" | "Set" | "Map"
+                ) =>
+            {
+                Some(self.default_value_for_type(ty))
+            }
+            _ => None,
+        }
+    }
+
+    fn json_any_value(&self, value: &serde_json::Value) -> Value {
+        match value {
+            serde_json::Value::Null => Value::Unit,
+            serde_json::Value::Bool(value) => Value::Bool(*value),
+            serde_json::Value::Number(value) => value
+                .as_i64()
+                .map(Value::Int)
+                .or_else(|| value.as_f64().map(Value::Float))
+                .unwrap_or(Value::Unit),
+            serde_json::Value::String(value) => Value::String(value.clone()),
+            serde_json::Value::Array(values) => Value::list(
+                values
+                    .iter()
+                    .map(|value| self.json_any_value(value))
+                    .collect(),
+            ),
+            serde_json::Value::Object(values) => Value::map(
+                values
+                    .iter()
+                    .map(|(key, value)| (Value::String(key.clone()), self.json_any_value(value)))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn json_value_from_serde(&self, value: &serde_json::Value) -> Value {
+        match value {
+            serde_json::Value::Null => self.json_null(),
+            serde_json::Value::Bool(value) => {
+                self.json_variant("JsonBool", &["value"], vec![Value::Bool(*value)])
+            }
+            serde_json::Value::Number(value) => self.json_number(value.to_string()),
+            serde_json::Value::String(value) => {
+                self.json_variant("JsonString", &["value"], vec![Value::String(value.clone())])
+            }
+            serde_json::Value::Array(values) => self.json_array(
+                values
+                    .iter()
+                    .map(|value| self.json_value_from_serde(value))
+                    .collect(),
+            ),
+            serde_json::Value::Object(values) => self.json_object(
+                values
+                    .iter()
+                    .map(|(name, value)| {
+                        self.json_field(name.clone(), self.json_value_from_serde(value))
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
     fn invoke_math_method(
         &mut self,
         method: &str,
@@ -4373,6 +5522,16 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        match &receiver {
+            Value::FileStream(stream) => {
+                return self.invoke_file_stream_method(stream.clone(), method, args, span);
+            }
+            Value::TextFileReader(reader) => {
+                return self.invoke_text_file_reader_method(reader.clone(), method, args, span);
+            }
+            _ => {}
+        }
+
         if let Some(value) =
             self.try_invoke_runtime_method(receiver.clone(), method, args.clone(), span)?
         {
@@ -5611,6 +6770,13 @@ impl<'a> Interpreter<'a> {
                 Value::RuntimeParam { .. } => name == "Param",
                 Value::RuntimeEnumCase { .. } => name == "EnumCase" || name == "Annotated",
                 Value::ReferenceId(_) => name == "ReferenceId",
+                Value::FileStream(_) => matches!(
+                    name.as_str(),
+                    "FileStream" | "ByteReader" | "Seekable" | "Closeable"
+                ),
+                Value::TextFileReader(_) => {
+                    matches!(name.as_str(), "TextFileReader" | "TextReader" | "Closeable")
+                }
                 other => self
                     .runtime
                     .type_by_name_kind(name, crate::ast::TypeKind::Record)
@@ -6205,6 +7371,51 @@ fn structural_shape_fields(value: &Value) -> Option<Vec<(String, Value)>> {
     }
 }
 
+fn bytes_value(bytes: Vec<u8>) -> Value {
+    Value::list(
+        bytes
+            .into_iter()
+            .map(|byte| Value::Int(i64::from(byte)))
+            .collect(),
+    )
+}
+
+fn seek_from_case(value: &Value) -> Option<&'static str> {
+    let Value::Aggregate(aggregate) = value else {
+        return None;
+    };
+    let aggregate = aggregate.borrow();
+    if aggregate.type_name != "SeekFrom" {
+        return None;
+    }
+    match aggregate.case_name.as_deref() {
+        Some("Start") => Some("Start"),
+        Some("Current") => Some("Current"),
+        Some("End") => Some("End"),
+        _ => None,
+    }
+}
+
+fn expect_runtime_arity(
+    interpreter: &Interpreter<'_>,
+    callable: &str,
+    args: &[Value],
+    expected: usize,
+    span: Option<Span>,
+) -> Result<(), Diagnostic> {
+    if args.len() == expected {
+        Ok(())
+    } else {
+        Err(interpreter.runtime_error(
+            span,
+            format!(
+                "{callable} expects {expected} arguments, got {}",
+                args.len()
+            ),
+        ))
+    }
+}
+
 fn values_identical(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::List(lhs), Value::List(rhs)) => Rc::ptr_eq(lhs, rhs),
@@ -6212,6 +7423,8 @@ fn values_identical(left: &Value, right: &Value) -> bool {
         (Value::Map(lhs), Value::Map(rhs)) => Rc::ptr_eq(lhs, rhs),
         (Value::Record(lhs), Value::Record(rhs)) => Rc::ptr_eq(lhs, rhs),
         (Value::Aggregate(lhs), Value::Aggregate(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::FileStream(lhs), Value::FileStream(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::TextFileReader(lhs), Value::TextFileReader(rhs)) => Rc::ptr_eq(lhs, rhs),
         _ => false,
     }
 }
@@ -6223,6 +7436,8 @@ fn reference_identity_address(value: &Value) -> Option<usize> {
         Value::Map(value) => Some(Rc::as_ptr(value) as usize),
         Value::Record(value) => Some(Rc::as_ptr(value) as usize),
         Value::Aggregate(value) => Some(Rc::as_ptr(value) as usize),
+        Value::FileStream(value) => Some(Rc::as_ptr(value) as usize),
+        Value::TextFileReader(value) => Some(Rc::as_ptr(value) as usize),
         _ => None,
     }
 }
@@ -6621,6 +7836,126 @@ fn value_as_f64(value: &Value) -> Option<f64> {
     }
 }
 
+fn render_json_float(value: f64) -> String {
+    if value.is_nan() {
+        "NaN".to_string()
+    } else if value == f64::INFINITY {
+        "Infinity".to_string()
+    } else if value == f64::NEG_INFINITY {
+        "-Infinity".to_string()
+    } else {
+        serde_json::Number::from_f64(value)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| value.to_string())
+    }
+}
+
+fn json_i64(value: &serde_json::Value) -> Option<i64> {
+    match value {
+        serde_json::Value::Number(value) => value.as_i64(),
+        serde_json::Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn json_f64(value: &serde_json::Value) -> Option<f64> {
+    match value {
+        serde_json::Value::Number(value) => value.as_f64(),
+        serde_json::Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn json_bool(value: &serde_json::Value) -> Option<bool> {
+    match value {
+        serde_json::Value::Bool(value) => Some(*value),
+        serde_json::Value::String(value) => value.parse().ok(),
+        _ => None,
+    }
+}
+
+fn annotation_name_is(annotation: &ir::Annotation, expected: &str) -> bool {
+    annotation
+        .name
+        .rsplit('.')
+        .next()
+        .is_some_and(|name| name == expected)
+}
+
+fn json_annotation_name(annotations: &[ir::Annotation]) -> Option<String> {
+    let annotation = annotations
+        .iter()
+        .find(|annotation| annotation_name_is(annotation, "JsonName"))?;
+    annotation.fields.iter().find_map(|field| {
+        (field.name == "value")
+            .then_some(&field.value)
+            .and_then(|value| match value {
+                ir::AnnotationValue::String(value) if !value.is_empty() => Some(value.clone()),
+                _ => None,
+            })
+    })
+}
+
+fn is_option_ir_type(ty: &ir::Type) -> bool {
+    matches!(ty, ir::Type::Named { name, .. } if name == "Option")
+}
+
+fn substitute_runtime_type(ty: &ir::Type, substitutions: &HashMap<String, ir::Type>) -> ir::Type {
+    match ty {
+        ir::Type::TypeParam(name) => substitutions
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| ty.clone()),
+        ir::Type::Named { name, args } => ir::Type::Named {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|arg| substitute_runtime_type(arg, substitutions))
+                .collect(),
+        },
+        ir::Type::Union(members) => ir::Type::Union(
+            members
+                .iter()
+                .map(|member| substitute_runtime_type(member, substitutions))
+                .collect(),
+        ),
+        ir::Type::Tuple(items) => ir::Type::Tuple(
+            items
+                .iter()
+                .map(|item| substitute_runtime_type(item, substitutions))
+                .collect(),
+        ),
+        ir::Type::Record(fields) => ir::Type::Record(
+            fields
+                .iter()
+                .map(|field| ir::NamedType {
+                    name: field.name.clone(),
+                    ty: substitute_runtime_type(&field.ty, substitutions),
+                })
+                .collect(),
+        ),
+        ir::Type::Function { params, ret } => ir::Type::Function {
+            params: params
+                .iter()
+                .map(|param| substitute_runtime_type(param, substitutions))
+                .collect(),
+            ret: Box::new(substitute_runtime_type(ret, substitutions)),
+        },
+        _ => ty.clone(),
+    }
+}
+
+fn runtime_type_kind_name(kind: crate::ast::TypeKind) -> &'static str {
+    match kind {
+        crate::ast::TypeKind::Annotation => "annotation",
+        crate::ast::TypeKind::Class => "class",
+        crate::ast::TypeKind::Record => "shape",
+        crate::ast::TypeKind::Object => "object",
+        crate::ast::TypeKind::Interface => "interface",
+        crate::ast::TypeKind::Enum => "union",
+    }
+}
+
 fn is_primitive_type_name(name: &str) -> bool {
     matches!(name, "Bool" | "Float" | "Int" | "Never" | "Rune" | "Unit")
 }
@@ -6991,6 +8326,59 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.return_value.as_deref(), Some("3"));
         assert!(run.output.is_empty());
+    }
+
+    #[test]
+    fn runs_contextual_empty_brace_construction() {
+        let program = lower_inline(
+            r#"
+            class Counter {
+                value Int
+
+                new() {
+                    this.value = 7
+                }
+            }
+
+            class Defaulted {
+                value Int = 11
+            }
+
+            shape Marker {}
+
+            def noop() Unit = {}
+
+            def main() Unit {
+                counter Counter = {}
+                defaulted Defaulted = {}
+                marker Marker = {}
+                values Vector[Str] = {}
+                lookup Map[Str, Int] = {}
+                set Set[Str] = {}
+                nothing Unit = {}
+                anonymous = {}
+                extended = { ...anonymous, value: 2 }
+                callback fn() Unit = () => {}
+                shapeCallback = () => {}
+                callbackResult = { ...shapeCallback(), value: 3 }
+                callback()
+                noop()
+
+                println(counter.value, defaulted.value, marker == Marker())
+                println(
+                    values.size,
+                    lookup.size,
+                    set.size,
+                    extended.value,
+                    callbackResult.value
+                )
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "7 11 true\n0 0 0 2 3\n");
     }
 
     #[test]
@@ -7729,7 +9117,7 @@ mod tests {
 
                 def size() Int = this.segments.size
 
-                def firstOr(value Str) Str = this.segments.at(0).getOr(value)
+                def firstOr(value Str) Str = this.segments.at(0) ?? value
 }
 
 
@@ -7759,20 +9147,21 @@ mod tests {
             }
 
             def main() Unit {
-                set Set[Str] = Set()
+                set Set[Str] = new {}
                 map Map[Str, Int] = Map[Str, Int]()
                 inferred = Box("hello")
                 contextual Box[Str] = new("world")
 
+                println(set.isEmpty, set.nonEmpty)
                 set.add("Ada")
-                println(set.size, map.size, inferred.value, contextual.value)
+                println(set.isEmpty, set.nonEmpty, set.size, map.size, inferred.value, contextual.value)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "1 0 hello world\n");
+        assert_eq!(run.output, "true false\nfalse true 1 0 hello world\n");
     }
 
     #[test]
@@ -8273,9 +9662,9 @@ mod tests {
                 none = None
                 ok = Ok(9)
                 err = Err("missing")
-                OS.println("some", some.getOr(0))
+                OS.println("some", some ?? 0)
                 OS.println("none", none.isEmpty)
-                OS.println("ok", ok.getOr(0))
+                OS.println("ok", ok ?? 0)
                 OS.println("err", err.getError())
             }
             "#,
@@ -8376,8 +9765,11 @@ $name
                 more.add(3)
                 more.addAll([2, 4, 4])
 
-                OS.println("base", base.size, base.at(1).getOr(0))
-                OS.println("grown", grown.size, grown.at(4).getOr(0))
+                empty [Int] = []
+
+                OS.println("base", base.size, base.first ?? 0)
+                OS.println("grown", grown.size, grown.last ?? 0, grown.contains(4))
+                OS.println("empty", empty.last ?? -1)
                 OS.println("seen", seen.size, seen.contains(3))
                 OS.println("more", more.size, more.contains(4))
             }
@@ -8388,7 +9780,7 @@ $name
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "base 2 2\ngrown 5 5\nseen 2 false\nmore 4 true\n"
+            "base 2 1\ngrown 5 5 true\nempty -1\nseen 2 false\nmore 4 true\n"
         );
     }
 
@@ -8484,8 +9876,8 @@ $name
                 mapped = values.map { value => value + 5 }
 
                 OS.println(mappedEmpty.size)
-                OS.println(mapped.at(0).getOr(0))
-                OS.println(mapped.at(1).getOr(0))
+                OS.println(mapped.at(0) ?? 0)
+                OS.println(mapped.at(1) ?? 0)
                 OS.println(mapped.size)
             }
             "#,
@@ -8873,7 +10265,7 @@ $name
                 })
                 let Some { value as first } = mapped.at(0) else return ()
                 let Some { value as second } = mapped.at(1) else return ()
-                OS.println(first.getOr(0))
+                OS.println(first ?? 0)
                 OS.println(second.isEmpty)
             }
             "#,

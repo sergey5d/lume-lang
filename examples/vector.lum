@@ -16,6 +16,7 @@
 # zipIndex 4 3
 # at 3
 # head 1
+# last 4
 # tail 2 4
 # remove 2 3
 # size 3
@@ -52,27 +53,29 @@ def main() Unit {
     let Some(zippedPair) = zipped.at(1) else return ()
     let Some(indexedPair) = indexed.at(3) else return ()
     let Some(head) = items.head else return ()
+    let Some(last) = items.last else return ()
     let Ok { value as removed } = items.removeAt(1) else return ()
 
     let (zipValue, zipLabel) = zippedPair
     let (indexedValue, indexedPos) = indexedPair
 
-    println("mapped " + mapped.at(0).getOr(0) + " " + mapped.at(3).getOr(0))
-    println("expanded " + expanded.at(0).getOr(0) + " " + expanded.at(7).getOr(0))
-    println("filtered " + filtered.at(0).getOr(0) + " " + filtered.at(1).getOr(0))
+    println("mapped " + (mapped.at(0) ?? 0) + " " + (mapped.at(3) ?? 0))
+    println("expanded " + (expanded.at(0) ?? 0) + " " + (expanded.at(7) ?? 0))
+    println("filtered " + (filtered.at(0) ?? 0) + " " + (filtered.at(1) ?? 0))
     println("fold " + total)
-    println("reduce " + reduced.getOr(0))
+    println("reduce " + (reduced ?? 0))
     println("exists " + hasBig)
     println("forAll " + allPositive)
-    println("sorted " + sorted.at(0).getOr(0) + " " + sorted.at(3).getOr(0))
+    println("sorted " + (sorted.at(0) ?? 0) + " " + (sorted.at(3) ?? 0))
     println("zip " + zipValue + " " + zipLabel)
     println("zipIndex " + indexedValue + " " + indexedPos)
-    println("at " + items.at(1).getOr(0))
+    println("at " + (items.at(1) ?? 0))
     println("head " + head)
-    println("tail " + tailItems.at(0).getOr(0) + " " + tailItems.at(2).getOr(0))
+    println("last " + last)
+    println("tail " + (tailItems.at(0) ?? 0) + " " + (tailItems.at(2) ?? 0))
     println("remove " + removed + " " + items.size)
     println("size " + items.size)
 
     spreaded = [0, ...items, 5, ...[6, 7]]
-    println("spread " + spreaded.at(0).getOr(0) + " " + spreaded.at(3).getOr(0) + " " + spreaded.at(6).getOr(0) + " " + spreaded.size)
+    println("spread " + (spreaded.at(0) ?? 0) + " " + (spreaded.at(3) ?? 0) + " " + (spreaded.at(6) ?? 0) + " " + spreaded.size)
 }

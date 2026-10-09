@@ -35,11 +35,6 @@ ext Option[T] {
         case None => None
     }
 
-    def getOr(fallback => T) T = match this {
-        case Some { value } => value
-        case None => fallback
-    }
-
     def orElse(fallback => Option[T]) Option[T] = match this {
         case Some { value } => Some(value)
         case None => fallback

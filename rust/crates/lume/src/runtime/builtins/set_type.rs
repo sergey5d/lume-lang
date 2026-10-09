@@ -37,6 +37,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(11, "forEach", vec![function_unknown()], set_for_each),
             builtin_method(12, "contains", vec![ir::Type::Unknown], set_contains),
             builtin_method(13, "size", Vec::new(), set_size),
+            builtin_method(15, "isEmpty", Vec::new(), set_is_empty),
+            builtin_method(16, "nonEmpty", Vec::new(), set_non_empty),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -295,4 +297,28 @@ fn set_size(
         return Err(interpreter.runtime_error(span, "Set.size expects 0 arguments"));
     }
     Ok(Value::Int(set_items(&receiver).borrow().len() as i64))
+}
+
+fn set_is_empty(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Set.isEmpty expects 0 arguments"));
+    }
+    Ok(Value::Bool(set_items(&receiver).borrow().is_empty()))
+}
+
+fn set_non_empty(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Set.nonEmpty expects 0 arguments"));
+    }
+    Ok(Value::Bool(!set_items(&receiver).borrow().is_empty()))
 }

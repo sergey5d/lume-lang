@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*type 'Int' does not satisfy generic bound 'Iterable\[.*\]'.*
+
+def main() Unit {
+    values = [1, 2, 3]
+    flattened = values.flatten()
+    println(flattened.size)
+}

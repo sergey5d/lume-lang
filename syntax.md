@@ -1131,7 +1131,7 @@ Field braces construct values. Parsing is entirely syntactic:
 { field: value }  # construction
 { ...source }     # construction
 { value }         # block expression
-{}                # empty block, producing Unit
+{}                # empty construction expression
 ```
 
 The type checker then applies the construction fields to a unique concrete
@@ -1155,7 +1155,18 @@ anonymous = {
 }
 
 copy = { ...source }
+
+empty = {}                 # empty anonymous shape
+nothing Unit = {}          # Unit, equivalent to ()
+user EmptyUser = {}        # zero-argument contextual construction
+names [Str] = {}           # zero-argument Vector construction
 ```
+
+Empty braces use the expected type when one exists. A concrete class, named
+shape, or collection target invokes its normal zero-argument construction and
+must satisfy the same constructor/default rules as any other call. Expected
+`Unit` produces `()`. Without an expected type, `{}` infers an empty anonymous
+shape; it is not silently defaulted to `Unit`.
 
 Context can flow from a typed binding, return type, indexed assignment, or a
 single known function parameter:
@@ -1674,7 +1685,7 @@ Braces carry several meanings. The parser chooses by the tokens before and insid
 { field: value }                 # contextual or anonymous field construction
 { ...source }                    # anonymous or contextual shape/class construction
 { expr }                         # block expression
-{}                               # empty block expression
+{}                               # empty contextual or anonymous construction
 Type { field: value }            # brace field construction or union payload
 Type { field }                   # brace construction with a punned field
 call { x => ... }                # trailing lambda
@@ -1689,7 +1700,17 @@ new {}                           # empty anonymous or contextual construction
 
 Single-expression braces such as `{ value }` are block expressions, not
 anonymous shapes. Use `new { value }` when `value` is a punned field. Bare `{}`
-is an empty block; `new {}` is empty construction.
+is empty construction; `new {}` is the equivalent explicit spelling.
+
+Braces that a declaration or control-flow construct requires remain body
+delimiters rather than expressions:
+
+```txt
+class Marker {}                  # empty declaration body
+def noop() Unit {}               # empty callable body
+def noopValue() Unit = {}        # Unit-valued construction expression
+def make() EmptyUser = {}        # zero-argument construction expression
+```
 
 Brace classification uses the first syntactic entry, not punctuation found
 later in the body. A leading construction field or spread selects an anonymous
@@ -1901,7 +1922,9 @@ point Point = (1, 2)                   # invalid: tuple -> named shape
 anon { x Int, y Int } = new(1, 2)      # invalid: positional new cannot target an anonymous shape
 unknown = new(1, 2)                    # invalid: no concrete expected target
 user User = { name: "Ada", age: 10 }   # contextual class construction
-empty = new {}                          # empty anonymous shape
+empty = {}                              # empty anonymous shape
+explicitEmpty = new {}                  # equivalent explicit spelling
+nothing Unit = {}                       # Unit from expected type
 ```
 
 Anonymous shape field types come from the surrounding declaration:
@@ -2322,7 +2345,7 @@ Rules:
 
 Style:
 
-- Use by-name parameters only for conditional-value APIs such as `assert`, `debug`, `getOr`, and `orElse`.
+- Use by-name parameters only for conditional-value APIs such as `assert`, `debug`, and `orElse`.
 - Use `fn() T` for callbacks, schedulers, retry operations, event handlers, and stored work.
 
 Forwarding rules:
@@ -2353,7 +2376,7 @@ fallback branch. Mapper callbacks such as `map`, `flatMap`, `mapLeft`, and
 on the container branch:
 
 ```txt
-value = maybe.getOr(expensiveDefault())
+value = maybe ?? expensiveDefault()
 result = maybe.toResult(makeError())
 next = result.orElse(recover())
 mapped = maybe.map(value => value + 1)
@@ -3001,7 +3024,7 @@ removed Option[Int] = queue.removeFirst()
 populated = LinkedList(1, 2, 3)
 ```
 
-`at`, `first()`, `last()`, `removeFirst()`, and `removeLast()` are safe and
+`at`, `first`, `last`, `removeFirst()`, and `removeLast()` are safe and
 return `Option[T]`. Indexed mutations return `Result` with an `InvalidIndex`
 that records the rejected index and the collection size. `setAt` returns the
 replaced value, `removeAt` returns the removed value, and `insertAt` accepts
@@ -3048,9 +3071,14 @@ boxes Array[Box] = Array(Box(1), Box(2))
 takeArray(Array(4, 5, 6))
 ```
 
-Vectors expose `at`, `setAt`, `insertAt`, and `removeAt` with the same safe
-return types as LinkedList. Vector and Array bracket access remains available
-as the explicit unsafe alternative.
+Vectors expose the optional `first` and `last` getters plus `at`, `setAt`,
+`insertAt`, and `removeAt` with the same safe return types as LinkedList. Vector
+and Array bracket access remains available as the explicit unsafe alternative:
+
+```txt
+first = values.first ?? fallback
+last = values.last ?? fallback
+```
 
 `take(count)` returns a new vector containing at most the first `count` values;
 a non-positive count produces an empty vector. `sort` mutates the vector and
@@ -3065,6 +3093,15 @@ firstTen = values.take(10)
 A comparator returns a negative value when `left` belongs before `right`, zero
 when they compare equally, and a positive value when `left` belongs after
 `right`.
+
+`flatten()` removes one iterable layer. The vector element type must implement
+`Iterable[X]`; this includes nested vectors, sets, and `Option[X]`. An absent
+option contributes no value:
+
+```txt
+present [Int] = [Some(1), None, Some(3)].flatten() # [1, 3]
+nested [Int] = [[1, 2], [3]].flatten()             # [1, 2, 3]
+```
 
 Map construction:
 
@@ -4240,12 +4277,14 @@ match value {
 
 Every `match` branch must start with `case`.
 
-Every case must have an explicit body after `=>`: an expression, `()` for Unit, or a block such as `{}`.
+Every case must have an explicit body after `=>`: an expression, `()` for Unit,
+or a nonempty block. In an expression body, `{}` is empty construction and uses
+the match expression's expected type when one exists.
 
 ```txt
 match value {
     case Skip => ()
-    case Empty => {}
+    case Empty => ()
     case Log { message } => {
         println(message)
     }

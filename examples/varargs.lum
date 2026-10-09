@@ -24,7 +24,7 @@ def joinWords(separator Str, words [Str] vararg) Str {
 }
 
 def describeTags(label Str, tags [Str] vararg) Str {
-    first = tags.at(0).getOr("none")
+    first = tags.at(0) ?? "none"
     label + " " + tags.size + " " + first
 }
 

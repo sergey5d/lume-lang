@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 use crate::{
@@ -142,15 +143,60 @@ pub(crate) fn load_module_graph_with_options(
     Ok((graph, root))
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct ModuleLoadOptions {
     pub(crate) library_modules: HashMap<String, LibraryModule>,
+}
+
+impl Default for ModuleLoadOptions {
+    fn default() -> Self {
+        Self {
+            library_modules: native_library_modules(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct LibraryModule {
     pub(crate) program: Program,
     pub(crate) typecheck_only_types: HashSet<String>,
+}
+
+fn native_library_modules() -> HashMap<String, LibraryModule> {
+    let mut modules = HashMap::new();
+    modules.insert(
+        "lume/json".to_string(),
+        LibraryModule {
+            program: native_json_program(),
+            typecheck_only_types: HashSet::new(),
+        },
+    );
+    modules
+}
+
+fn native_json_program() -> Program {
+    static PROGRAM: OnceLock<Program> = OnceLock::new();
+    PROGRAM
+        .get_or_init(|| {
+            let file = SourceFile::new(
+                "<native:lume/json>",
+                include_str!("native_json.lum").to_string(),
+            );
+            let lexed = lex(&file);
+            assert!(
+                lexed.diagnostics.is_empty(),
+                "native lume/json lexer diagnostics: {:#?}",
+                lexed.diagnostics
+            );
+            let parsed = parse_program(&lexed.tokens);
+            assert!(
+                parsed.diagnostics.is_empty(),
+                "native lume/json parser diagnostics: {:#?}",
+                parsed.diagnostics
+            );
+            parsed.program.expect("native lume/json program")
+        })
+        .clone()
 }
 
 #[derive(Debug, Clone, Default)]

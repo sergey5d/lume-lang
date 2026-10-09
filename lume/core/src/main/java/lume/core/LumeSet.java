@@ -40,6 +40,14 @@ public final class LumeSet<T> {
         return values.size();
     }
 
+    public boolean isEmpty() {
+        return values.isEmpty();
+    }
+
+    public boolean nonEmpty() {
+        return !values.isEmpty();
+    }
+
     public Set<T> asJava() {
         return Set.copyOf(values);
     }

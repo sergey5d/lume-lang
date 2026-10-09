@@ -63,12 +63,12 @@ def main() Unit {
     sumFail = sumBoth(Some(4), None)
     prefix = sumPrefix([Some(1), Some(2), Some(3), None, Some(100)])
 
-    println("some ${some.getOr(0)}")
+    println("some ${some ?? 0}")
     println("none ${none.getError()}")
-    println("optSome ${optSome.getOr(0)}")
+    println("optSome ${optSome ?? 0}")
     println("optNone ${optNone.isEmpty}")
     println("pair ${pair.count}-${pair.label}")
-    println("sum ${sum.getOr(0)}")
+    println("sum ${sum ?? 0}")
     println("sumFail ${sumFail.getError()}")
     println("prefix ${prefix}")
 }

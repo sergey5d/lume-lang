@@ -23,7 +23,7 @@ def main() Unit {
     second = extracted.at(1) ?? return ()
     third = extracted.at(2) ?? return ()
 
-    println("first " + first.getOr(0))
+    println("first " + (first ?? 0))
     println("second " + second.isEmpty)
-    println("third " + third.getOr(0))
+    println("third " + (third ?? 0))
 }

@@ -20,7 +20,7 @@ private object JdbcRowDecoderCache {
     }
 
     def key(targetType Type[_]) Str =
-        targetType.qualifiedName.getOr(targetType.name.getOr("<anonymous>"))
+        targetType.qualifiedName ?? (targetType.name ?? "<anonymous>")
 }
 
 

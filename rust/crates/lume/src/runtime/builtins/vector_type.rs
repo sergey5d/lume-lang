@@ -24,6 +24,7 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(30, "addAll", vec![ir::Type::Unknown], list_add_all),
             builtin_method(3, "map", vec![function_unknown()], list_map),
             builtin_method(4, "flatMap", vec![function_unknown()], list_flat_map),
+            builtin_method(41, "flatten", Vec::new(), list_flatten),
             builtin_method(5, "filter", vec![function_unknown()], list_filter),
             builtin_method(
                 6,
@@ -179,6 +180,23 @@ fn list_flat_map(
     for value in values {
         let mapped = interpreter.invoke_value(callback.clone(), vec![value], span)?;
         out.extend(iterable_values(mapped, span, interpreter)?);
+    }
+    Ok(Value::list(out))
+}
+
+fn list_flatten(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Vector.flatten expects no arguments"));
+    }
+    let values = list_values(interpreter, &receiver, span, "Vector.flatten")?;
+    let mut out = Vec::new();
+    for value in values {
+        out.extend(iterable_values(value, span, interpreter)?);
     }
     Ok(Value::list(out))
 }

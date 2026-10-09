@@ -100,7 +100,7 @@ class Path {
 
     def size() Int = this.segments.size
 
-    def firstOr(value Str) Str = this.segments.at(0).getOr(value)
+    def firstOr(value Str) Str = this.segments.at(0) ?? value
 }
 
 

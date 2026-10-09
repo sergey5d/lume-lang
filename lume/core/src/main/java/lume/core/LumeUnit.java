@@ -5,4 +5,9 @@ public final class LumeUnit {
 
     private LumeUnit() {
     }
+
+    @Override
+    public String toString() {
+        return "()";
+    }
 }

@@ -186,7 +186,7 @@ def makeAdder(base Int) fn(Int) Int =
     value => base + value
 
 # By-name parameter
-def getOr(defaultValue => Int) Int =
+def valueOr(defaultValue => Int) Int =
     ...
 
 # Lambda expression

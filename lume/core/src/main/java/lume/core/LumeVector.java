@@ -36,11 +36,27 @@ public final class LumeVector<T> implements Iterable<T> {
         return values.size();
     }
 
+    public boolean contains(T value) {
+        return values.contains(value);
+    }
+
     public Option<T> at(long index) {
         if (index < 0 || index >= values.size()) {
             return LumeRuntime.optionNone();
         }
         return LumeRuntime.optionSome(values.get((int) index));
+    }
+
+    public Option<T> first() {
+        return values.isEmpty()
+            ? LumeRuntime.optionNone()
+            : LumeRuntime.optionSome(values.get(0));
+    }
+
+    public Option<T> last() {
+        return values.isEmpty()
+            ? LumeRuntime.optionNone()
+            : LumeRuntime.optionSome(values.get(values.size() - 1));
     }
 
     public LumeVector<T> slice() {
@@ -106,6 +122,14 @@ public final class LumeVector<T> implements Iterable<T> {
         var result = LumeVector.<X>empty();
         for (var value : values) {
             result.addAll(mapper.apply(value));
+        }
+        return result;
+    }
+
+    public <X> LumeVector<X> flatten() {
+        var result = LumeVector.<X>empty();
+        for (var value : values) {
+            result.addAll(value);
         }
         return result;
     }

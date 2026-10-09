@@ -67,7 +67,7 @@ def main() Unit {
     tracker.register("Bob", 5)
     tracker.register("Bob", 35)
 
-    println("total", tracker.get("Ada").getOr(0))
+    println("total", tracker.get("Ada") ?? 0)
     top = tracker.topWorkers(2, "engineer")
-    println("top", top.at(0).getOr(""), top.at(1).getOr(""))
+    println("top", top.at(0) ?? "", top.at(1) ?? "")
 }

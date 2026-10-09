@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*expected match case body; use '\(\)' for Unit or '\{\}' for an empty block.*
+# .*expected match case body; use '\(\)' for Unit or '\{\}' for empty construction.*
 
 def main() Int =
     match Some(1) {

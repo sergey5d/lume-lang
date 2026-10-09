@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*cannot assign value of type '\{\}' to target of type 'Named'.*
+
+interface Named {
+    def name Str
+}
+
+def main(existing Named) Unit {
+    var value Named = existing
+    value := {}
+}

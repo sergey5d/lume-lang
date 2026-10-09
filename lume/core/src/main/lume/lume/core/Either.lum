@@ -40,11 +40,6 @@ ext Either[L, R] {
         case Right { value } => value
     }
 
-    def getOr(fallback => R) R = match this {
-        case Left { value: _ } => fallback
-        case Right { value } => value
-    }
-
     def orElse(fallback => Either[L, R]) Either[L, R] = match this {
         case Left { value: _ } => fallback
         case Right { value } => Right(value)

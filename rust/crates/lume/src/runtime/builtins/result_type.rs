@@ -31,7 +31,6 @@ pub(super) fn define() -> RuntimeType {
                 result_map,
             ),
             builtin_method(3, "getError", Vec::new(), result_get_error),
-            builtin_method(4, "getOr", vec![ir::Type::Unknown], result_get_or),
             builtin_method(5, "orElse", vec![ir::Type::Unknown], result_or_else),
             builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
             builtin_method(
@@ -193,23 +192,6 @@ fn result_get_error(
         Ok(first_field.expect("Result.Err payload"))
     } else {
         Err(interpreter.runtime_error(span, "Result has no error value"))
-    }
-}
-
-fn result_get_or(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "Result.getOr expects 1 argument"));
-    }
-    let (case_id, first_field) = result_case(&receiver);
-    if case_id == OK_CASE {
-        Ok(first_field.expect("Result.Ok payload"))
-    } else {
-        force_lazy_arg(interpreter, args[0].clone(), span)
     }
 }
 

@@ -16,7 +16,7 @@ def canVisitAllRooms(rooms [[Int]]) Bool {
 
     while keys.size != 0 {
 
-        key = keys.removeAt(0).getOr(-1)
+        key = keys.removeAt(0) ?? -1
 
         if !seen.contains(key) {
             let Some(roomKeys) = rooms.at(key) else return false

@@ -1,0 +1,20 @@
+# EXPECT:
+# optional 2 1 3
+# nested 3 1 3
+# loop 4
+
+def main() Unit {
+    optional [Int?] = [Some(1), None, Some(3)]
+    present [Int] = optional.flatten()
+    println("optional", present.size, present.first ?? 0, present.last ?? 0)
+
+    nested [[Int]] = [[1, 2], [3]]
+    values [Int] = nested.flatten()
+    println("nested", values.size, values.first ?? 0, values.last ?? 0)
+
+    var total = 0
+    for value <- optional.flatten() {
+        total += value
+    }
+    println("loop", total)
+}

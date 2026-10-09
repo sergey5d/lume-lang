@@ -63,19 +63,19 @@ def main() Unit {
     right Either[Str, Int] = Right(3)
     left Either[Str, Int] = Left("bad")
 
-    optionSome Int = some.getOr(fallbackInt("option eager", 9))
+    optionSome Int = some ?? fallbackInt("option eager", 9)
     println("option some ${optionSome}")
-    optionNone Int = none.getOr(fallbackInt("option fallback", 9))
+    optionNone Int = none ?? fallbackInt("option fallback", 9)
     println("option none ${optionNone}")
 
-    resultOk Int = ok.getOr(fallbackInt("result eager", 11))
+    resultOk Int = ok ?? fallbackInt("result eager", 11)
     println("result ok ${resultOk}")
-    resultErr Int = err.getOr(fallbackInt("result fallback", 11))
+    resultErr Int = err ?? fallbackInt("result fallback", 11)
     println("result err ${resultErr}")
 
-    eitherRight Int = right.getOr(fallbackInt("either eager", 4))
+    eitherRight Int = right ?? fallbackInt("either eager", 4)
     println("either right ${eitherRight}")
-    eitherLeft Int = left.getOr(fallbackInt("either fallback", 4))
+    eitherLeft Int = left ?? fallbackInt("either fallback", 4)
     println("either left ${eitherLeft}")
 
     okFromSome Result[Int, Str] = some.toResult(fallbackStr("toResult eager", "missing"))

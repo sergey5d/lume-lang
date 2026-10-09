@@ -34,24 +34,24 @@ def main() {
     optionSome = plusOneOption(Some(5))
     optionNone = plusOneOption(None)
 
-    println("option some ${optionSome.getOr(0)}")
+    println("option some ${optionSome ?? 0}")
     println("option none ${optionNone.isEmpty}")
 
     resultOk = plusOneResult(Ok(6))
     resultErr = plusOneResult(Err("bad"))
 
-    println("result ok ${resultOk.getOr(0)}")
+    println("result ok ${resultOk ?? 0}")
     println("result err ${resultErr.getError()}")
 
     eitherRight = plusOneEither(Right(7))
     eitherLeft = plusOneEither(Left("nope"))
-    println("either right ${eitherRight.getOr(0)}")
+    println("either right ${eitherRight ?? 0}")
     println("either left ${eitherLeft.expectLeft()}")
 
     if true {
         combo = twoEithers(Right(7), Right("abc"))
         comboLeft = twoEithers(Right(7), Left("size bad"))
-        println("either combo ${combo.getOr(0)}")
+        println("either combo ${combo ?? 0}")
         println("either combo left ${comboLeft.expectLeft()}")
     }
 }

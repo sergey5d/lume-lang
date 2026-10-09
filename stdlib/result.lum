@@ -18,11 +18,6 @@ ext Result[T, E] {
         case Err { error } => error
     }
 
-    def getOr(defaultValue => T) T = match this {
-        case Ok { value } => value
-        case Err { error: _ } => defaultValue
-    }
-
     def orElse(fallback => Result[T, E]) Result[T, E] = match this {
         case Ok { value } => Ok(value)
         case Err { error: _ } => fallback

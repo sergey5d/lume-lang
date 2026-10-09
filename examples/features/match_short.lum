@@ -3,7 +3,7 @@
 # 14
 # worker 7
 # after unit
-# after empty block
+# after empty braces
 # block body
 # after block
 # expression body 3
@@ -37,7 +37,7 @@ def printBodyShape(value Int) {
 
     match value {
         case 0 => println("after unit")
-        case 1 => println("after empty block")
+        case 1 => println("after empty braces")
         case 2 => println("after block")
         case _ => println("after expression")
     }

@@ -1228,7 +1228,15 @@ impl<'a> FunctionLowerer<'a> {
                                 binding
                                     .values
                                     .get(index)
-                                    .map(|expr| inferred_storage_type(self.infer_expr_type(expr)))
+                                    .map(|expr| {
+                                        inferred_storage_type(
+                                            self.infer_expr_type_against_with_overrides(
+                                                expr,
+                                                &ir::Type::Unknown,
+                                                &[],
+                                            ),
+                                        )
+                                    })
                                     .unwrap_or(ir::Type::Unknown)
                             }
                         });
@@ -3586,7 +3594,7 @@ impl<'a> FunctionLowerer<'a> {
                 let base_condition = if path.is_empty() {
                     self.bool_const(true)
                 } else {
-                    let Some(kind) = self.lookup_record_pattern_kind(path) else {
+                    let Some(kind) = self.lookup_record_pattern_kind(path, &scrutinee) else {
                         self.add_error(
                             "lower_invariant",
                             "record pattern should be resolved before lowering",
@@ -3673,7 +3681,8 @@ impl<'a> FunctionLowerer<'a> {
             Pattern::Constructor {
                 path, args, span, ..
             } => {
-                let Some(kind) = self.lookup_constructor_pattern_kind(path, args.len()) else {
+                let Some(kind) = self.lookup_constructor_pattern_kind(path, args.len(), &scrutinee)
+                else {
                     self.add_error(
                         "lower_invariant",
                         "constructor pattern should be resolved before lowering",
@@ -3810,7 +3819,7 @@ impl<'a> FunctionLowerer<'a> {
             Pattern::Alias { inner, .. } => self.whole_pattern_binding_type(inner, scrutinee),
             Pattern::Type { target, .. } => self.lower_type_ref(target),
             Pattern::Record { path, .. } if !path.is_empty() => {
-                match self.lookup_record_pattern_kind(path) {
+                match self.lookup_record_pattern_kind(path, scrutinee) {
                     Some(ConstructorPatternKind::EnumCase { case_name, .. }) => self
                         .enum_case_view_type(scrutinee, &case_name)
                         .unwrap_or_else(|| {
@@ -3821,7 +3830,7 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
             Pattern::Constructor { path, args, .. } => {
-                match self.lookup_constructor_pattern_kind(path, args.len()) {
+                match self.lookup_constructor_pattern_kind(path, args.len(), scrutinee) {
                     Some(ConstructorPatternKind::EnumCase { case_name, .. }) => self
                         .enum_case_view_type(scrutinee, &case_name)
                         .unwrap_or_else(|| {
@@ -3968,6 +3977,15 @@ impl<'a> FunctionLowerer<'a> {
             ("Result", "Err", "error") if args.len() == 2 => return args.get(1).cloned(),
             ("Either", "Left", "value") if args.len() == 2 => return args.first().cloned(),
             ("Either", "Right", "value") if args.len() == 2 => return args.get(1).cloned(),
+            (
+                "FileError",
+                "NotFound" | "AccessDenied" | "Closed" | "InvalidEncoding" | "IoFailure",
+                "path",
+            ) => return Some(ir::Type::Str),
+            ("FileError", "InvalidEncoding", "offset") => return Some(ir::Type::Int),
+            ("FileError", "IoFailure", "operation" | "message") => {
+                return Some(ir::Type::Str);
+            }
             _ => {}
         }
 
@@ -3994,8 +4012,9 @@ impl<'a> FunctionLowerer<'a> {
         &self,
         path: &[String],
         arity: usize,
+        scrutinee: &ir::Operand,
     ) -> Option<ConstructorPatternKind> {
-        if let Some(field_names) = self.lookup_case_fields(path, arity) {
+        if let Some(field_names) = self.lookup_case_fields(path, arity, scrutinee) {
             return Some(ConstructorPatternKind::EnumCase {
                 case_name: path.last().cloned().unwrap_or_default(),
                 field_names,
@@ -4021,8 +4040,12 @@ impl<'a> FunctionLowerer<'a> {
             .then(|| ir::Type::named(type_name))
     }
 
-    fn lookup_record_pattern_kind(&self, path: &[String]) -> Option<ConstructorPatternKind> {
-        if let Some(field_names) = self.lookup_case_all_fields(path) {
+    fn lookup_record_pattern_kind(
+        &self,
+        path: &[String],
+        scrutinee: &ir::Operand,
+    ) -> Option<ConstructorPatternKind> {
+        if let Some(field_names) = self.lookup_case_all_fields(path, scrutinee) {
             return Some(ConstructorPatternKind::EnumCase {
                 case_name: path.last().cloned().unwrap_or_default(),
                 field_names,
@@ -4032,7 +4055,11 @@ impl<'a> FunctionLowerer<'a> {
             .map(|(ty, field_names)| ConstructorPatternKind::TypeDestructure { ty, field_names })
     }
 
-    fn lookup_case_all_fields(&self, path: &[String]) -> Option<Vec<String>> {
+    fn lookup_case_all_fields(
+        &self,
+        path: &[String],
+        scrutinee: &ir::Operand,
+    ) -> Option<Vec<String>> {
         let case_name = path.last()?;
         if path.len() >= 2 {
             let type_name = &path[path.len() - 2];
@@ -4047,11 +4074,9 @@ impl<'a> FunctionLowerer<'a> {
                 return Some(case.fields.iter().map(|field| field.name.clone()).collect());
             }
         }
-        match case_name.as_str() {
-            "Some" | "Ok" | "Left" | "Right" => return Some(vec!["value".to_string()]),
-            "Err" => return Some(vec!["error".to_string()]),
-            "None" => return Some(Vec::new()),
-            _ => {}
+        if let Some(fields) = core_pattern_case_fields(path, self.operand_type(scrutinee).as_ref())
+        {
+            return Some(fields);
         }
         let ast_matches = self
             .program
@@ -4092,7 +4117,12 @@ impl<'a> FunctionLowerer<'a> {
             .cloned()
     }
 
-    fn lookup_case_fields(&self, path: &[String], arity: usize) -> Option<Vec<String>> {
+    fn lookup_case_fields(
+        &self,
+        path: &[String],
+        arity: usize,
+        scrutinee: &ir::Operand,
+    ) -> Option<Vec<String>> {
         let case_name = path.last()?;
         if path.len() >= 2 {
             let type_name = &path[path.len() - 2];
@@ -4113,15 +4143,10 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
         }
-        match case_name.as_str() {
-            "Some" | "Ok" | "Left" | "Right" if arity == 1 => {
-                return Some(vec!["value".to_string()]);
-            }
-            "Err" if arity == 1 => {
-                return Some(vec!["error".to_string()]);
-            }
-            "None" if arity == 0 => return Some(Vec::new()),
-            _ => {}
+        if let Some(fields) = core_pattern_case_fields(path, self.operand_type(scrutinee).as_ref())
+            && fields.len() == arity
+        {
+            return Some(fields);
         }
 
         let ast_matches = self
@@ -4756,10 +4781,19 @@ impl<'a> FunctionLowerer<'a> {
         expected: Option<&ir::Type>,
     ) -> ir::Operand {
         let source_ty = self.infer_expr_type(value);
-        let success_ty = unwrap_lifted_ir_type(&source_ty)
+        let mut success_ty = unwrap_lifted_ir_type(&source_ty)
             .map(|(_, inner)| inner)
             .unwrap_or(ir::Type::Unknown);
-        let result_ty = expected.cloned().unwrap_or_else(|| success_ty.clone());
+        let result_ty = expected.cloned().unwrap_or_else(|| {
+            if success_ty == ir::Type::Unknown {
+                self.infer_expr_type(fallback)
+            } else {
+                success_ty.clone()
+            }
+        });
+        if success_ty == ir::Type::Unknown {
+            success_ty = result_ty.clone();
+        }
         let source = self.lower_expr_with_expected(value, Some(&source_ty));
         let source_local = self.add_temp(source_ty);
         self.push_statement(ir::Statement {
@@ -5012,11 +5046,18 @@ impl<'a> FunctionLowerer<'a> {
             Expr::RecordUpdate { receiver, .. } => {
                 self.infer_expr_type_with_overrides(receiver, overrides)
             }
-            Expr::ExtractOr { value, .. } => {
+            Expr::ExtractOr {
+                value, fallback, ..
+            } => {
                 let source_ty = self.infer_expr_type_with_overrides(value, overrides);
-                unwrap_lifted_ir_type(&source_ty)
+                let inner = unwrap_lifted_ir_type(&source_ty)
                     .map(|(_, inner)| inner)
-                    .unwrap_or(ir::Type::Unknown)
+                    .unwrap_or(ir::Type::Unknown);
+                if inner == ir::Type::Unknown {
+                    self.infer_expr_type_with_overrides(fallback, overrides)
+                } else {
+                    inner
+                }
             }
             Expr::Try { value, .. } => {
                 let source_ty = self.infer_expr_type_with_overrides(value, overrides);
@@ -5298,6 +5339,25 @@ impl<'a> FunctionLowerer<'a> {
             [owner, method] if owner == "Float" && method == "parse" => {
                 Some(ir::Type::option(ir::Type::Float))
             }
+            [owner, method] if owner == "File" && method == "readBytes" => Some(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],
+            }),
+            [owner, method] if owner == "File" && method == "readText" => Some(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::Str, ir::Type::named("FileError")],
+            }),
+            [owner, method] if owner == "File" && method == "open" => Some(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::named("FileStream"), ir::Type::named("FileError")],
+            }),
+            [owner, method] if owner == "File" && method == "openText" => Some(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![
+                    ir::Type::named("TextFileReader"),
+                    ir::Type::named("FileError"),
+                ],
+            }),
             [owner] if owner == "Map" => Some(ir::Type::Named {
                 name: "Map".to_string(),
                 args: vec![ir::Type::Unknown, ir::Type::Unknown],
@@ -6089,6 +6149,11 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return Some(*ret);
                 }
+                ("flatten", []) if type_name == "Vector" => {
+                    let item = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
+                    let flattened = known_iterable_ir_item_type(&item).unwrap_or(ir::Type::Unknown);
+                    return Some(ir::Type::list(flattened));
+                }
                 _ => {}
             }
         }
@@ -6424,6 +6489,29 @@ impl<'a> FunctionLowerer<'a> {
             )),
             Expr::RecordLiteral { fields, values, .. } => {
                 if let Some(expected) = expected {
+                    if fields.is_empty() && values.is_empty() && matches!(expected, ir::Type::Unit)
+                    {
+                        return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
+                    }
+                    if fields.is_empty()
+                        && values.is_empty()
+                        && matches!(expected, ir::Type::Named { name, .. } if runtime_collection_constructor_name(name))
+                    {
+                        let ir::Type::Named { name, .. } = expected else {
+                            unreachable!()
+                        };
+                        let span = expr.span();
+                        let call = Expr::Call {
+                            callee: Box::new(Expr::Identifier {
+                                name: name.clone(),
+                                span,
+                            }),
+                            args: Vec::new(),
+                            style: core::CallStyle::Paren,
+                            span,
+                        };
+                        return self.lower_rvalue_with_expected(&call, Some(expected));
+                    }
                     if let ir::Type::Named { name, .. } = expected
                         && self.program.types.iter().any(|ty| {
                             ty.name == *name
@@ -6654,7 +6742,14 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::ContextualNew { args, style, span } => {
                 if *style == core::CallStyle::Brace
-                    && expected.is_none_or(|ty| self.named_construct_fields(ty).is_none())
+                    && expected.is_none_or(|ty| {
+                        self.named_construct_fields(ty).is_none()
+                            && !matches!(
+                                ty,
+                                ir::Type::Named { name, .. }
+                                    if runtime_collection_constructor_name(name)
+                            )
+                    })
                 {
                     let [
                         core::CallArg {
@@ -9371,7 +9466,6 @@ fn builtin_member_expected_arg_specs(
                 false,
             )])
         }
-        ("Option", "getOr") => Some(vec![spec(item, true)]),
         ("Option", "orElse") => Some(vec![spec(receiver.clone(), true)]),
         ("Option", "toResult") => {
             let error = match expected {
@@ -9428,7 +9522,6 @@ fn builtin_member_expected_arg_specs(
                 false,
             )])
         }
-        ("Result", "getOr") => Some(vec![spec(item, true)]),
         ("Result", "orElse") => Some(vec![spec(receiver.clone(), true)]),
         ("Result", "mapError") => {
             let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
@@ -9484,10 +9577,6 @@ fn builtin_member_expected_arg_specs(
                 },
                 false,
             )])
-        }
-        ("Either", "getOr") => {
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(vec![spec(right, true)])
         }
         ("Either", "orElse") => Some(vec![spec(receiver.clone(), true)]),
         ("Either", "merge") => Some(Vec::new()),
@@ -9578,10 +9667,6 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             }],
             ret: Box::new(ir::Type::option(ir::Type::Unknown)),
         }),
-        ("Option", "getOr") => Some(ir::Type::Function {
-            params: vec![item.clone()],
-            ret: Box::new(item),
-        }),
         ("Option", "orElse") => Some(ir::Type::Function {
             params: vec![receiver.clone()],
             ret: Box::new(receiver.clone()),
@@ -9633,10 +9718,6 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 }),
             })
         }
-        ("Result", "getOr") => Some(ir::Type::Function {
-            params: vec![item.clone()],
-            ret: Box::new(item),
-        }),
         ("Result", "orElse") => Some(ir::Type::Function {
             params: vec![receiver.clone()],
             ret: Box::new(receiver.clone()),
@@ -9683,13 +9764,6 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                     name: "Either".to_string(),
                     args: vec![left, ir::Type::Unknown],
                 }),
-            })
-        }
-        ("Either", "getOr") => {
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: vec![right.clone()],
-                ret: Box::new(right),
             })
         }
         ("Either", "orElse") => Some(ir::Type::Function {
@@ -9925,6 +9999,10 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 args: vec![item, ir::Type::named("InvalidIndex")],
             }),
         }),
+        ("Vector" | "LinkedList" | "Array" | "Set", "contains") => Some(ir::Type::Function {
+            params: vec![item],
+            ret: Box::new(ir::Type::Bool),
+        }),
         ("Vector" | "LinkedList" | "Array" | "Set" | "Map" | "Str", "size" | "length") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
@@ -9962,6 +10040,51 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir::Type::list(args[0].clone())),
         }),
+        ("FileStream", "read") => Some(ir::Type::Function {
+            params: vec![ir::Type::Int],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],
+            }),
+        }),
+        ("FileStream", "readToEnd") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],
+            }),
+        }),
+        ("FileStream", "seek") => Some(ir::Type::Function {
+            params: vec![ir::Type::Int],
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::Int, ir::Type::named("FileError")],
+            }),
+        }),
+        ("FileStream" | "TextFileReader", "close") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::Unit, ir::Type::named("FileError")],
+            }),
+        }),
+        ("TextFileReader", "readLine") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![
+                    ir::Type::option(ir::Type::Str),
+                    ir::Type::named("FileError"),
+                ],
+            }),
+        }),
+        ("TextFileReader", "readToEnd") => Some(ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::Str, ir::Type::named("FileError")],
+            }),
+        }),
         _ => None,
     }
 }
@@ -9994,7 +10117,7 @@ fn builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             Some(ir::Type::option(item))
         }
         ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
-        ("Vector" | "LinkedList", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Type", "name" | "qualifiedName")
         | (
             "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
@@ -10021,6 +10144,9 @@ fn builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             Some(ir_exact_runtime_type(ir::Type::Unknown))
         }
         ("Field", "isPrivate") => Some(ir::Type::Bool),
+        ("FileStream" | "TextFileReader", "path") => Some(ir::Type::Str),
+        ("FileStream", "position") => Some(ir::Type::Int),
+        ("FileStream" | "TextFileReader", "closed") => Some(ir::Type::Bool),
         _ => None,
     }
 }
@@ -10757,6 +10883,11 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
         return true;
     }
 
+    if matches!(path, [owner, case] if owner == "SeekFrom" && matches!(case.as_str(), "Start" | "Current" | "End"))
+    {
+        return true;
+    }
+
     if single_type_exists(program, &path[0]) {
         return true;
     }
@@ -10799,6 +10930,8 @@ fn runtime_callable_root_name(name: &str) -> bool {
     matches!(
         name,
         "OS" | "Math"
+            | "File"
+            | "SeekFrom"
             | "Range"
             | "IntRange"
             | "Vector"
@@ -10828,6 +10961,39 @@ fn single_type_exists(program: &ir::Program, name: &str) -> bool {
 
 fn builtin_zero_arg_value_name(name: &str) -> bool {
     matches!(name, "None")
+}
+
+fn core_pattern_case_fields(
+    path: &[String],
+    scrutinee_ty: Option<&ir::Type>,
+) -> Option<Vec<String>> {
+    let case_name = path.last()?.as_str();
+    let inferred_owner = if path.len() >= 2 {
+        Some(path.get(path.len() - 2)?.as_str())
+    } else if let Some(ir::Type::Named { name, .. }) = scrutinee_ty {
+        Some(name.split("::").next().unwrap_or(name))
+    } else {
+        None
+    };
+    // The lifted wrapper cases are language-level bare patterns. Their scrutinee can
+    // still carry an unresolved generic owner while nested patterns are lowered.
+    let owner = match case_name {
+        "Some" | "None" if path.len() == 1 => "Option",
+        "Ok" | "Err" if path.len() == 1 => "Result",
+        "Left" | "Right" if path.len() == 1 => "Either",
+        _ => inferred_owner?,
+    };
+
+    let fields = match (owner, case_name) {
+        ("Option", "Some") | ("Result", "Ok") | ("Either", "Left" | "Right") => &["value"][..],
+        ("Option", "None") | ("SeekFrom", "Start" | "Current" | "End") => &[],
+        ("Result", "Err") => &["error"],
+        ("FileError", "NotFound" | "AccessDenied" | "Closed") => &["path"],
+        ("FileError", "InvalidEncoding") => &["path", "offset"],
+        ("FileError", "IoFailure") => &["operation", "path", "message"],
+        _ => return None,
+    };
+    Some(fields.iter().map(|field| (*field).to_string()).collect())
 }
 
 fn explicit_enum_case_exists(program: &ir::Program, type_name: &str, case_name: &str) -> bool {

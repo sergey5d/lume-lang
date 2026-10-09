@@ -12,9 +12,9 @@ def main() Int {
     shorthand [Str: Int] = explicit
     explicitAgain Map[Str, Int] = shorthand
 
-    println(explicitAgain["one"].getOr(0))
+    println(explicitAgain["one"] ?? 0)
     shorthand.put("two", 2)
-    println(explicitAgain["two"].getOr(0))
+    println(explicitAgain["two"] ?? 0)
 
     0
 }

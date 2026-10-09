@@ -52,7 +52,7 @@ def main() Unit {
     println(a1)
     println(v)
     println(branch)
-    println(yielded.at(0).getOr(0))
-    println(yielded.at(1).getOr(0))
+    println(yielded.at(0) ?? 0)
+    println(yielded.at(1) ?? 0)
     println(matched)
 }

@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# unknown_member at .*: method 'getOr' was removed from 'Option\[Int\]'; use '<value> \?\? fallback' for lazy fallback extraction
+
+def main(value Int?) Int = value.getOr(0)

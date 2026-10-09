@@ -13,11 +13,6 @@ ext Option[T] {
 
     def isEmpty Bool = !this.isSet
 
-    def getOr(defaultValue => T) T = match this {
-        case Some { value } => value
-        case Option.None => defaultValue
-    }
-
     def orElse(fallback => Option[T]) Option[T] = match this {
         case Some { value } => Some(value)
         case Option.None => fallback

@@ -5280,7 +5280,8 @@ impl<'a> SourceBodyEmitter<'a> {
         if let Some(case_name) = named_pattern
             && let Some(owner) = core_enum_case_owner(case_name)
         {
-            let arity = if owner == "Option" { 1 } else { 2 };
+            let arity = core_enum_owner_type_arity(owner)
+                .expect("every core enum case owner has a Java type arity");
             let args = match value_ty {
                 ir::Type::Named { name, args } if name == owner => args.clone(),
                 _ => vec![ir::Type::Unknown; arity],
@@ -5554,11 +5555,7 @@ impl<'a> SourceBodyEmitter<'a> {
     ) -> Option<MatchedCase> {
         let owner = core_enum_case_owner(case_name)?;
         let case_local = self.synthetic_name("match", "case", index);
-        let arity = match owner {
-            "Option" => 1,
-            "Result" | "Either" => 2,
-            _ => return None,
-        };
+        let arity = core_enum_owner_type_arity(owner)?;
         let case_type = format!(
             "lume.core.{owner}.{}{}",
             java_type_name(case_name),
@@ -5572,30 +5569,47 @@ impl<'a> SourceBodyEmitter<'a> {
         } else {
             format!("{value} instanceof {case_type}")
         };
+        let mut conditions = vec![condition];
         let mut bindings = parent_bindings.clone();
         let mut binding_types = parent_binding_types.clone();
         for (pattern, field_name, field_ty) in patterns {
+            let access = format!(
+                "(({}) {case_local}.{}())",
+                self.names.value_type(field_ty),
+                java_member_name(field_name)
+            );
             match pattern {
                 ast::Pattern::Wildcard { .. } => {}
                 ast::Pattern::Binding { name, .. } => {
                     if name == "_" {
                         continue;
                     }
-                    bindings.insert(
-                        name.clone(),
-                        format!(
-                            "(({}) {case_local}.{}())",
-                            self.names.value_type(field_ty),
-                            java_member_name(field_name)
-                        ),
-                    );
+                    bindings.insert(name.clone(), access);
                     binding_types.insert(name.clone(), field_ty.clone());
                 }
-                _ => return None,
+                ast::Pattern::Literal { value, .. } => conditions.push(format!(
+                    "java.util.Objects.equals({access}, {})",
+                    emit_pattern_literal(value)?
+                )),
+                pattern => {
+                    let matched = self.match_case_pattern(
+                        pattern,
+                        &access,
+                        field_ty,
+                        index + conditions.len(),
+                        &bindings,
+                        &binding_types,
+                    )?;
+                    if matched.condition != "true" {
+                        conditions.push(format!("({})", matched.condition));
+                    }
+                    bindings = matched.bindings;
+                    binding_types = matched.binding_types;
+                }
             }
         }
         Some(MatchedCase {
-            condition,
+            condition: conditions.join(" && "),
             bindings,
             binding_types,
         })
@@ -5803,6 +5817,12 @@ impl<'a> SourceBodyEmitter<'a> {
                     .any(|ty| ty.name == *name && ty.kind == TypeKind::Object) =>
             {
                 Some(format!("{}.INSTANCE", self.names.named_type(name)))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "SeekFrom")
+                    && matches!(name.as_str(), "Start" | "Current" | "End") =>
+            {
+                Some(format!("lume.core.SeekFrom.{}.INSTANCE", java_type_name(name)))
             }
             core::Expr::Member { .. }
                 if source_member_segments(expr).is_some_and(|segments| {
@@ -6140,7 +6160,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     && args.is_empty()
                 {
                     if let Some(owner) = core_enum_case_owner(name) {
-                        let arity = if owner == "Option" { 1 } else { 2 };
+                        let arity = core_enum_owner_type_arity(owner)?;
                         return Some(format!(
                             "{value} instanceof lume.core.{owner}.{}{}",
                             java_type_name(name),
@@ -6296,7 +6316,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 span,
             } => {
                 let source_ty = self.expr_type(value, bindings)?;
-                let success_ty = lifted_success_type(&source_ty)?;
+                let mut success_ty = lifted_success_type(&source_ty)?;
+                if success_ty == ir::Type::Unknown {
+                    success_ty = self.expr_type(fallback, bindings)?;
+                }
                 let (case_type, accessor) = match &source_ty {
                     ir::Type::Named { name, .. } if name == "Option" => {
                         ("lume.core.Option.Some<?>".to_string(), "value")
@@ -7033,10 +7056,45 @@ impl<'a> SourceBodyEmitter<'a> {
                 values,
                 span,
             } => {
+                if fields.is_empty() && values.is_empty() && is_java_void_type(expected) {
+                    return Some("lume.core.LumeUnit.INSTANCE".to_string());
+                }
+                if fields.is_empty()
+                    && values.is_empty()
+                    && let ir::Type::Named { name, .. } = expected
+                    && matches!(
+                        name.as_str(),
+                        "Array" | "LinkedList" | "Map" | "Set" | "Vector"
+                    )
+                {
+                    let callee = core::Expr::Identifier {
+                        name: name.clone(),
+                        span: *span,
+                    };
+                    return self.emit_call(&callee, &[], *span, core::CallStyle::Paren, bindings);
+                }
                 if let Some(emitted) =
                     self.emit_record_literal_against(fields, values, bindings, expected)
                 {
                     return Some(emitted);
+                }
+                let expected_is_declared_constructible = match expected {
+                    ir::Type::Named { name, .. } => self.bundle.ir.types.iter().any(|ty| {
+                        ty.name == *name && matches!(ty.kind, TypeKind::Class | TypeKind::Record)
+                    }),
+                    _ => false,
+                };
+                if !expected_is_declared_constructible {
+                    let inferred = self
+                        .source_expr_type(*span)
+                        .or_else(|| self.expr_type(expr, bindings));
+                    if let Some(inferred) = inferred
+                        && inferred != *expected
+                        && let Some(emitted) =
+                            self.emit_record_literal_against(fields, values, bindings, &inferred)
+                    {
+                        return Some(emitted);
+                    }
                 }
                 let ir::Type::Named { name, .. } = expected else {
                     return None;
@@ -7067,6 +7125,18 @@ impl<'a> SourceBodyEmitter<'a> {
                         self.emit_record_literal_against(fields, values, bindings, expected)
                     {
                         return Some(emitted);
+                    }
+                    if let ir::Type::Named { name, .. } = expected
+                        && matches!(
+                            name.as_str(),
+                            "Array" | "LinkedList" | "Map" | "Set" | "Vector"
+                        )
+                    {
+                        let callee = core::Expr::Identifier {
+                            name: name.clone(),
+                            span: *span,
+                        };
+                        return self.emit_call(&callee, args, *span, *style, bindings);
                     }
                     let inferred = self
                         .source_expr_type(*span)
@@ -8119,6 +8189,17 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some(format!("java.lang.Math.{name}({})", args.join(", ")))
             }
             core::Expr::Member { receiver, name, .. }
+                if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "File")
+                    && matches!(
+                        name.as_str(),
+                        "readBytes" | "readText" | "open" | "openText"
+                    )
+                    && args.len() == 1 =>
+            {
+                let arg = self.emit_call_arg(&args[0], bindings)?;
+                Some(format!("lume.core.LumeFile.{name}({arg})"))
+            }
+            core::Expr::Member { receiver, name, .. }
                 if name == "iterator"
                     && args.is_empty()
                     && matches!(
@@ -8499,6 +8580,15 @@ impl<'a> SourceBodyEmitter<'a> {
                     && emitted.len() == 2 =>
             {
                 Some(format!("java.lang.Math.{method}({joined})"))
+            }
+            [owner, method]
+                if owner == "File"
+                    && matches!(
+                        method.as_str(),
+                        "readBytes" | "readText" | "open" | "openText"
+                    ) =>
+            {
+                Some(format!("lume.core.LumeFile.{method}({joined})"))
             }
             [owner] if self.names.is_java_type(owner) => Some(format!(
                 "new {}{}({joined})",
@@ -9148,6 +9238,18 @@ impl<'a> SourceBodyEmitter<'a> {
                 .is_empty()
                 .then(|| "lume.core.Option.None.instance()".to_string());
         }
+        if owner == "SeekFrom" {
+            return args
+                .is_empty()
+                .then(|| format!("lume.core.SeekFrom.{}.INSTANCE", java_type_name(case)));
+        }
+        if owner == "FileError" {
+            return Some(format!(
+                "new lume.core.FileError.{}({})",
+                java_type_name(case),
+                args.join(", ")
+            ));
+        }
         Some(format!(
             "new lume.core.{}.{}<>({})",
             java_type_name(owner),
@@ -9199,6 +9301,14 @@ impl<'a> SourceBodyEmitter<'a> {
                     .map(|param| ir::Type::TypeParam(param.clone()))
                     .collect(),
             });
+        }
+        if matches!(
+            expr,
+            core::Expr::Member { receiver, name, .. }
+                if name == "args"
+                    && matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "OS")
+        ) {
+            return Some(ir::Type::list(ir::Type::Str));
         }
         if let Some(segments) = source_member_segments(expr) {
             let name = segments.join(".");
@@ -11338,6 +11448,14 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "ReferenceId" => Some("lume.core.ReferenceId".to_string()),
         "InvalidIndex" => Some("lume.core.InvalidIndex".to_string()),
         "IntRange" => Some("lume.core.IntRange".to_string()),
+        "FileError" => Some("lume.core.FileError".to_string()),
+        "SeekFrom" => Some("lume.core.SeekFrom".to_string()),
+        "Closeable" => Some("lume.core.LumeCloseable".to_string()),
+        "ByteReader" => Some("lume.core.LumeByteReader".to_string()),
+        "Seekable" => Some("lume.core.LumeSeekable".to_string()),
+        "TextReader" => Some("lume.core.LumeTextReader".to_string()),
+        "FileStream" => Some("lume.core.LumeFileStream".to_string()),
+        "TextFileReader" => Some("lume.core.LumeTextFileReader".to_string()),
         _ => None,
     }
 }
@@ -11400,6 +11518,19 @@ fn core_enum_case_owner(case: &str) -> Option<&'static str> {
         "Some" | "None" => Some("Option"),
         "Ok" | "Err" => Some("Result"),
         "Left" | "Right" => Some("Either"),
+        "NotFound" | "AccessDenied" | "Closed" | "InvalidEncoding" | "IoFailure" => {
+            Some("FileError")
+        }
+        "Start" | "Current" | "End" => Some("SeekFrom"),
+        _ => None,
+    }
+}
+
+fn core_enum_owner_type_arity(owner: &str) -> Option<usize> {
+    match owner {
+        "Option" => Some(1),
+        "Result" | "Either" => Some(2),
+        "FileError" | "SeekFrom" => Some(0),
         _ => None,
     }
 }
@@ -11448,6 +11579,7 @@ fn builtin_method_param_types(
             match (method, arg_len) {
                 ("add", 1) => Some(vec![args[0].clone()]),
                 ("addAll", 1) => Some(vec![receiver.clone()]),
+                ("contains", 1) => Some(vec![args[0].clone()]),
                 ("map", 1) => Some(vec![ir::Type::Function {
                     params: vec![args[0].clone()],
                     ret: Box::new(ir::Type::Unknown),
@@ -11456,6 +11588,7 @@ fn builtin_method_param_types(
                     params: vec![args[0].clone()],
                     ret: Box::new(ir::Type::Unknown),
                 }]),
+                ("flatten", 0) if name == "Vector" => Some(Vec::new()),
                 ("filter", 1) => Some(vec![ir::Type::Function {
                     params: vec![args[0].clone()],
                     ret: Box::new(ir::Type::Bool),
@@ -11562,9 +11695,13 @@ fn builtin_method_return_type(
             match (method, arg_len) {
                 ("append" | "add" | "filter" | "sort" | "take", 1) => Some(receiver.clone()),
                 ("map" | "flatMap", 1) => Some(ir::Type::list(ir::Type::Unknown)),
+                ("flatten", 0) => Some(ir::Type::list(
+                    iterable_item_type(&args[0]).unwrap_or(ir::Type::Unknown),
+                )),
                 ("fold" | "reduce", 2) => Some(ir::Type::Unknown),
                 ("size", 0) => Some(ir::Type::Int),
                 ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
+                ("contains", 1) => Some(ir::Type::Bool),
                 ("at" | "head" | "removeFirst" | "removeLast", 0 | 1) => {
                     Some(ir::Type::option(args[0].clone()))
                 }
@@ -11631,7 +11768,6 @@ fn builtin_method_param_specs(
     match receiver {
         ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
             match (method, arg_len) {
-                ("getOr", 1) => Some(vec![java_param_spec(args[0].clone(), true)]),
                 ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
                 ("toResult" | "toEither", 1) => {
                     Some(vec![java_param_spec(ir::Type::Unknown, true)])
@@ -11641,14 +11777,12 @@ fn builtin_method_param_specs(
         }
         ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
             match (method, arg_len) {
-                ("getOr", 1) => Some(vec![java_param_spec(args[0].clone(), true)]),
                 ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
                 _ => None,
             }
         }
         ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
             match (method, arg_len) {
-                ("getOr", 1) => Some(vec![java_param_spec(args[1].clone(), true)]),
                 ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
                 _ => None,
             }
@@ -11846,6 +11980,18 @@ fn core_enum_case_fields(
         ("Result", "Err", [_, error]) => Some(vec![("error", error.clone())]),
         ("Either", "Left", [left, _]) => Some(vec![("value", left.clone())]),
         ("Either", "Right", [_, right]) => Some(vec![("value", right.clone())]),
+        ("FileError", "NotFound" | "AccessDenied" | "Closed", []) => {
+            Some(vec![("path", ir::Type::Str)])
+        }
+        ("FileError", "InvalidEncoding", []) => {
+            Some(vec![("path", ir::Type::Str), ("offset", ir::Type::Int)])
+        }
+        ("FileError", "IoFailure", []) => Some(vec![
+            ("operation", ir::Type::Str),
+            ("path", ir::Type::Str),
+            ("message", ir::Type::Str),
+        ]),
+        ("SeekFrom", "Start" | "Current" | "End", []) => Some(Vec::new()),
         _ => None,
     }
 }
@@ -12313,7 +12459,7 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
             Some(ir::Type::option(item))
         }
         ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
-        ("Vector" | "LinkedList", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Type", "name" | "qualifiedName")
         | (
             "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
@@ -12340,6 +12486,9 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
             Some(ir::Type::named("Type"))
         }
         ("Field", "isPrivate") => Some(ir::Type::Bool),
+        ("FileStream" | "TextFileReader", "path") => Some(ir::Type::Str),
+        ("FileStream", "position") => Some(ir::Type::Int),
+        ("FileStream" | "TextFileReader", "closed") => Some(ir::Type::Bool),
         _ => None,
     }
 }
