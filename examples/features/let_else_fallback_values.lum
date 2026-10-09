@@ -8,8 +8,8 @@
 # pair Ada 3
 # pair positional1 positional2
 # new new1 new2
-# grouped left right
-# grouped shape a fallback c fallback
+# grouped tuple left right
+# grouped tuple a fallback c fallback
 
 class SomeClass {
     field1 Str
@@ -48,7 +48,7 @@ def contextualNewFallback(value Any) Str {
     field1 + " " + length
 }
 
-def groupedShape(left Str?, right Str?) Str {
+def groupedTuple(left Str?, right Str?) Str {
     let {
         a <- left
         c <- right
@@ -73,6 +73,6 @@ def main() Unit {
     println("pair", pairFallback(None))
     println("new", contextualNewFallback(missing))
 
-    println("grouped", groupedShape(Some("left"), Some("right")))
-    println("grouped shape", groupedShape(Some("unused"), None))
+    println("grouped tuple", groupedTuple(Some("left"), Some("right")))
+    println("grouped tuple", groupedTuple(Some("unused"), None))
 }
