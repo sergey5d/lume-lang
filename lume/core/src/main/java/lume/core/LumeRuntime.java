@@ -10,7 +10,17 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public final class LumeRuntime {
+    private static String[] arguments = new String[0];
+
     private LumeRuntime() {
+    }
+
+    public static void setArgs(String[] args) {
+        arguments = args == null ? new String[0] : args.clone();
+    }
+
+    public static LumeVector<String> args() {
+        return LumeVector.from(Arrays.asList(arguments));
     }
 
     public static LumeUnit print(Object... values) {

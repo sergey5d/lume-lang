@@ -4980,6 +4980,12 @@ impl<'a> FunctionLowerer<'a> {
                 style,
                 ..
             } => self.infer_call_type(callee, args, *style, overrides),
+            Expr::Member { receiver, name, .. }
+                if name == "args"
+                    && matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "OS") =>
+            {
+                ir::Type::list(ir::Type::Str)
+            }
             Expr::Member { receiver, name, .. } => {
                 if name == "runtimeType" {
                     let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
@@ -6683,6 +6689,16 @@ impl<'a> FunctionLowerer<'a> {
                 };
                 self.lower_rvalue_with_expected(&call, expected)
             }
+            Expr::Member { receiver, name, .. }
+                if name == "args"
+                    && matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "OS") =>
+            {
+                Some(ir::RValue::Call {
+                    callee: ir::Callee::Intrinsic(ir::Intrinsic::ProgramArgs),
+                    args: Vec::new(),
+                    structural: false,
+                })
+            }
             Expr::Member { receiver, name, .. } => {
                 let receiver_ty = self.infer_expr_type(receiver);
                 if self.is_getter_member_for_type(&receiver_ty, name) {
@@ -7794,6 +7810,21 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lower_callee(&mut self, callee: &Expr) -> ir::Callee {
+        if let Expr::Member { receiver, name, .. } = callee
+            && !self.callee_receiver_is_static_namespace(receiver)
+        {
+            let receiver_ty = self.infer_expr_type(receiver);
+            if self.is_getter_member_for_type(&receiver_ty, name)
+                && matches!(self.infer_expr_type(callee), ir::Type::Function { .. })
+            {
+                return ir::Callee::Indirect(self.lower_expr(callee));
+            }
+            return ir::Callee::Method {
+                receiver: self.lower_expr(receiver),
+                method: name.clone(),
+            };
+        }
+
         if let Some(path) = expr_path(callee) {
             let path = self.canonical_enum_case_path(&path);
             if let Some(name) = self.canonical_declared_type_path(&path) {
@@ -7858,6 +7889,23 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         ir::Callee::Indirect(self.lower_expr(callee))
+    }
+
+    fn callee_receiver_is_static_namespace(&self, receiver: &Expr) -> bool {
+        let Some(path) = expr_path(receiver) else {
+            return false;
+        };
+        if matches!(path.as_slice(), [owner, stream] if owner == "OS" && matches!(stream.as_str(), "stdout" | "stderr"))
+        {
+            return true;
+        }
+        self.canonical_declared_type_path(&path).is_some()
+            || declared_type_exists(self.program, &path.join("."))
+            || (path.len() == 1
+                && (runtime_callable_root_name(&path[0])
+                    || matches!(path[0].as_str(), "Int" | "Float" | "Option")
+                    || declared_type_exists(self.program, &path[0])
+                    || single_type_exists(self.program, &path[0])))
     }
 
     fn lower_implicit_method_callee(&mut self, name: &str) -> Option<ir::Callee> {

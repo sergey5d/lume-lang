@@ -8052,10 +8052,14 @@ impl<'a> Checker<'a> {
         if let Some(sig) = self.lookup_any_object(type_name) {
             if let Some(methods) = self.method_sigs_for_type(&sig, name) {
                 let first = methods.first()?;
-                return Some(Ty::Function(
-                    first.params.iter().map(|param| param.ty.clone()).collect(),
-                    Box::new(first.ret.clone()),
-                ));
+                return Some(if first.getter {
+                    first.ret.clone()
+                } else {
+                    Ty::Function(
+                        first.params.iter().map(|param| param.ty.clone()).collect(),
+                        Box::new(first.ret.clone()),
+                    )
+                });
             }
         }
         let sig = self.lookup_any_non_object_type(type_name)?;

@@ -3,6 +3,7 @@
 # fmt 7
 # pair left 9
 # out line
+# args 0
 # done
 
 def main() Unit {
@@ -12,5 +13,6 @@ def main() Unit {
     OS.stdout.printf("pair %s %d\n", "left", 9)
     OS.stdout.print("out")
     OS.stdout.println(" line")
+    println("args", OS.args.size)
     println("done")
 }

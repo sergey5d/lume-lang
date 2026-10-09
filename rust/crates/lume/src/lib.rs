@@ -23,8 +23,8 @@ pub use diagnostic::{Diagnostic, Severity};
 pub use diagnostic_render::{render_diagnostic, render_path_diagnostic, render_path_diagnostics};
 pub use formatter::{FormatResult, format_source};
 pub use interpreter::{
-    PathRunResult, RunResult, run_path, run_program, run_program_entry, run_program_specs,
-    test_path,
+    PathRunResult, RunResult, run_path, run_path_with_args, run_program, run_program_entry,
+    run_program_entry_with_args, run_program_specs, test_path,
 };
 pub use java_backend::{JavaBackendOptions, JavaBackendResult, generate_java_path};
 pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};

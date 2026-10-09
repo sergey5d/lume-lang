@@ -194,6 +194,7 @@ fn render_entrypoint_runner(bundle: &BackendBundle, package: &JavaPackage) -> Op
     out.push_str(&format!("final class {class_name} {{\n"));
     out.push_str(&format!("    private {class_name}() {{}}\n\n"));
     out.push_str("    public static void main(String[] args) {\n");
+    out.push_str("        lume.core.LumeRuntime.setArgs(args);\n");
     if is_java_void_type(&entry.return_ty) {
         out.push_str(&format!("        {module_name}.{method_name}();\n"));
     } else {
@@ -5975,6 +5976,12 @@ impl<'a> SourceBodyEmitter<'a> {
                 self.emit_expr(receiver, bindings)?
             )),
             core::Expr::Member { receiver, name, .. }
+                if name == "args"
+                    && matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "OS") =>
+            {
+                Some("lume.core.LumeRuntime.args()".to_string())
+            }
+            core::Expr::Member { receiver, name, .. }
                 if matches!(name.as_str(), "size" | "isEmpty" | "nonEmpty")
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
@@ -8551,6 +8558,9 @@ impl<'a> SourceBodyEmitter<'a> {
             .collect::<Option<Vec<_>>>()?;
 
         match intrinsic {
+            ir::Intrinsic::ProgramArgs if emitted.is_empty() => {
+                Some("lume.core.LumeRuntime.args()".to_string())
+            }
             ir::Intrinsic::Print => Some(format!(
                 "lume.core.LumeRuntime.print({})",
                 emitted.join(", ")
@@ -9335,6 +9345,9 @@ impl<'a> SourceBodyEmitter<'a> {
                 .lowered_args
                 .first()
                 .and_then(|arg| emitter.operand_type(arg)),
+            ir::Callee::Intrinsic(ir::Intrinsic::ProgramArgs) => {
+                Some(ir::Type::list(ir::Type::Str))
+            }
             ir::Callee::Intrinsic(
                 ir::Intrinsic::Print
                 | ir::Intrinsic::Println
@@ -10658,6 +10671,9 @@ impl<'a> JavaIrSupport<'a> {
                     name: "Result".to_string(),
                     args: vec![ir::Type::Unit, ir::Type::Unknown],
                 }),
+                ir::Callee::Intrinsic(ir::Intrinsic::ProgramArgs) => {
+                    Some(ir::Type::list(ir::Type::Str))
+                }
                 ir::Callee::Intrinsic(
                     ir::Intrinsic::Print
                     | ir::Intrinsic::Println

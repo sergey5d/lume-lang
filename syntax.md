@@ -562,9 +562,24 @@ OS.println("hello")
 OS.printf("value=%d\n", 42)
 OS.stdout.println("hello")
 OS.stderr.println("oops")
+for argument <- OS.args {
+    println(argument)
+}
 ```
 
 `OS.stdout` and `OS.stderr` implement `Printer`.
+
+`OS.args` is a `Vector[Str]` snapshot of the program arguments. Pass arguments
+to the interpreter after `--`; the command, source path, optional entry name,
+and separator are not included:
+
+```sh
+lume run app.lum -- first "two words"
+lume run app.lum alternateEntry -- first "two words"
+```
+
+Each `OS.args` access returns a fresh vector, so mutating it does not change the
+process argument snapshot.
 
 `Math.min` and `Math.max` select the smaller or larger of two values. Both
 arguments must be the same numeric type; overloads are available for `Int` and

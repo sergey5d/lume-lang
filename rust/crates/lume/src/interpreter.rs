@@ -37,7 +37,15 @@ pub fn run_program(program: &ir::Program) -> RunResult {
 }
 
 pub fn run_program_entry(program: &ir::Program, requested_entry: Option<&str>) -> RunResult {
-    let mut interpreter = Interpreter::new(program);
+    run_program_entry_with_args(program, requested_entry, &[])
+}
+
+pub fn run_program_entry_with_args(
+    program: &ir::Program,
+    requested_entry: Option<&str>,
+    program_args: &[String],
+) -> RunResult {
+    let mut interpreter = Interpreter::new(program, program_args);
     match interpreter.run(requested_entry) {
         Ok(Some(value)) => RunResult {
             diagnostics: Vec::new(),
@@ -58,7 +66,7 @@ pub fn run_program_entry(program: &ir::Program, requested_entry: Option<&str>) -
 }
 
 pub fn run_program_specs(program: &ir::Program) -> RunResult {
-    let mut interpreter = Interpreter::new(program);
+    let mut interpreter = Interpreter::new(program, &[]);
     let diagnostics = interpreter.run_specs();
     RunResult {
         diagnostics,
@@ -70,6 +78,14 @@ pub fn run_program_specs(program: &ir::Program) -> RunResult {
 pub fn run_path(
     path: impl AsRef<Path>,
     requested_entry: Option<&str>,
+) -> Result<PathRunResult, String> {
+    run_path_with_args(path, requested_entry, &[])
+}
+
+pub fn run_path_with_args(
+    path: impl AsRef<Path>,
+    requested_entry: Option<&str>,
+    program_args: &[String],
 ) -> Result<PathRunResult, String> {
     let path = path.as_ref();
     let checked = check_path(path)?;
@@ -107,7 +123,7 @@ pub fn run_path(
     let lowered_program = lowered
         .program
         .expect("ir program after successful lowering");
-    let run = run_program_entry(&lowered_program, requested_entry);
+    let run = run_program_entry_with_args(&lowered_program, requested_entry, program_args);
     Ok(PathRunResult {
         diagnostics: run
             .diagnostics
@@ -1158,11 +1174,12 @@ pub(crate) struct Interpreter<'a> {
     globals: Vec<Value>,
     globals_ready: bool,
     singletons: Vec<Option<Value>>,
+    program_args: Vec<String>,
     output: String,
 }
 
 impl<'a> Interpreter<'a> {
-    fn new(program: &'a ir::Program) -> Self {
+    fn new(program: &'a ir::Program, program_args: &[String]) -> Self {
         let runtime = runtime::RuntimeProgram::from_ir(program);
         let singleton_count = runtime.types.len();
         let mut interpreter = Self {
@@ -1171,6 +1188,7 @@ impl<'a> Interpreter<'a> {
             globals: Vec::new(),
             globals_ready: false,
             singletons: vec![None; singleton_count],
+            program_args: program_args.to_vec(),
             output: String::new(),
         };
         interpreter.globals = interpreter
@@ -3938,6 +3956,18 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         match intrinsic {
+            ir::Intrinsic::ProgramArgs => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(span, "OS.args expects no arguments"));
+                }
+                Ok(Value::list(
+                    self.program_args
+                        .iter()
+                        .cloned()
+                        .map(Value::String)
+                        .collect(),
+                ))
+            }
             ir::Intrinsic::Print => self.invoke_print(false, args, span),
             ir::Intrinsic::Println => self.invoke_print(true, args, span),
             ir::Intrinsic::Printf => self.invoke_printf(args, span),

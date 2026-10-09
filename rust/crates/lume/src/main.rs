@@ -2,8 +2,8 @@ use std::{env, fs, path::Path, process::ExitCode};
 
 use lume::{
     Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, format_source,
-    generate_java_path, lex, parse_program, render_diagnostic, render_path_diagnostic, run_path,
-    test_path,
+    generate_java_path, lex, parse_program, render_diagnostic, render_path_diagnostic,
+    run_path_with_args, test_path,
 };
 
 fn main() -> ExitCode {
@@ -132,8 +132,27 @@ fn run_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let requested_entry = args.next();
-    match run_path(&path, requested_entry.as_deref()) {
+    let remaining = args.collect::<Vec<_>>();
+    let separator = remaining.iter().position(|arg| arg == "--");
+    let (requested_entry, program_args) = match separator {
+        Some(index) if index <= 1 => (
+            remaining.first().filter(|_| index == 1).map(String::as_str),
+            &remaining[index + 1..],
+        ),
+        Some(_) => {
+            eprintln!("'run' accepts at most one entry name before '--'");
+            print_usage();
+            return ExitCode::from(2);
+        }
+        None if remaining.len() <= 1 => (remaining.first().map(String::as_str), &[][..]),
+        None => {
+            eprintln!("program arguments must follow '--'");
+            print_usage();
+            return ExitCode::from(2);
+        }
+    };
+
+    match run_path_with_args(&path, requested_entry, program_args) {
         Ok(result) => {
             if !result.diagnostics.is_empty() {
                 print_path_diagnostics(&result.diagnostics);
@@ -208,7 +227,7 @@ fn print_usage() {
     eprintln!("  lume parse <file>");
     eprintln!("  lume fmt <file>");
     eprintln!("  lume check <file>");
-    eprintln!("  lume run <file> [entry]");
+    eprintln!("  lume run <file> [entry] [-- <args>...]");
     eprintln!("  lume test <file>");
     eprintln!("  lume gen <file> --out <dir> [--classpath <path>]");
 }

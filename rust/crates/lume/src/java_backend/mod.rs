@@ -2254,7 +2254,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        run_path,
+        run_path, run_path_with_args,
         source::{LineColumn, Span},
     };
 
@@ -2532,6 +2532,7 @@ def main() Unit {
 
         let runner = fs::read_to_string(out.join("demo/app/AppMain.java")).expect("read runner");
         assert!(runner.contains("public static void main(String[] args)"));
+        assert!(runner.contains("LumeRuntime.setArgs(args);"));
         assert!(runner.contains("AppModule.main();"));
 
         let shape = fs::read_to_string(out.join("demo/app/Point.java")).expect("read shape");
@@ -2565,6 +2566,77 @@ def main() Unit {
             fs::read_to_string(out.join("demo/app/Named.java")).expect("read interface");
         assert!(interface.contains("interface Named"));
         assert!(interface.contains("String name();"));
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_forwards_program_arguments_to_os_args() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping program-argument Java test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-program-args");
+        let source = temp.join("program_args.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/args
+
+def main() Unit {
+    received = OS.args
+    received.add("local-only")
+    fresh = OS.args
+    println(fresh.size, fresh[0], fresh[1])
+}
+"#,
+        )
+        .expect("write source");
+
+        let arguments = vec!["alpha".to_string(), "two words".to_string()];
+        let interpreted =
+            run_path_with_args(&source, None, &arguments).expect("run interpreter with arguments");
+        assert!(interpreted.diagnostics.is_empty());
+        let expected = interpreter_stdout(interpreted);
+        assert_eq!(expected, "2 alpha two words\n");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let module = fs::read_to_string(out.join("demo/args/ArgsModule.java"))
+            .expect("read generated module");
+        assert!(module.contains("LumeRuntime.args()"));
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.args.ArgsMain")
+                .arg("alpha")
+                .arg("two words"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            expected
+        );
 
         let _ = fs::remove_dir_all(temp);
     }
@@ -3337,7 +3409,7 @@ def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
 
         if command_available("javac") {
             let classes = out.join("classes");
-            let mut sources = Vec::new();
+            let mut sources = core_runtime_sources();
             collect_java_sources(&out, &mut sources).expect("collect generated Java");
             fs::create_dir_all(&classes).expect("create classes dir");
             run_checked(

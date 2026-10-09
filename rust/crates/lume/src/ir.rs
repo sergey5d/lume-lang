@@ -584,6 +584,7 @@ pub enum Callee {
 /// Built-in runtime operations that lowering models without user code.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intrinsic {
+    ProgramArgs,
     Print,
     Println,
     Printf,
