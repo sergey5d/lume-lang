@@ -2208,7 +2208,12 @@ impl<'a> Resolver<'a> {
                 }
             }
             Expr::Call { callee, args, .. } => {
-                if let Some((receiver, type_args)) = generic_call_callee_parts(callee) {
+                if let Some((receiver, type_args)) = generic_call_callee_parts(callee)
+                    && self.can_use_explicit_type_arguments(receiver)
+                    && type_args
+                        .iter()
+                        .all(|type_arg| self.is_known_type_ref(type_arg))
+                {
                     self.resolve_expr(receiver);
                     for type_arg in &type_args {
                         self.resolve_type_ref(Some(type_arg));
@@ -2424,6 +2429,56 @@ impl<'a> Resolver<'a> {
                 self.pop_scope();
             }
             Expr::Group { inner, .. } => self.resolve_expr(inner),
+        }
+    }
+
+    fn can_use_explicit_type_arguments(&self, receiver: &Expr) -> bool {
+        match receiver {
+            Expr::Identifier { name, .. } => {
+                if self.lookup_value(name).is_some()
+                    || self.is_field_hint(name)
+                    || self.is_getter_hint(name)
+                {
+                    return false;
+                }
+                self.functions.contains_key(name)
+                    || self.imported_functions.contains_key(name)
+                    || self.is_implicit_method_call(receiver)
+                    || self.lookup_type(name).is_some_and(|info| info.arity > 0)
+                    || self
+                        .lookup_object_info(name)
+                        .is_some_and(|info| info.arity > 0)
+                    || self.ambient.values.contains(name)
+            }
+            // Name and receiver types are finalized during type checking. A member can
+            // denote a generic module function, static method, or instance method.
+            Expr::Member { .. } => true,
+            _ => false,
+        }
+    }
+
+    fn is_known_type_ref(&self, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Wildcard { .. } => true,
+            TypeRef::Named { name, args, .. } => {
+                (self.lookup_type(name).is_some()
+                    || self.lookup_alias(name).is_some()
+                    || self.is_type_param(name))
+                    && args.iter().all(|arg| self.is_known_type_ref(arg))
+            }
+            TypeRef::Tuple { fields, .. } => {
+                fields.iter().all(|field| self.is_known_type_ref(&field.ty))
+            }
+            TypeRef::Record { fields, .. } => {
+                fields.iter().all(|field| self.is_known_type_ref(&field.ty))
+            }
+            TypeRef::Function { params, ret, .. } => {
+                params.iter().all(|param| self.is_known_type_ref(param))
+                    && self.is_known_type_ref(ret)
+            }
+            TypeRef::Union { members, .. } => {
+                members.iter().all(|member| self.is_known_type_ref(member))
+            }
         }
     }
 
@@ -3307,6 +3362,11 @@ fn generic_call_type_ref(expr: &Expr) -> Option<TypeRef> {
     match expr {
         Expr::Identifier { name, span } => Some(TypeRef::Named {
             name: name.clone(),
+            args: Vec::new(),
+            span: *span,
+        }),
+        Expr::Member { span, .. } => Some(TypeRef::Named {
+            name: member_segments(expr)?.join("."),
             args: Vec::new(),
             span: *span,
         }),

@@ -4,6 +4,8 @@
 # typed Ada 42
 # typed fallback
 # head 1 tail 3
+# prefix 7
+# prefix fallback
 # all 3
 # empty
 # single 9
@@ -22,6 +24,11 @@ def typedSummary(values [Any]) Str {
 def headTail(values [Int]) Str {
     let [head, ...tail] = values else return "empty head"
     "head " + head + " tail " + tail.size
+}
+
+def leadingPair(values [Int]) Str {
+    let [left, right, ...] = values else return "prefix fallback"
+    "prefix " + (left + right)
 }
 
 def copyAll(values [Int]) Str {
@@ -43,6 +50,8 @@ def main() Unit {
     println(typedSummary(["Ada", 42]))
     println(typedSummary(["Ada", "wrong"]))
     println(headTail([1, 2, 3, 4]))
+    println(leadingPair([3, 4, 5]))
+    println(leadingPair([3]))
     println(copyAll([1, 2, 3]))
     println(describe([]))
     println(describe([9]))

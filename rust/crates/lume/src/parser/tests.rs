@@ -3825,6 +3825,36 @@ def run(values [Any]) Unit {
 }
 
 #[test]
+fn parses_bare_list_pattern_rest_as_ignored() {
+    let result = parse(
+        r#"
+def run(values [Int]) Unit {
+    let [first, second, ...] = values else return ()
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+    assert!(matches!(
+        &block.statements[0],
+        Stmt::LetElse(LetElseStmt {
+            pattern: Pattern::List {
+                elements,
+                rest: Some(rest),
+                ..
+            },
+            ..
+        }) if elements.len() == 2 && rest.name == "_"
+    ));
+}
+
+#[test]
 fn rejects_plain_let_identifier_binding() {
     let result = parse(
         r#"

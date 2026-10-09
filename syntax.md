@@ -523,10 +523,20 @@ Rules:
 - `Str.isEmpty` reports whether the string contains no characters
 - `Str.nonEmpty` reports whether the string contains at least one character
 - `Str.trim()` removes leading and trailing whitespace
+- `Str.trimLeft()` and `Str.trimRight()` remove whitespace from one side
+- `Str.toLower()` and `Str.toUpper()` use Unicode case conversion and are not
+  locale-sensitive
+- `Str.contains(part)` performs literal substring membership; `contains` is the
+  common membership spelling for strings and collections
+- `Str.indexOf(part)` returns the zero-based Unicode-scalar index of the first
+  literal match, or `-1` when no match exists
 - `Str.split(separator)` treats `separator` as literal text and returns a
   growable `Vector[Str]`
 - `Str.splitRegex(pattern)` explicitly interprets `pattern` as a regular
   expression and returns a growable `Vector[Str]`
+- `Str.replaceFirstRegex(pattern, replacement)` and
+  `Str.replaceAllRegex(pattern, replacement)` make regular-expression
+  replacement explicit in the method name
 
 Raw strings preserve their contents without escapes or interpolation:
 
@@ -2150,17 +2160,24 @@ Rules:
 - If no argument determines `A`, pass it explicitly: `metadata[User]()`.
 - Type declarations cannot use `reified`: `class Box[reified A]` is invalid.
 
-Explicit generic application has priority over indexing when it is immediately
-called. Any expression of the form `callee[...](...)` is parsed as a generic
-call. To call a function value returned from indexing, group the indexed
-expression:
+Bracket application is resolved from the expression before the brackets, not
+from the presence of a following call. A generic function, method, or type uses
+the brackets as explicit type arguments. An indexable value uses them as an
+index or key expression. Parentheses then invoke whichever callable value that
+operation produces:
 
 ```txt
 metadata[User]()       # explicit generic call
 entries["a"]           # indexing
-(handlers[key])()      # call an indexed function value
-handlers[key]()        # invalid: parsed as generic call syntax
+handlers[key]()        # index, then call the selected function value
+service.handlers[key]() # read a getter, index its result, then call it
 ```
+
+The receiver and the bracket contents are resolved semantically. A type name is
+a type argument only when the receiver supports generic application; a value
+such as `typeOf[User]` remains an ordinary index expression when the receiver is
+indexable. Getter-local type parameters are not supported, so a non-generic
+getter returning a collection is always read before its result is indexed.
 
 Generic types follow the same explicit-or-inferred construction rule. A
 constructor invocation may provide every type argument, or omit the complete
@@ -3493,6 +3510,10 @@ let [head, ...tail] = values else {
     return Err("empty vector")
 }
 
+let [left, right, ...] = values else {
+    return Err("expected at least two values")
+}
+
 let [...all] = values
 ```
 
@@ -3503,7 +3524,7 @@ Vector pattern rules:
 - `[a, ...rest]` matches one or more elements and binds `rest` as `[T]`.
 - `[...rest]` matches any vector and binds a shallow vector tail copy as `[T]`.
 - Only one `...rest` is allowed, and it must be last.
-- `..._` ignores the remaining elements.
+- Bare `...` ignores the remaining elements; `..._` is the equivalent explicit spelling.
 - Vector patterns are for `Vector[T]` / `[T]`; `Array[T]` is not part of this pattern surface.
 
 Grouped refutable bindings share one fallback:

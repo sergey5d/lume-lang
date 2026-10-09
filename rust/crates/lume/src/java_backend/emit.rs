@@ -8192,6 +8192,59 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. }
+                if matches!(
+                    name.as_str(),
+                    "trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper"
+                ) && args.is_empty()
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                let helper = match name.as_str() {
+                    "trim" => "stringTrim",
+                    "trimLeft" => "stringTrimLeft",
+                    "trimRight" => "stringTrimRight",
+                    "toLower" => "stringToLower",
+                    "toUpper" => "stringToUpper",
+                    _ => unreachable!(),
+                };
+                Some(format!(
+                    "lume.core.LumeRuntime.{helper}({})",
+                    self.emit_receiver_expr(receiver, bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if matches!(name.as_str(), "contains" | "indexOf")
+                    && args.len() == 1
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                let helper = if name == "contains" {
+                    "stringContains"
+                } else {
+                    "stringIndexOf"
+                };
+                Some(format!(
+                    "lume.core.LumeRuntime.{helper}({}, {})",
+                    self.emit_receiver_expr(receiver, bindings)?,
+                    self.emit_call_arg(&args[0], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if matches!(name.as_str(), "replaceFirstRegex" | "replaceAllRegex")
+                    && args.len() == 2
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                let helper = if name == "replaceFirstRegex" {
+                    "stringReplaceFirstRegex"
+                } else {
+                    "stringReplaceAllRegex"
+                };
+                Some(format!(
+                    "lume.core.LumeRuntime.{helper}({}, {}, {})",
+                    self.emit_receiver_expr(receiver, bindings)?,
+                    self.emit_call_arg(&args[0], bindings)?,
+                    self.emit_call_arg(&args[1], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
                 if name == "runeAt"
                     && args.len() == 1
                     && self.is_java_string_receiver(receiver, bindings) =>
@@ -8794,11 +8847,19 @@ impl<'a> SourceBodyEmitter<'a> {
         name: &str,
         bindings: &HashMap<String, String>,
     ) -> String {
-        if self.is_java_string_compare(receiver, name, bindings) {
-            "compareTo".to_string()
-        } else {
-            java_member_name(name)
+        if self.is_java_string_receiver(receiver, bindings) {
+            match name {
+                "compare" => return "compareTo".to_string(),
+                "trimLeft" => return "stripLeading".to_string(),
+                "trimRight" => return "stripTrailing".to_string(),
+                "toLower" => return "toLowerCase".to_string(),
+                "toUpper" => return "toUpperCase".to_string(),
+                "replaceFirstRegex" => return "replaceFirst".to_string(),
+                "replaceAllRegex" => return "replaceAll".to_string(),
+                _ => {}
+            }
         }
+        java_member_name(name)
     }
 
     fn is_java_string_compare(
@@ -11348,8 +11409,17 @@ fn builtin_method_param_types(
 ) -> Option<Vec<ir::Type>> {
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
-            ("split" | "splitRegex" | "indexOf" | "compare", 1) => Some(vec![ir::Type::Str]),
-            ("size" | "trim" | "isEmpty" | "nonEmpty", 0) => Some(Vec::new()),
+            ("split" | "splitRegex" | "contains" | "indexOf" | "compare", 1) => {
+                Some(vec![ir::Type::Str])
+            }
+            ("replaceFirstRegex" | "replaceAllRegex", 2) => {
+                Some(vec![ir::Type::Str, ir::Type::Str])
+            }
+            (
+                "size" | "trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper" | "isEmpty"
+                | "nonEmpty",
+                0,
+            ) => Some(Vec::new()),
             ("runeAt", 1) => Some(vec![ir::Type::Int]),
             _ => None,
         };
@@ -11419,8 +11489,9 @@ fn builtin_method_return_type(
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
             ("split" | "splitRegex", 1) => Some(ir::Type::list(ir::Type::Str)),
-            ("trim", 0) => Some(ir::Type::Str),
-            ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
+            ("trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper", 0) => Some(ir::Type::Str),
+            ("replaceFirstRegex" | "replaceAllRegex", 2) => Some(ir::Type::Str),
+            ("isEmpty" | "nonEmpty", 0) | ("contains", 1) => Some(ir::Type::Bool),
             ("size", 0) | ("indexOf" | "compare", 1) => Some(ir::Type::Int),
             ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
             _ => None,

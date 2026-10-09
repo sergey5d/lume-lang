@@ -67,6 +67,6 @@ def main() Int {
 
     println("assigned", topLevelFn(UserEntity { id: 3, name: "Katherine" }).name)
     println("assigned instance", instanceFn(UserEntity { id: 4, name: "Alan" }).name)
-    println("indexed", (handlers[0])())
+    println("indexed", handlers[0]())
     0
 }

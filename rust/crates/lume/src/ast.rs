@@ -589,7 +589,7 @@ pub struct RecordPatternField {
     pub span: Span,
 }
 
-/// The `...rest` tail in a list pattern.
+/// The `...rest`, `..._`, or bare `...` tail in a list pattern.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListPatternRest {
     pub name: String,

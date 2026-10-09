@@ -3,8 +3,10 @@ package lume.core;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public final class LumeRuntime {
@@ -85,6 +87,43 @@ public final class LumeRuntime {
 
     public static LumeVector<String> stringSplitRegex(String text, String pattern) {
         return LumeVector.from(Arrays.asList(text.split(pattern, -1)));
+    }
+
+    public static String stringTrim(String text) {
+        return text.strip();
+    }
+
+    public static String stringTrimLeft(String text) {
+        return text.stripLeading();
+    }
+
+    public static String stringTrimRight(String text) {
+        return text.stripTrailing();
+    }
+
+    public static String stringToLower(String text) {
+        return text.toLowerCase(Locale.ROOT);
+    }
+
+    public static String stringToUpper(String text) {
+        return text.toUpperCase(Locale.ROOT);
+    }
+
+    public static Boolean stringContains(String text, String part) {
+        return text.contains(part);
+    }
+
+    public static Long stringIndexOf(String text, String part) {
+        int utf16Index = text.indexOf(part);
+        return utf16Index < 0 ? -1L : (long) text.codePointCount(0, utf16Index);
+    }
+
+    public static String stringReplaceFirstRegex(String text, String pattern, String replacement) {
+        return Pattern.compile(pattern).matcher(text).replaceFirst(replacement);
+    }
+
+    public static String stringReplaceAllRegex(String text, String pattern, String replacement) {
+        return Pattern.compile(pattern).matcher(text).replaceAll(replacement);
     }
 
     public static Long stringSize(String text) {

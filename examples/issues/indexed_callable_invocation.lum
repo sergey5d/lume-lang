@@ -1,0 +1,33 @@
+# EXPECT:
+# generic User
+# literal 26
+# variable 26
+# getter 26
+# method 27
+
+module indexed_callable_invocation
+
+class User {}
+
+class HandlerService {
+    stored [fn() Int]
+
+    def handlers [fn() Int] = stored
+
+    def echo[T](value T) T = value
+}
+
+def metadata[reified T]() Type[T] =
+    typeOf[T]
+
+def main() Unit {
+    handlers [fn() Int] = [() => 26]
+    index = 0
+    service = HandlerService(handlers)
+
+    println("generic", metadata[User]().name!)
+    println("literal", handlers[0]())
+    println("variable", handlers[index]())
+    println("getter", service.handlers[index]())
+    println("method", service.echo[Int](27))
+}

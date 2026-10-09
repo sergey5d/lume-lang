@@ -1,10 +1,29 @@
 # EXPECT:
 # alpha beta gamma
 # true true false false
+# [LuMe] [LuMe  ] [  LuMe] lume LUME
+# true false
+# a# b22 a# b#
 
 def main() Unit {
     parts Vector[Str] = "  alpha, beta  ".trim().splitRegex("\s*,\s*")
     parts.add("gamma")
     println(parts[0], parts[1], parts[2])
     println("".isEmpty, "lume".nonEmpty, "".nonEmpty, "lume".isEmpty)
+
+    text = "  LuMe  "
+    println(
+        "[${text.trim()}]",
+        "[${text.trimLeft()}]",
+        "[${text.trimRight()}]",
+        text.toLower().trim(),
+        text.toUpper().trim()
+    )
+    println(text.contains("LuMe"), text.contains("missing"))
+
+    digits = "a1 b22"
+    println(
+        digits.replaceFirstRegex("\d+", "#"),
+        digits.replaceAllRegex("\d+", "#")
+    )
 }

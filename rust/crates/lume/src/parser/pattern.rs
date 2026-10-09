@@ -637,12 +637,14 @@ impl<'a> Parser<'a> {
                 self.skip_newlines();
                 if self.match_token(TokenKind::Ellipsis) {
                     let rest_start = self.previous_span();
-                    let (name, name_span) =
-                        self.expect_binding_name("expected rest binding name after '...'")?;
-                    rest = Some(ListPatternRest {
-                        name,
-                        span: rest_start.cover(name_span),
-                    });
+                    let (name, span) = if self.at(TokenKind::RBracket) {
+                        ("_".to_string(), rest_start)
+                    } else {
+                        let (name, name_span) =
+                            self.expect_binding_name("expected rest binding name after '...'")?;
+                        (name, rest_start.cover(name_span))
+                    };
+                    rest = Some(ListPatternRest { name, span });
                     self.skip_newlines();
                     if self.match_token(TokenKind::Comma) {
                         let comma = self.previous_span();

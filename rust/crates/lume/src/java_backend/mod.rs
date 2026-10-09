@@ -5502,6 +5502,11 @@ def describeList(values [Int]) Str = match values {
     case _ => "short"
 }
 
+def leadingPair(values [Int]) Int {
+    let [first, second, ...] = values else return -1
+    first + second
+}
+
 def main() Unit {
     println(describe(User { name: "Ada", location: Location { city: "Tampa" }, age: 18 }))
     println(describe(User { name: "Bob", location: Location { city: "Miami" }, age: 19 }))
@@ -5512,6 +5517,8 @@ def main() Unit {
     println(describeNoneAlias(None))
     println(describePayload(Payload.Item(7)))
     println(describeList([10, 20, 30, 40]))
+    println(leadingPair([10, 20, 30]))
+    println(leadingPair([10]))
 }
 "#,
         )
@@ -5566,7 +5573,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada Tampa Ada\nother\nother\napproved\nready\n5 5\nNone\n7 7\n10 20 2 4\n"
+            "Ada Tampa Ada\nother\nother\napproved\nready\n5 5\nNone\n7 7\n10 20 2 4\n30\n-1\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -6985,6 +6992,83 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_runs_indexed_callable_invocation() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java indexed callable test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-indexed-callable");
+        let source = temp.join("indexed_callable.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/indexedcall
+
+class User {}
+
+class HandlerService {
+    stored [fn() Int]
+
+    def handlers [fn() Int] = stored
+
+    def echo[T](value T) T = value
+}
+
+def metadata[reified T]() Type[T] = typeOf[T]
+
+def main() Unit {
+    handlers [fn() Int] = [() => 26]
+    index = 0
+    service = HandlerService(handlers)
+
+    println(metadata[User]().name!)
+    println(handlers[0]())
+    println(handlers[index]())
+    println(service.handlers[index]())
+    println(service.echo[Int](27))
+}
+"#,
+        )
+        .expect("write source");
+
+        let interpreted = run_path(&source, None).expect("run interpreter");
+        assert!(interpreted.diagnostics.is_empty());
+        let expected = interpreter_stdout(interpreted);
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.indexedcall.IndexedcallMain"),
+            "java",
+        );
+        let actual = String::from_utf8(output.stdout).expect("java stdout utf8");
+        assert_eq!(actual, expected);
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_runs_indexed_collection_methods() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java LinkedList test because javac/java is not available");
@@ -7092,7 +7176,7 @@ def main() Unit {
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
-            r#"
+            r##"
 module demo/stringmethods
 
 def main() Unit {
@@ -7112,8 +7196,19 @@ def main() Unit {
     println("lume".isEmpty)
     println("😀a".size)
     println("😀a".runeAt(1)! == "a".runeAt(0)!)
+    text = "  LuMe  "
+    println("[${text.trim()}]")
+    println("[${text.trimLeft()}]")
+    println("[${text.trimRight()}]")
+    println(text.toLower().trim())
+    println(text.toUpper().trim())
+    println(text.contains("LuMe"))
+    println(text.contains("missing"))
+    println("😀ab".indexOf("a"))
+    println("a1 b22".replaceFirstRegex("\d+", "#"))
+    println("a1 b22".replaceAllRegex("\d+", "#"))
 }
-"#,
+"##,
         )
         .expect("write source");
 
@@ -7131,6 +7226,14 @@ def main() Unit {
         assert!(module.contains("LumeRuntime.stringSplitRegex"));
         assert!(module.contains("LumeRuntime.stringRuneAt"));
         assert!(module.contains("LumeRuntime.stringSize"));
+        assert!(module.contains("LumeRuntime.stringTrimLeft"));
+        assert!(module.contains("LumeRuntime.stringTrimRight"));
+        assert!(module.contains("LumeRuntime.stringToLower"));
+        assert!(module.contains("LumeRuntime.stringToUpper"));
+        assert!(module.contains("LumeRuntime.stringContains"));
+        assert!(module.contains("LumeRuntime.stringIndexOf"));
+        assert!(module.contains("LumeRuntime.stringReplaceFirstRegex"));
+        assert!(module.contains("LumeRuntime.stringReplaceAllRegex"));
         assert!(module.contains("LumeVector<String> parts"));
         assert!(module.contains("(\"\").isEmpty()"));
         assert!(module.contains("!(\"lume\").isEmpty()"));
@@ -7152,7 +7255,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n"
+            "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n[LuMe]\n[LuMe  ]\n[  LuMe]\nlume\nLUME\ntrue\nfalse\n1\na# b22\na# b#\n"
         );
 
         let _ = fs::remove_dir_all(temp);

@@ -3538,15 +3538,22 @@ impl<'a> FunctionLowerer<'a> {
                 let mut conditions = vec![length_condition];
                 let mut bindings = Vec::new();
                 for (index, element) in elements.iter().enumerate() {
+                    let item_value = ir::RValue::Call {
+                        callee: ir::Callee::Intrinsic(ir::Intrinsic::ListGet),
+                        args: vec![
+                            scrutinee.clone(),
+                            ir::Operand::Const(ir::Constant::Int(index as i64)),
+                        ],
+                        structural: false,
+                    };
+                    if let Some(mut deferred) =
+                        Self::deferred_list_item_bindings(element, item_value.clone(), &element_ty)
+                    {
+                        bindings.append(&mut deferred);
+                        continue;
+                    }
                     let item = self.emit_temp_from_rvalue(
-                        ir::RValue::Call {
-                            callee: ir::Callee::Intrinsic(ir::Intrinsic::ListGet),
-                            args: vec![
-                                scrutinee.clone(),
-                                ir::Operand::Const(ir::Constant::Int(index as i64)),
-                            ],
-                            structural: false,
-                        },
+                        item_value,
                         element_ty.clone(),
                         Some(element.span()),
                     );
@@ -3764,6 +3771,37 @@ impl<'a> FunctionLowerer<'a> {
                     bindings,
                 }
             }
+        }
+    }
+
+    fn deferred_list_item_bindings(
+        pattern: &Pattern,
+        source: ir::RValue,
+        ty: &ir::Type,
+    ) -> Option<Vec<PendingBinding>> {
+        match pattern {
+            Pattern::Wildcard { .. } => Some(Vec::new()),
+            Pattern::Binding { name, .. } => Some(if name == "_" {
+                Vec::new()
+            } else {
+                vec![PendingBinding {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    source: PendingBindingSource::RValue(source),
+                }]
+            }),
+            Pattern::Alias { inner, name, .. } => {
+                let mut bindings = Self::deferred_list_item_bindings(inner, source.clone(), ty)?;
+                if name != "_" {
+                    bindings.push(PendingBinding {
+                        name: name.clone(),
+                        ty: ty.clone(),
+                        source: PendingBindingSource::RValue(source),
+                    });
+                }
+                Some(bindings)
+            }
+            _ => None,
         }
     }
 
@@ -6529,7 +6567,8 @@ impl<'a> FunctionLowerer<'a> {
                 let use_generic_callee = !candidate_type_args.is_empty()
                     && (self
                         .reified_call_target(candidate_callee, &candidate_normalized_args)
-                        .is_some()
+                        .and_then(|(function, _)| self.program.function(function))
+                        .is_some_and(|function| !function.type_params.is_empty())
                         || self.is_builtin_reified_metadata_call(candidate_callee)
                         || expr_path(candidate_callee).is_some_and(|path| {
                             path.len() == 1
@@ -10519,6 +10558,11 @@ fn generic_call_type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
     match expr {
         Expr::Identifier { name, span } => Some(TypeRef::Named {
             name: name.clone(),
+            args: Vec::new(),
+            span: *span,
+        }),
+        Expr::Member { span, .. } => Some(TypeRef::Named {
+            name: expr_path(expr)?.join("."),
             args: Vec::new(),
             span: *span,
         }),

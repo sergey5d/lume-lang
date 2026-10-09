@@ -5568,14 +5568,6 @@ impl<'a> Checker<'a> {
                 expected,
             );
         }
-        if let Expr::Index { span, .. } = callee {
-            self.add_error(
-                "indexed_function_call_requires_grouping",
-                "callee[...](...) is explicit generic application syntax; to call an indexed function value, write '(callee[key])()'",
-                *span,
-            );
-            return Ty::Unknown;
-        }
         let callee_ty = self.check_expr(callee);
         match callee_ty {
             Ty::Function(params, ret) => {
@@ -7862,6 +7854,64 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn is_explicit_generic_call_target(&self, callee: &Expr) -> bool {
+        match callee {
+            Expr::Identifier { name, .. } => {
+                if self.lookup_scoped_value(name).is_some()
+                    || self.lookup_implicit_field(name).is_some()
+                    || self.lookup_implicit_getter(name).is_some()
+                    || self.lookup_global_value(name).is_some()
+                {
+                    return false;
+                }
+                if self.lookup_functions(name).is_some_and(|functions| {
+                    functions.iter().any(|sig| !sig.type_params.is_empty())
+                }) || self
+                    .lookup_implicit_method_functions(name)
+                    .is_some_and(|methods| methods.iter().any(|sig| !sig.type_params.is_empty()))
+                {
+                    return true;
+                }
+                self.brace_call_type_sig(callee)
+                    .is_some_and(|sig| !sig.type_params.is_empty())
+                    || matches!(
+                        name.as_str(),
+                        "Vector" | "LinkedList" | "Array" | "Set" | "Map"
+                    )
+            }
+            Expr::Member { receiver, name, .. } => {
+                if let Some((module, member)) =
+                    module_alias_and_member(callee).and_then(|(alias, member)| {
+                        self.world
+                            .lookup_module_alias(self.module, &alias)
+                            .map(|module| (module, member))
+                    })
+                    && module.functions.get(&member).is_some_and(|functions| {
+                        functions.iter().any(|sig| !sig.type_params.is_empty())
+                    })
+                {
+                    return true;
+                }
+                if self
+                    .static_method_sigs(receiver, name)
+                    .is_some_and(|methods| methods.iter().any(|sig| !sig.type_params.is_empty()))
+                {
+                    return true;
+                }
+                let receiver_ty = self.probe_expr_type(receiver);
+                if self
+                    .member_method_sigs(&receiver_ty, name)
+                    .is_some_and(|methods| methods.iter().any(|sig| !sig.type_params.is_empty()))
+                {
+                    return true;
+                }
+                self.brace_call_type_sig(callee)
+                    .is_some_and(|sig| !sig.type_params.is_empty())
+            }
+            _ => false,
+        }
+    }
+
     fn split_generic_call_callee<'expr>(&self, callee: &'expr Expr) -> (&'expr Expr, Vec<Ty>) {
         let Expr::Index {
             receiver, index, ..
@@ -7869,6 +7919,9 @@ impl<'a> Checker<'a> {
         else {
             return (callee, Vec::new());
         };
+        if !self.is_explicit_generic_call_target(receiver) {
+            return (callee, Vec::new());
+        }
         let Some(type_args) = type_arg_refs_from_expr(index) else {
             return (callee, Vec::new());
         };
@@ -13573,6 +13626,11 @@ fn type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
     match expr {
         Expr::Identifier { name, span } => Some(TypeRef::Named {
             name: name.clone(),
+            args: Vec::new(),
+            span: *span,
+        }),
+        Expr::Member { span, .. } => Some(TypeRef::Named {
+            name: expr_path_for_known_value(expr)?.join("."),
             args: Vec::new(),
             span: *span,
         }),

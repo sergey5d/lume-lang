@@ -11,5 +11,12 @@ interface Str {
     def split(separator Str) Vector[Str]
     def splitRegex(pattern Str) Vector[Str]
     def trim() Str
+    def trimLeft() Str
+    def trimRight() Str
+    def toLower() Str
+    def toUpper() Str
+    def contains(part Str) Bool
     def indexOf(part Str) Int
+    def replaceFirstRegex(pattern Str, replacement Str) Str
+    def replaceAllRegex(pattern Str, replacement Str) Str
 }
