@@ -3423,6 +3423,74 @@ def run(value Option[Int]) Unit {
 }
 
 #[test]
+fn parses_let_else_value_fallbacks() {
+    let result = parse(
+        r#"
+class SomeClass {
+    field1 Str
+    field2 Str
+}
+
+def run(value Any, left Str?, right Str?) Unit {
+    let SomeClass { field1, field2 as length } = value else {
+        field1: "fallback"
+        length: "fallback"
+    }
+    let SomeClass { field1 as first, field2 as second } = value else ("left", "right")
+    let item <- left else "fallback"
+    let {
+        a <- left
+        c <- right
+    } else new {
+        a: "left"
+        c: "right"
+    }
+    println(field1, length, first, second, item, a, c)
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[1] else {
+        panic!("expected function")
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body")
+    };
+    let Stmt::LetElse(record) = &body.statements[0] else {
+        panic!("expected record fallback")
+    };
+    assert!(matches!(
+        record.else_block.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::RecordLiteral { .. },
+            ..
+        })]
+    ));
+    let Stmt::LetElse(tuple) = &body.statements[1] else {
+        panic!("expected tuple fallback")
+    };
+    assert!(matches!(
+        tuple.else_block.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::TupleLiteral { .. },
+            ..
+        })]
+    ));
+    let Stmt::LetElse(grouped) = &body.statements[3] else {
+        panic!("expected grouped fallback")
+    };
+    assert_eq!(grouped.clauses.len(), 2);
+    assert!(matches!(
+        grouped.else_block.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::ContextualNew { .. },
+            ..
+        })]
+    ));
+}
+
+#[test]
 fn parses_option_extract_let_else_shorthand() {
     let result = parse(
         r#"

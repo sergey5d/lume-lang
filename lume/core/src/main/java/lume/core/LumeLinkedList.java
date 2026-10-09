@@ -216,7 +216,11 @@ public final class LumeLinkedList<T> {
     }
 
     public String makeStr(String separator) {
-        return String.join(separator, values.stream().map(String::valueOf).toList());
+        return makeStr(separator, String::valueOf);
+    }
+
+    public String makeStr(String separator, Function<? super T, String> render) {
+        return String.join(separator, values.stream().map(render).toList());
     }
 
     public java.util.List<T> asJava() {

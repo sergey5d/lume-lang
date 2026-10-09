@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# invalid_let_else_fallback at .*: shape fallback fields must exactly match let bindings: expected \{a, c\}, got \{a, b\}
+
+def choose(left Str?, right Str?) Unit {
+    wrong = {
+        a: "fallback a"
+        b: "fallback b"
+    }
+    let {
+        a <- left
+        c <- right
+    } else wrong
+    println(a, c)
+}

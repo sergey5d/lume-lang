@@ -34,7 +34,9 @@ pub struct ResolveResult {
 
 impl ResolveResult {
     pub fn has_errors(&self) -> bool {
-        !self.diagnostics.is_empty()
+        self.diagnostics
+            .iter()
+            .any(|located| located.diagnostic.severity == crate::Severity::Error)
     }
 }
 

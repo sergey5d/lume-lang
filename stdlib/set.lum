@@ -18,6 +18,32 @@ private interface SetApi[T] with Iterable[T] {
     def isEmpty Bool
     def nonEmpty Bool = !this.isEmpty
     def size Int
+
+    def makeStr(separator Str) Str {
+        var result Str = ""
+        var first Bool = true
+        for item <- this {
+            if !first {
+                result := result + separator
+            }
+            result := result + item
+            first := false
+        }
+        result
+    }
+
+    def makeStr(separator Str, render fn(T) Str) Str {
+        var result Str = ""
+        var first Bool = true
+        for item <- this {
+            if !first {
+                result := result + separator
+            }
+            result := result + render(item)
+            first := false
+        }
+        result
+    }
 }
 
 class Set[T] with SetApi[T] {

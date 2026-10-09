@@ -50,6 +50,12 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(15, "isEmpty", Vec::new(), list_is_empty),
             builtin_method(31, "nonEmpty", Vec::new(), list_non_empty),
             builtin_method(32, "makeStr", vec![ir::Type::Str], list_make_str),
+            builtin_method(
+                42,
+                "makeStr",
+                vec![ir::Type::Str, function_unknown()],
+                list_make_str,
+            ),
             builtin_method(16, "at", vec![ir::Type::Int], list_at),
             builtin_method(37, "slice", Vec::new(), list_slice),
             builtin_method(38, "slice", vec![ir::Type::Int], list_slice),
@@ -463,8 +469,12 @@ fn list_make_str(
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let [separator] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "Vector.makeStr expects 1 argument"));
+    let (separator, render) = match args.as_slice() {
+        [separator] => (separator, None),
+        [separator, render] => (separator, Some(render)),
+        _ => {
+            return Err(interpreter.runtime_error(span, "Vector.makeStr expects 1 or 2 arguments"));
+        }
     };
     let Value::String(separator) = separator else {
         return Err(interpreter.runtime_error(
@@ -482,7 +492,25 @@ fn list_make_str(
         if index > 0 {
             rendered.push_str(separator);
         }
-        rendered.push_str(&interpreter.render_value(item, span, "Vector.makeStr")?);
+        let item = if let Some(render) = render {
+            interpreter.invoke_value(render.clone(), vec![item.clone()], span)?
+        } else {
+            item.clone()
+        };
+        if render.is_some() {
+            let Value::String(item) = item else {
+                return Err(interpreter.runtime_error(
+                    span,
+                    format!(
+                        "Vector.makeStr formatter must return Str, got {}",
+                        item.render()
+                    ),
+                ));
+            };
+            rendered.push_str(&item);
+        } else {
+            rendered.push_str(&interpreter.render_value(&item, span, "Vector.makeStr")?);
+        }
     }
     Ok(Value::String(rendered))
 }

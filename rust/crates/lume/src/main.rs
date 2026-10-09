@@ -118,7 +118,7 @@ fn check_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
     };
 
     match check_path(&path) {
-        Ok(result) => exit_with_path_diagnostics(&result.diagnostics),
+        Ok(result) => exit_with_path_diagnostics(&result.diagnostics, &result.warnings),
         Err(err) => {
             eprintln!("{err}");
             ExitCode::from(1)
@@ -154,6 +154,7 @@ fn run_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
 
     match run_path_with_args(&path, requested_entry, program_args) {
         Ok(result) => {
+            print_path_diagnostics(&result.warnings);
             if !result.diagnostics.is_empty() {
                 print_path_diagnostics(&result.diagnostics);
                 return ExitCode::from(1);
@@ -179,6 +180,7 @@ fn test_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
 
     match test_path(&path) {
         Ok(result) => {
+            print_path_diagnostics(&result.warnings);
             if !result.diagnostics.is_empty() {
                 print_path_diagnostics(&result.diagnostics);
                 return ExitCode::from(1);
@@ -205,6 +207,7 @@ fn gen_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
 
     match generate_java_path(&path, options) {
         Ok(result) => {
+            print_path_diagnostics(&result.warnings);
             if !result.diagnostics.is_empty() {
                 print_path_diagnostics(&result.diagnostics);
                 return ExitCode::from(1);
@@ -307,7 +310,11 @@ fn read_gen_options(
     Ok(options)
 }
 
-fn exit_with_path_diagnostics(diagnostics: &[LocatedDiagnostic]) -> ExitCode {
+fn exit_with_path_diagnostics(
+    diagnostics: &[LocatedDiagnostic],
+    warnings: &[LocatedDiagnostic],
+) -> ExitCode {
+    print_path_diagnostics(warnings);
     if diagnostics.is_empty() {
         ExitCode::SUCCESS
     } else {

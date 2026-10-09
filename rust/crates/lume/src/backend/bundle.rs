@@ -26,6 +26,7 @@ pub struct BackendBundle {
 #[derive(Debug, Clone, Default)]
 pub struct BackendBundleResult {
     pub diagnostics: Vec<LocatedDiagnostic>,
+    pub warnings: Vec<LocatedDiagnostic>,
     pub bundle: Option<BackendBundle>,
 }
 
@@ -42,9 +43,11 @@ pub(crate) fn build_backend_bundle_with_load_options(
     if !checked.diagnostics.is_empty() {
         return Ok(BackendBundleResult {
             diagnostics: checked.diagnostics,
+            warnings: checked.warnings,
             bundle: None,
         });
     }
+    let warnings = checked.warnings;
 
     let (graph, root_path) = load_module_graph_with_options(path, load_options)?;
     let root_module = graph
@@ -65,6 +68,7 @@ pub(crate) fn build_backend_bundle_with_load_options(
                     diagnostic,
                 })
                 .collect(),
+            warnings,
             bundle: None,
         });
     }
@@ -77,6 +81,7 @@ pub(crate) fn build_backend_bundle_with_load_options(
 
     Ok(BackendBundleResult {
         diagnostics: Vec::new(),
+        warnings,
         bundle: Some(BackendBundle {
             root_path,
             root_display_path,

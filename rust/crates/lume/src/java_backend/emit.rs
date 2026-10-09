@@ -3267,6 +3267,17 @@ impl<'a> SourceBodyEmitter<'a> {
         used_locals: &mut HashSet<ir::LocalId>,
         loop_depth: usize,
     ) -> Option<()> {
+        if self.let_else_value_fallback(&statement.else_block, bindings, binding_types) {
+            return self.emit_value_let_else_statement(
+                out,
+                statement,
+                indent,
+                bindings,
+                binding_types,
+                used_locals,
+                loop_depth,
+            );
+        }
         if statement.clauses.is_empty() {
             return self.emit_let_else_clause(
                 out,
@@ -3295,6 +3306,268 @@ impl<'a> SourceBodyEmitter<'a> {
                 used_locals,
                 loop_depth,
             )?;
+        }
+        Some(())
+    }
+
+    fn let_else_value_fallback(
+        &self,
+        block: &core::Block,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+    ) -> bool {
+        let Some(core::Stmt::Expr(statement)) = block.statements.last() else {
+            return false;
+        };
+        !matches!(
+            self.expr_type_with_binding_types(&statement.expr, bindings, binding_types),
+            Some(ir::Type::Never)
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_value_let_else_statement(
+        &self,
+        out: &mut String,
+        statement: &core::LetElseStmt,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        let fallback_bindings = bindings.clone();
+        let fallback_types = binding_types.clone();
+        let matched_name = self.synthetic_name("letMatched", "letMatched", statement.span.start);
+        out.push_str(indent);
+        out.push_str("boolean ");
+        out.push_str(&matched_name);
+        out.push_str(" = true;\n");
+
+        let mut success_bindings = bindings.clone();
+        let mut success_types = binding_types.clone();
+        let mut materialized = Vec::<(String, String, ir::Type)>::new();
+
+        if statement.clauses.is_empty() {
+            self.emit_value_let_else_clause(
+                out,
+                &statement.pattern,
+                &statement.value,
+                statement.span.start,
+                &matched_name,
+                indent,
+                &mut success_bindings,
+                &mut success_types,
+                &mut materialized,
+                used_locals,
+            )?;
+        } else {
+            for (index, clause) in statement.clauses.iter().enumerate() {
+                self.emit_value_let_else_clause(
+                    out,
+                    &clause.pattern,
+                    &clause.value,
+                    statement.span.start + index,
+                    &matched_name,
+                    indent,
+                    &mut success_bindings,
+                    &mut success_types,
+                    &mut materialized,
+                    used_locals,
+                )?;
+            }
+        }
+
+        out.push_str(indent);
+        out.push_str("if (!");
+        out.push_str(&matched_name);
+        out.push_str(") {\n");
+        let fallback_indent = format!("{indent}    ");
+        let mut active_fallback_bindings = fallback_bindings;
+        let mut active_fallback_types = fallback_types;
+        let tail_index = statement.else_block.statements.len().checked_sub(1)?;
+        if tail_index > 0 {
+            let prefix = core::Block {
+                statements: statement.else_block.statements[..tail_index].to_vec(),
+                span: statement.else_block.span,
+            };
+            self.emit_statement_block(
+                out,
+                &prefix,
+                &fallback_indent,
+                &mut active_fallback_bindings,
+                &mut active_fallback_types,
+                used_locals,
+                false,
+                loop_depth,
+            )?;
+        }
+        let core::Stmt::Expr(tail) = &statement.else_block.statements[tail_index] else {
+            return None;
+        };
+
+        if let [(name, java_name, ty)] = materialized.as_slice() {
+            let value = self
+                .emit_expr_against(&tail.expr, &active_fallback_bindings, ty)
+                .or_else(|| self.emit_expr(&tail.expr, &active_fallback_bindings))?;
+            out.push_str(&fallback_indent);
+            out.push_str(java_name);
+            out.push_str(" = ");
+            out.push_str(&value);
+            out.push_str(";\n");
+            let _ = name;
+        } else {
+            let expected = match &tail.expr {
+                core::Expr::TupleLiteral { .. } => {
+                    ir::Type::Tuple(materialized.iter().map(|(_, _, ty)| ty.clone()).collect())
+                }
+                core::Expr::RecordLiteral { .. }
+                | core::Expr::ContextualNew {
+                    style: core::CallStyle::Brace,
+                    ..
+                } => ir::Type::Record(
+                    materialized
+                        .iter()
+                        .map(|(name, _, ty)| ir::NamedType {
+                            name: name.clone(),
+                            ty: ty.clone(),
+                        })
+                        .collect(),
+                ),
+                _ => self.expr_type_with_binding_types(
+                    &tail.expr,
+                    &active_fallback_bindings,
+                    &active_fallback_types,
+                )?,
+            };
+            let value = self
+                .emit_expr_against(&tail.expr, &active_fallback_bindings, &expected)
+                .or_else(|| self.emit_expr(&tail.expr, &active_fallback_bindings))?;
+            let fallback_value =
+                self.synthetic_name("letFallback", "letFallback", statement.span.start);
+            out.push_str(&fallback_indent);
+            out.push_str("var ");
+            out.push_str(&fallback_value);
+            out.push_str(" = ");
+            out.push_str(&value);
+            out.push_str(";\n");
+            let tuple = matches!(expected, ir::Type::Tuple(_));
+            for (index, (name, java_name, ty)) in materialized.iter().enumerate() {
+                let access = if tuple {
+                    let accessor = tuple_accessor_name(&format!("_{}", index + 1))?;
+                    format!("{fallback_value}.{accessor}()")
+                } else if matches!(expected, ir::Type::Record(_)) {
+                    format!(
+                        "(({}) ((lume.core.LumeShape) {fallback_value}).get({}))",
+                        self.names.value_type(ty),
+                        java_string_literal(name)
+                    )
+                } else {
+                    format!("{fallback_value}.{}()", java_member_name(name))
+                };
+                out.push_str(&fallback_indent);
+                out.push_str(java_name);
+                out.push_str(" = ");
+                out.push_str(&access);
+                out.push_str(";\n");
+            }
+        }
+        out.push_str(indent);
+        out.push_str("}\n");
+
+        for (name, java_name, ty) in materialized {
+            bindings.insert(name.clone(), java_name);
+            binding_types.insert(name, ty);
+        }
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_value_let_else_clause(
+        &self,
+        out: &mut String,
+        pattern: &ast::Pattern,
+        value: &core::Expr,
+        unique: usize,
+        matched_name: &str,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        materialized: &mut Vec<(String, String, ir::Type)>,
+        used_locals: &mut HashSet<ir::LocalId>,
+    ) -> Option<()> {
+        let value_ty = self.expr_type_with_binding_types(value, bindings, binding_types)?;
+        let value_expr = self.emit_expr(value, bindings)?;
+        let value_local = self.synthetic_name("let", "let", unique);
+        let matched = self.match_case_pattern(
+            pattern,
+            &value_local,
+            &value_ty,
+            unique,
+            bindings,
+            binding_types,
+        )?;
+
+        let mut clause_bindings = Vec::new();
+        for name in crate::ast::pattern_binding_names(pattern) {
+            if materialized
+                .iter()
+                .any(|(existing, _, _)| existing == &name)
+            {
+                continue;
+            }
+            let local = self.source_binding_local(&name, used_locals)?;
+            used_locals.insert(local.id);
+            let java_name = java_local_name(self.function, local);
+            let ty = matched.binding_types.get(&name)?.clone();
+            let matched_value = matched.bindings.get(&name)?.clone();
+            out.push_str(indent);
+            out.push_str(&self.names.value_type(&ty));
+            out.push(' ');
+            out.push_str(&java_name);
+            out.push_str(" = ");
+            out.push_str(&java_default_value(&ty));
+            out.push_str(";\n");
+            clause_bindings.push((name, java_name, ty, matched_value));
+        }
+
+        out.push_str(indent);
+        out.push_str("if (");
+        out.push_str(matched_name);
+        out.push_str(") {\n");
+        out.push_str(indent);
+        out.push_str("    var ");
+        out.push_str(&value_local);
+        out.push_str(" = ");
+        out.push_str(&value_expr);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("    if (");
+        out.push_str(&matched.condition);
+        out.push_str(") {\n");
+        for (_, java_name, _, matched_value) in &clause_bindings {
+            out.push_str(indent);
+            out.push_str("        ");
+            out.push_str(java_name);
+            out.push_str(" = ");
+            out.push_str(matched_value);
+            out.push_str(";\n");
+        }
+        out.push_str(indent);
+        out.push_str("    } else {\n");
+        out.push_str(indent);
+        out.push_str("        ");
+        out.push_str(matched_name);
+        out.push_str(" = false;\n");
+        out.push_str(indent);
+        out.push_str("    }\n");
+        out.push_str(indent);
+        out.push_str("}\n");
+
+        for (name, java_name, ty, _) in clause_bindings {
+            bindings.insert(name.clone(), java_name.clone());
+            binding_types.insert(name.clone(), ty.clone());
+            materialized.push((name, java_name, ty));
         }
         Some(())
     }

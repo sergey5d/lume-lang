@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# non_diverging_let_else at .*: let else fallback must exit control flow with 'return', 'break', 'continue', or a call returning Never
+# invalid_let_else_fallback at .*: let else fallback for 'item' has type 'Unit' but expects 'Int'
 
 type MaybeInt =
     object NoneX {}

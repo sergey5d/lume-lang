@@ -29,6 +29,7 @@ pub struct RunResult {
 #[derive(Debug, Clone, Default)]
 pub struct PathRunResult {
     pub diagnostics: Vec<LocatedDiagnostic>,
+    pub warnings: Vec<LocatedDiagnostic>,
     pub output: String,
     pub return_value: Option<String>,
 }
@@ -93,10 +94,12 @@ pub fn run_path_with_args(
     if !checked.diagnostics.is_empty() {
         return Ok(PathRunResult {
             diagnostics: checked.diagnostics,
+            warnings: checked.warnings,
             output: String::new(),
             return_value: None,
         });
     }
+    let warnings = checked.warnings;
 
     let (graph, root_path) = load_module_graph(path)?;
     let root_module = graph
@@ -116,6 +119,7 @@ pub fn run_path_with_args(
                     diagnostic,
                 })
                 .collect(),
+            warnings,
             output: String::new(),
             return_value: None,
         });
@@ -134,6 +138,7 @@ pub fn run_path_with_args(
                 diagnostic,
             })
             .collect(),
+        warnings,
         output: run.output,
         return_value: run.return_value,
     })
@@ -145,10 +150,12 @@ pub fn test_path(path: impl AsRef<Path>) -> Result<PathRunResult, String> {
     if !checked.diagnostics.is_empty() {
         return Ok(PathRunResult {
             diagnostics: checked.diagnostics,
+            warnings: checked.warnings,
             output: String::new(),
             return_value: None,
         });
     }
+    let warnings = checked.warnings;
 
     let (graph, root_path) = load_module_graph(path)?;
     let root_module = graph
@@ -168,6 +175,7 @@ pub fn test_path(path: impl AsRef<Path>) -> Result<PathRunResult, String> {
                     diagnostic,
                 })
                 .collect(),
+            warnings,
             output: String::new(),
             return_value: None,
         });
@@ -186,6 +194,7 @@ pub fn test_path(path: impl AsRef<Path>) -> Result<PathRunResult, String> {
                 diagnostic,
             })
             .collect(),
+        warnings,
         output: run.output,
         return_value: run.return_value,
     })
@@ -10195,6 +10204,8 @@ $name
             r#"
             def main() Unit {
                 values = ["btc", "usd"]
+                labels = Set("btc", "usd")
+                linked = LinkedList("btc", "usd")
                 let Some { value as parsedFloat } = Float.parse("1.2") else panic("expected float")
                 let Some { value as parsedInt } = Int.parse("7") else panic("expected int")
                 OS.println(parsedFloat + 0.8)
@@ -10202,6 +10213,9 @@ $name
                 OS.println(Float.parse("oops").isEmpty)
                 OS.println(Int.parse("nope").isEmpty)
                 OS.println(values.makeStr("-"))
+                OS.println(values.makeStr("/", value => value.toUpper()))
+                OS.println(labels.makeStr("/", value => value.toUpper()))
+                OS.println(linked.makeStr("/", value => value.toUpper()))
                 OS.println(values.nonEmpty)
             }
             "#,
@@ -10209,7 +10223,10 @@ $name
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "2.0\n8\ntrue\ntrue\nbtc-usd\ntrue\n");
+        assert_eq!(
+            run.output,
+            "2.0\n8\ntrue\ntrue\nbtc-usd\nBTC/USD\nBTC/USD\nBTC/USD\ntrue\n"
+        );
     }
 
     #[test]

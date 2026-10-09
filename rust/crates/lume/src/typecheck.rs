@@ -24,11 +24,13 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct CheckResult {
     pub diagnostics: Vec<Diagnostic>,
+    pub warnings: Vec<Diagnostic>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct PathCheckResult {
     pub diagnostics: Vec<crate::resolver::LocatedDiagnostic>,
+    pub warnings: Vec<crate::resolver::LocatedDiagnostic>,
 }
 
 pub fn check_program(program: &Program) -> CheckResult {
@@ -36,12 +38,14 @@ pub fn check_program(program: &Program) -> CheckResult {
     let Some(module) = world.root_module.as_ref() else {
         return CheckResult {
             diagnostics: Vec::new(),
+            warnings: Vec::new(),
         };
     };
     let mut checker = Checker::new(&world, module);
     checker.check_module();
     CheckResult {
         diagnostics: checker.diagnostics,
+        warnings: checker.warnings,
     }
 }
 
@@ -54,9 +58,14 @@ pub(crate) fn check_path_with_load_options(
     options: &ModuleLoadOptions,
 ) -> Result<PathCheckResult, String> {
     let resolved = resolve_path_with_options(path.as_ref(), options)?;
-    if !resolved.diagnostics.is_empty() {
+    let (resolve_errors, mut warnings): (Vec<_>, Vec<_>) = resolved
+        .diagnostics
+        .into_iter()
+        .partition(|located| located.diagnostic.severity == crate::Severity::Error);
+    if !resolve_errors.is_empty() {
         return Ok(PathCheckResult {
-            diagnostics: resolved.diagnostics,
+            diagnostics: resolve_errors,
+            warnings,
         });
     }
 
@@ -70,10 +79,14 @@ pub(crate) fn check_path_with_load_options(
             continue;
         };
         let display_path = module.display_path.clone();
-        let (module_diagnostics, checked_globals) = {
+        let (module_diagnostics, module_warnings, checked_globals) = {
             let mut checker = Checker::new(&world, module);
             checker.check_module();
-            (checker.diagnostics, checker.globals.clone())
+            (
+                checker.diagnostics,
+                checker.warnings,
+                checker.globals.clone(),
+            )
         };
         world
             .checked_globals
@@ -84,9 +97,18 @@ pub(crate) fn check_path_with_load_options(
                 diagnostic,
             }
         }));
+        warnings.extend(module_warnings.into_iter().map(|diagnostic| {
+            crate::resolver::LocatedDiagnostic {
+                path: display_path.clone(),
+                diagnostic,
+            }
+        }));
     }
 
-    Ok(PathCheckResult { diagnostics })
+    Ok(PathCheckResult {
+        diagnostics,
+        warnings,
+    })
 }
 
 fn default_stdlib_dir() -> Option<PathBuf> {
@@ -301,6 +323,13 @@ struct ValueInfo {
     ty: Ty,
     mutable: bool,
     stable: bool,
+}
+
+#[derive(Debug, Clone)]
+struct MutableBindingUsage {
+    name: String,
+    span: crate::source::Span,
+    reassigned: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1396,7 +1425,9 @@ struct Checker<'a> {
     world: &'a World,
     module: &'a ModuleInfo,
     diagnostics: Vec<Diagnostic>,
+    warnings: Vec<Diagnostic>,
     scopes: Vec<HashMap<String, ValueInfo>>,
+    mutable_bindings: Vec<HashMap<String, MutableBindingUsage>>,
     type_params: Vec<TypeParamScope>,
     current_return: Ty,
     current_owner: Option<TypeSig>,
@@ -1420,7 +1451,9 @@ impl<'a> Checker<'a> {
             world,
             module,
             diagnostics: Vec::new(),
+            warnings: Vec::new(),
             scopes: Vec::new(),
+            mutable_bindings: Vec::new(),
             type_params: Vec::new(),
             current_return: Ty::Unknown,
             current_owner: None,
@@ -3433,6 +3466,9 @@ impl<'a> Checker<'a> {
                         );
                     }
                     self.define_local(&binding.name, ty, binding.mutable);
+                    if binding.mutable {
+                        self.track_mutable_binding(binding);
+                    }
                 }
                 Ty::unit()
             }
@@ -3559,23 +3595,210 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        self.check_block(&stmt.else_block);
-        if !self.block_guarantees_control_exit(&stmt.else_block) {
-            self.add_error(
-                "non_diverging_let_else",
-                "let else fallback must exit control flow with 'return', 'break', 'continue', or a call returning Never",
-                stmt.else_block.span,
-            );
-        }
+        let mut binding_names = Vec::new();
         if !stmt.clauses.is_empty() {
             for clause in &stmt.clauses {
                 let value_ty = self.check_expr(&clause.value);
                 self.bind_pattern(&clause.pattern, &value_ty);
+                for name in crate::ast::pattern_binding_names(&clause.pattern) {
+                    if !binding_names.contains(&name) {
+                        binding_names.push(name);
+                    }
+                }
             }
+        } else {
+            let value_ty = self.check_expr(&stmt.value);
+            self.bind_pattern(&stmt.pattern, &value_ty);
+            binding_names = crate::ast::pattern_binding_names(&stmt.pattern);
+        }
+
+        let mut bindings = Vec::new();
+        if let Some(scope) = self.scopes.last_mut() {
+            for name in &binding_names {
+                if let Some(value) = scope.remove(name) {
+                    bindings.push((name.clone(), value));
+                }
+            }
+        }
+
+        self.check_let_else_fallback(&stmt.else_block, &bindings);
+
+        if let Some(scope) = self.scopes.last_mut() {
+            for (name, value) in bindings {
+                scope.insert(name, value);
+            }
+        }
+    }
+
+    fn check_let_else_fallback(&mut self, block: &Block, bindings: &[(String, ValueInfo)]) {
+        if self.block_guarantees_control_exit(block) {
+            self.check_block(block);
             return;
         }
-        let value_ty = self.check_expr(&stmt.value);
-        self.bind_pattern(&stmt.pattern, &value_ty);
+
+        if bindings.is_empty() {
+            self.check_block(block);
+            self.add_error(
+                "invalid_let_else_fallback",
+                "let else fallback cannot supply a value because the pattern introduces no bindings; exit control flow instead",
+                block.span,
+            );
+            return;
+        }
+
+        if bindings.len() == 1 {
+            if !matches!(block.statements.last(), Some(Stmt::Expr(_))) {
+                self.check_block(block);
+                self.add_error(
+                    "invalid_let_else_fallback",
+                    "let else fallback must end in a value expression or exit control flow",
+                    block.span,
+                );
+                return;
+            }
+            let expected = &bindings[0].1.ty;
+            let actual = self.check_block_against(block, expected);
+            self.require_assignable(
+                &actual,
+                expected,
+                block.span,
+                "invalid_let_else_fallback",
+                format!(
+                    "let else fallback for '{}' has type '{}' but expects '{}'",
+                    bindings[0].0,
+                    actual.describe(),
+                    expected.describe()
+                ),
+            );
+            return;
+        }
+
+        let tuple_expected =
+            Ty::Tuple(bindings.iter().map(|(_, value)| value.ty.clone()).collect());
+        let record_expected = Ty::Record(
+            bindings
+                .iter()
+                .map(|(name, value)| (name.clone(), value.ty.clone()))
+                .collect(),
+        );
+        let tail = block
+            .statements
+            .last()
+            .and_then(|statement| match statement {
+                Stmt::Expr(statement) => Some(&statement.expr),
+                _ => None,
+            });
+        if tail.is_none() {
+            self.check_block(block);
+            self.add_error(
+                "invalid_let_else_fallback",
+                "let else fallback must end in a value expression or exit control flow",
+                block.span,
+            );
+            return;
+        }
+        let expected = match tail {
+            Some(Expr::TupleLiteral { .. }) => Some(&tuple_expected),
+            Some(Expr::RecordLiteral { .. })
+            | Some(Expr::ContextualNew {
+                uses_brace_syntax: true,
+                ..
+            }) => Some(&record_expected),
+            _ => None,
+        };
+        let actual = match expected {
+            Some(expected) => self.check_block_against(block, expected),
+            None => self.check_block(block),
+        };
+
+        if matches!(actual, Ty::Never) {
+            return;
+        }
+        match &actual {
+            Ty::Tuple(items) if items.len() == bindings.len() => {
+                for ((name, value), actual) in bindings.iter().zip(items) {
+                    self.require_assignable(
+                        actual,
+                        &value.ty,
+                        block.span,
+                        "invalid_let_else_fallback",
+                        format!(
+                            "tuple fallback value for '{}' has type '{}' but expects '{}'",
+                            name,
+                            actual.describe(),
+                            value.ty.describe()
+                        ),
+                    );
+                }
+            }
+            Ty::Tuple(items) => self.add_error(
+                "invalid_let_else_fallback",
+                format!(
+                    "tuple fallback supplies {} values but the pattern introduces {} bindings",
+                    items.len(),
+                    bindings.len()
+                ),
+                block.span,
+            ),
+            _ if self.shape_target_fields(&actual).is_some() => {
+                let fields = self.shape_target_fields(&actual).unwrap_or_default();
+                let expected_names = bindings
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect::<Vec<_>>();
+                let actual_names = fields
+                    .iter()
+                    .map(|field| field.name.as_str())
+                    .collect::<Vec<_>>();
+                if expected_names.len() != actual_names.len()
+                    || expected_names
+                        .iter()
+                        .any(|name| !actual_names.contains(name))
+                {
+                    self.add_error(
+                        "invalid_let_else_fallback",
+                        format!(
+                            "shape fallback fields must exactly match let bindings: expected {{{}}}, got {{{}}}",
+                            expected_names.join(", "),
+                            actual_names.join(", ")
+                        ),
+                        block.span,
+                    );
+                    return;
+                }
+                for (name, value) in bindings {
+                    if let Some(field) = fields.iter().find(|field| field.name == *name) {
+                        self.require_assignable(
+                            &field.ty,
+                            &value.ty,
+                            block.span,
+                            "invalid_let_else_fallback",
+                            format!(
+                                "shape fallback field '{}' has type '{}' but binding expects '{}'",
+                                name,
+                                field.ty.describe(),
+                                value.ty.describe()
+                            ),
+                        );
+                    }
+                }
+            }
+            _ => self.add_error(
+                "invalid_let_else_fallback",
+                format!(
+                    "let else fallback for {} bindings must produce a {}-element tuple or a shape with fields {{{}}}, got '{}'",
+                    bindings.len(),
+                    bindings.len(),
+                    bindings
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    actual.describe()
+                ),
+                block.span,
+            ),
+        }
     }
 
     fn check_pattern_binding_stmt(&mut self, stmt: &PatternBindingStmt) {
@@ -4405,6 +4628,8 @@ impl<'a> Checker<'a> {
                             format!("cannot assign to immutable binding '{}'", name),
                             *span,
                         );
+                    } else {
+                        self.mark_local_reassigned(name);
                     }
                     value.ty
                 } else if let Some(field) = self.lookup_implicit_field(name) {
@@ -11155,10 +11380,62 @@ impl<'a> Checker<'a> {
 
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.mutable_bindings.push(HashMap::new());
     }
 
     fn pop_scope(&mut self) {
+        if let Some(bindings) = self.mutable_bindings.pop() {
+            let mut bindings = bindings.into_values().collect::<Vec<_>>();
+            bindings.sort_by_key(|binding| binding.span.start);
+            for binding in bindings {
+                if !binding.reassigned {
+                    self.warnings.push(
+                        Diagnostic::warning(
+                            "unused_mutability",
+                            format!(
+                                "binding '{}' is declared mutable but never reassigned",
+                                binding.name
+                            ),
+                            binding.span,
+                        )
+                        .with_label("this binding does not need 'var'")
+                        .with_help(format!(
+                            "remove 'var' and declare it as '{} = ...'",
+                            binding.name
+                        )),
+                    );
+                }
+            }
+        }
         self.scopes.pop();
+    }
+
+    fn track_mutable_binding(&mut self, binding: &crate::ast::Binding) {
+        if binding.name == "_" {
+            return;
+        }
+        if self.mutable_bindings.is_empty() {
+            self.push_scope();
+        }
+        if let Some(scope) = self.mutable_bindings.last_mut() {
+            scope.insert(
+                binding.name.clone(),
+                MutableBindingUsage {
+                    name: binding.name.clone(),
+                    span: binding.span,
+                    reassigned: false,
+                },
+            );
+        }
+    }
+
+    fn mark_local_reassigned(&mut self, name: &str) {
+        for scope in self.mutable_bindings.iter_mut().rev() {
+            if let Some(binding) = scope.get_mut(name) {
+                binding.reassigned = true;
+                return;
+            }
+        }
     }
 
     fn define_local(&mut self, name: &str, ty: Ty, mutable: bool) {
@@ -17350,7 +17627,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_non_diverging_let_else() {
+    fn rejects_incompatible_let_else_fallback() {
         let program = parse_inline(
             r#"
 def main() Unit {
@@ -17365,10 +17642,10 @@ def main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diag| {
-                diag.code == "non_diverging_let_else"
+                diag.code == "invalid_let_else_fallback"
                     && diag
                         .message
-                        .contains("must exit control flow with 'return', 'break', 'continue', or a call returning Never")
+                        .contains("fallback for 'item' has type 'Unit' but expects 'Int'")
             }),
             "{:#?}",
             result.diagnostics
@@ -19608,6 +19885,72 @@ def read(factory Factory) Int = factory.creator(5)
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn warns_when_a_mutable_local_is_never_reassigned() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    var count = 1
+    println(count)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(result.warnings.len(), 1, "{:#?}", result.warnings);
+        assert_eq!(result.warnings[0].code, "unused_mutability");
+        assert!(
+            result.warnings[0]
+                .message
+                .contains("'count' is declared mutable but never reassigned"),
+            "{:#?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn mutable_local_warning_tracks_binding_reassignment_only() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    var count = 0
+    if true {
+        count += 1
+    }
+
+    var label = "before"
+    label := "after"
+
+    var values = [1]
+    values.add(2)
+    println(count, label, values.size)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(result.warnings.len(), 1, "{:#?}", result.warnings);
+        assert!(
+            result.warnings[0].message.contains("'values'"),
+            "{:#?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn mutable_fields_do_not_produce_local_binding_warnings() {
+        let program = parse_inline(
+            r#"
+class Counter {
+    var value Int = 0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert!(result.warnings.is_empty(), "{:#?}", result.warnings);
     }
 
     #[test]

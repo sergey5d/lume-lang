@@ -913,6 +913,15 @@ var count = 0
 var total Int = 10
 ```
 
+The compiler warns when a local binding is declared with `var` but is never
+reassigned. Use an ordinary immutable binding in that case. Mutating an object
+referenced by a binding does not reassign the binding itself:
+
+```txt
+values = [1]
+values.add(2) # `values` does not need `var`
+```
+
 Top-level immutable bindings are also supported:
 
 ```txt
@@ -3090,6 +3099,15 @@ values.sort((left, right) => left.score - right.score)
 firstTen = values.take(10)
 ```
 
+`Vector`, `LinkedList`, and `Set` provide `makeStr`. The one-argument form uses
+each value's normal string rendering. The two-argument form accepts an explicit
+formatter:
+
+```txt
+names.makeStr(", ")
+evidence.makeStr(", ", value => value.label())
+```
+
 A comparator returns a negative value when `left` belongs before `right`, zero
 when they compare equally, and a positive value when `left` belongs after
 `right`.
@@ -3511,12 +3529,15 @@ let (left, right) = pair
 If the pattern can fail, plain `let` without `else` is rejected. Add an `else`
 fallback for recoverable refutable binding.
 
-`let ... else` is the refutable binding form with an explicit fallback path:
+`let ... else` is the refutable binding form with an explicit fallback path.
+The fallback may either exit control flow or supply values for the bindings:
 
 ```txt
 let Some { value as item } = maybeValue else {
     return Err("missing")
 }
+
+let Some(item) = maybeValue else defaultItem
 ```
 
 For success-carrying values, `<-` is shorthand for the success case:
@@ -3590,10 +3611,44 @@ let {
 }
 ```
 
-`let ... else` is statement-oriented:
+When the fallback supplies values, it is evaluated lazily only after a failed
+match. A pattern with one binding accepts one assignable fallback value:
+
+```txt
+let item <- maybeItem else defaultItem
+```
+
+A pattern or grouped extraction with multiple bindings accepts either an exact
+positional tuple or a shape whose fields exactly match the introduced local
+names:
+
+```txt
+let User { name, label as title } = value else ("Unknown", "Untitled")
+
+let User { name, label as title } = value else {
+    name: "Unknown"
+    title: "Untitled"
+}
+
+let {
+    user <- maybeUser
+    account <- maybeAccount
+} else new {
+    user: fallbackUser
+    account: fallbackAccount
+}
+```
+
+Tuple values map to bindings in pattern order. Shape values map by the local
+binding names, including aliases (`title` above), not by source field names.
+The tuple arity and shape field set must match exactly, and every fallback value
+must be assignable to its corresponding binding type.
+
+`let ... else` remains statement-oriented:
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement
-- if the match fails, the `else` block is evaluated and must exit the current control-flow path, typically with `return`, `break`, `continue`, or a call whose return type is `Never`
+- if the match fails, the `else` body is evaluated lazily
+- the fallback must either initialize every introduced binding or exit the current control-flow path with `return`, `break`, `continue`, or a call whose return type is `Never`
 
 Success-case extraction shorthand in `let` always requires an explicit
 fallback, even when the source expression visibly constructs a successful

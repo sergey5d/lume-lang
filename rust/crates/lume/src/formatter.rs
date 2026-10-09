@@ -95,6 +95,7 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
         .unwrap_or("\n");
     let mut output = String::with_capacity(source.len() + INDENT.len());
     let mut brace_depth = 0usize;
+    let mut brace_continuations = Vec::new();
     let mut delimiters = Vec::new();
     let mut continuation_pending = false;
 
@@ -104,7 +105,14 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
         if protected_lines[index] {
             output.push_str(line.content);
             output.push_str(line.ending);
-            update_nesting(line_tokens, index, &mut brace_depth, &mut delimiters);
+            update_nesting(
+                line_tokens,
+                index,
+                false,
+                &mut brace_depth,
+                &mut brace_continuations,
+                &mut delimiters,
+            );
             continuation_pending = line_requests_continuation(line_tokens);
             continue;
         }
@@ -138,13 +146,24 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
         let continuation = has_active_delimiter
             || (!starts_with_closer && (continuation_pending || starts_continuation));
 
-        for _ in 0..line_brace_depth + usize::from(continuation) {
+        let carried_continuations = brace_continuations
+            .iter()
+            .filter(|carried| **carried)
+            .count();
+        for _ in 0..line_brace_depth + carried_continuations + usize::from(continuation) {
             output.push_str(INDENT);
         }
         output.push_str(&body);
         output.push_str(line.ending);
 
-        update_nesting(line_tokens, index, &mut brace_depth, &mut delimiters);
+        update_nesting(
+            line_tokens,
+            index,
+            continuation,
+            &mut brace_depth,
+            &mut brace_continuations,
+            &mut delimiters,
+        );
         continuation_pending = line_requests_continuation(line_tokens);
     }
 
@@ -279,13 +298,18 @@ fn nesting_after_leading_closers(
 fn update_nesting(
     tokens: &[&Token],
     line: usize,
+    carry_continuation: bool,
     braces: &mut usize,
+    brace_continuations: &mut Vec<bool>,
     delimiters: &mut Vec<OpenDelimiter>,
 ) {
+    let mut carry_continuation = carry_continuation;
     for token in tokens {
         match token.kind {
             TokenKind::LBrace => {
                 *braces += 1;
+                brace_continuations.push(carry_continuation);
+                carry_continuation = false;
                 for delimiter in delimiters.iter_mut().rev() {
                     if delimiter.opened_line != line {
                         break;
@@ -293,7 +317,10 @@ fn update_nesting(
                     delimiter.suspended_by_brace_depth.get_or_insert(*braces);
                 }
             }
-            TokenKind::RBrace => *braces = braces.saturating_sub(1),
+            TokenKind::RBrace => {
+                *braces = braces.saturating_sub(1);
+                brace_continuations.pop();
+            }
             TokenKind::LParen => delimiters.push(OpenDelimiter {
                 kind: DelimiterKind::Parenthesis,
                 opened_line: line,
@@ -465,6 +492,18 @@ mod tests {
         assert_eq!(
             result.text,
             "class Aggregator {\n    def all_rollups(range IntRange? = None) [Str] {\n        rollups = this.rollups(range)\n        rollups.sort((x, y) => {\n            xRollup = x[1]\n            yRollup = y[1]\n            if xRollup.total == yRollup.total {\n                return x[0].compare(y[0])\n            }\n            return yRollup.total - xRollup.total\n        })\n        rollups.map(x => \"${x[0]}(${x[1].count},${x[1].total})\")\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn carries_expression_continuation_through_a_trailing_lambda() {
+        let result = format(
+            "def readString(path Str) Result[Str, Str] =\nFile.readText(path).mapError { err =>\nfileErrorMessage(err)\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def readString(path Str) Result[Str, Str] =\n    File.readText(path).mapError { err =>\n        fileErrorMessage(err)\n    }\n"
         );
     }
 

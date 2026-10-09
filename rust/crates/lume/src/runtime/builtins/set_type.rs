@@ -39,6 +39,13 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(13, "size", Vec::new(), set_size),
             builtin_method(15, "isEmpty", Vec::new(), set_is_empty),
             builtin_method(16, "nonEmpty", Vec::new(), set_non_empty),
+            builtin_method(17, "makeStr", vec![ir::Type::Str], set_make_str),
+            builtin_method(
+                18,
+                "makeStr",
+                vec![ir::Type::Str, function_unknown()],
+                set_make_str,
+            ),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -321,4 +328,56 @@ fn set_non_empty(
         return Err(interpreter.runtime_error(span, "Set.nonEmpty expects 0 arguments"));
     }
     Ok(Value::Bool(!set_items(&receiver).borrow().is_empty()))
+}
+
+fn set_make_str(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let (separator, render) = match args.as_slice() {
+        [separator] => (separator, None),
+        [separator, render] => (separator, Some(render)),
+        _ => {
+            return Err(interpreter.runtime_error(span, "Set.makeStr expects 1 or 2 arguments"));
+        }
+    };
+    let Value::String(separator) = separator else {
+        return Err(interpreter.runtime_error(
+            span,
+            format!(
+                "Set.makeStr expects Str separator, got {}",
+                separator.render()
+            ),
+        ));
+    };
+
+    let items = set_items(&receiver).borrow().clone();
+    let mut rendered = String::new();
+    for (index, item) in items.into_iter().enumerate() {
+        if index > 0 {
+            rendered.push_str(separator);
+        }
+        let item = if let Some(render) = render {
+            interpreter.invoke_value(render.clone(), vec![item], span)?
+        } else {
+            item
+        };
+        if render.is_some() {
+            let Value::String(item) = item else {
+                return Err(interpreter.runtime_error(
+                    span,
+                    format!(
+                        "Set.makeStr formatter must return Str, got {}",
+                        item.render()
+                    ),
+                ));
+            };
+            rendered.push_str(&item);
+        } else {
+            rendered.push_str(&interpreter.render_value(&item, span, "Set.makeStr")?);
+        }
+    }
+    Ok(Value::String(rendered))
 }

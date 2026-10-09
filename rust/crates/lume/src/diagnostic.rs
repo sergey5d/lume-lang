@@ -30,6 +30,18 @@ impl Diagnostic {
         }
     }
 
+    pub fn warning(code: &'static str, message: impl Into<String>, span: Span) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code,
+            message: message.into(),
+            span,
+            label: None,
+            notes: Vec::new(),
+            helps: Vec::new(),
+        }
+    }
+
     pub fn todo(stage: &'static str, message: impl Into<String>) -> Self {
         let origin = crate::source::LineColumn::new(1, 1);
         Self {

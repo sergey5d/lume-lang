@@ -1,0 +1,87 @@
+# EXPECT:
+# scalar present
+# scalar fallback
+# arrow present
+# arrow fallback
+# record Ada 3
+# record fallback1 fallback2
+# tuple Ada 3
+# tuple positional1 positional2
+# new new1 new2
+# grouped left right
+# grouped tuple a fallback c fallback
+# grouped shape a fallback c fallback
+
+class SomeClass {
+    field1 Str
+    field2 Str
+}
+
+def scalar(value Str?) Str {
+    let Some(item) = value else "fallback"
+    item
+}
+
+def arrow(value Str?) Str {
+    let item <- value else "fallback"
+    item
+}
+
+def recordFallback(value Any) Str {
+    let SomeClass { field1, field2 as length } = value else {
+        field1: "fallback1"
+        length: "fallback2"
+    }
+    field1 + " " + length
+}
+
+def tupleFallback(value Any) Str {
+    let SomeClass { field1, field2 } = value else ("positional1", "positional2")
+    field1 + " " + field2
+}
+
+def contextualNewFallback(value Any) Str {
+    let SomeClass { field1, field2 as length } = value else new {
+        field1: "new1"
+        length: "new2"
+    }
+    field1 + " " + length
+}
+
+def groupedTuple(left Str?, right Str?) Str {
+    let {
+        a <- left
+        c <- right
+    } else ("a fallback", "c fallback")
+    a + " " + c
+}
+
+def groupedShape(left Str?, right Str?) Str {
+    let {
+        a <- left
+        c <- right
+    } else {
+        a: "a fallback"
+        c: "c fallback"
+    }
+    a + " " + c
+}
+
+def main() Unit {
+    println("scalar", scalar(Some("present")))
+    println("scalar", scalar(None))
+    println("arrow", arrow(Some("present")))
+    println("arrow", arrow(None))
+
+    present Any = SomeClass("Ada", "3")
+    missing Any = 0
+    println("record", recordFallback(present))
+    println("record", recordFallback(missing))
+    println("tuple", tupleFallback(present))
+    println("tuple", tupleFallback(missing))
+    println("new", contextualNewFallback(missing))
+
+    println("grouped", groupedTuple(Some("left"), Some("right")))
+    println("grouped tuple", groupedTuple(None, Some("unused")))
+    println("grouped shape", groupedShape(Some("unused"), None))
+}

@@ -51,6 +51,19 @@ private interface VectorApi[T] with Iterable[T] {
         }
         result
     }
+
+    def makeStr(separator Str, render fn(T) Str) Str {
+        var result Str = ""
+        for idx <- Range(0, this.size) {
+            if let Some { value as item } = this.at(idx) {
+                if idx > 0 {
+                    result := result + separator
+                }
+                result := result + render(item)
+            }
+        }
+        result
+    }
 }
 
 class Vector[T] with VectorApi[T] {

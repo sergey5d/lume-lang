@@ -470,10 +470,9 @@ pub struct ForStmt {
     pub span: Span,
 }
 
-/// A `let PATTERN = expr else { ... }` statement, or a grouped
-/// `let { ... } else { ... }`, whose fallback must exit the current control
-/// flow path on match failure, either explicitly or through a `Never`-returning
-/// call.
+/// A `let PATTERN = expr else ...` statement, or grouped `let { ... } else ...`.
+/// The fallback either exits the current control-flow path or supplies values
+/// for every binding produced by the pattern.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetElseStmt {
     pub clauses: Vec<RefutableClause>,
@@ -611,6 +610,63 @@ impl Pattern {
             | Pattern::Constructor { span, .. } => *span,
         }
     }
+}
+
+/// Returns the user-visible bindings introduced by a pattern in structural
+/// order. Whole-pattern aliases follow the bindings nested inside the pattern.
+pub(crate) fn pattern_binding_names(pattern: &Pattern) -> Vec<String> {
+    fn collect(pattern: &Pattern, names: &mut Vec<String>) {
+        match pattern {
+            Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
+            Pattern::Extract { inner, .. } => collect(inner, names),
+            Pattern::Alias { inner, name, .. } => {
+                collect(inner, names);
+                if name != "_" && !names.contains(name) {
+                    names.push(name.clone());
+                }
+            }
+            Pattern::Binding { name, .. } => {
+                if name != "_" && !names.contains(name) {
+                    names.push(name.clone());
+                }
+            }
+            Pattern::Type { name, .. } => {
+                if let Some(name) = name
+                    && name != "_"
+                    && !names.contains(name)
+                {
+                    names.push(name.clone());
+                }
+            }
+            Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+                for element in elements {
+                    collect(element, names);
+                }
+                if let Pattern::List {
+                    rest: Some(rest), ..
+                } = pattern
+                    && rest.name != "_"
+                    && !names.contains(&rest.name)
+                {
+                    names.push(rest.name.clone());
+                }
+            }
+            Pattern::Record { fields, .. } => {
+                for field in fields {
+                    collect(&field.pattern, names);
+                }
+            }
+            Pattern::Constructor { args, .. } => {
+                for argument in args {
+                    collect(argument, names);
+                }
+            }
+        }
+    }
+
+    let mut names = Vec::new();
+    collect(pattern, &mut names);
+    names
 }
 
 /// A source-level expression.

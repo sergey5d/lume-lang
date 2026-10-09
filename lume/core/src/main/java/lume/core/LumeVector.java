@@ -183,6 +183,14 @@ public final class LumeVector<T> implements Iterable<T> {
         return new LumeVector<>(indexed);
     }
 
+    public String makeStr(String separator) {
+        return makeStr(separator, String::valueOf);
+    }
+
+    public String makeStr(String separator, Function<? super T, String> render) {
+        return String.join(separator, values.stream().map(render).toList());
+    }
+
     @Override
     public LumeIterator<T> iterator() {
         return LumeIterator.from(this);

@@ -867,6 +867,13 @@ struct PendingBinding {
 }
 
 #[derive(Debug, Clone)]
+struct AppliedBinding {
+    name: String,
+    ty: ir::Type,
+    local: ir::LocalId,
+}
+
+#[derive(Debug, Clone)]
 enum PendingBindingSource {
     Operand(ir::Operand),
     RValue(ir::RValue),
@@ -2131,37 +2138,133 @@ impl<'a> FunctionLowerer<'a> {
         });
 
         self.current_block = Some(success_block);
-        self.apply_pending_bindings(plan.bindings);
+        let bindings = self.apply_pending_bindings(plan.bindings);
         if self.current_block.is_some() {
             self.terminate(ir::Terminator::goto(continue_block));
         }
 
         self.current_block = Some(failure_block);
-        let value = self
-            .lower_block_value(&stmt.else_block)
-            .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
-        if self.current_block.is_some() {
-            self.terminate(ir::Terminator::ret(Some(value)));
-        }
+        self.lower_let_else_fallback(&stmt.else_block, &bindings, continue_block);
 
         self.current_block = Some(continue_block);
     }
 
     fn lower_let_else_clauses(&mut self, stmt: &core::LetElseStmt) {
         let failure_block = self.add_block();
+        let success_block = self.add_block();
         let continue_block = self.add_block();
 
-        self.lower_refutable_clause_chain(&stmt.clauses, continue_block, failure_block);
-
-        self.current_block = Some(failure_block);
-        let value = self
-            .lower_block_value(&stmt.else_block)
-            .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
+        let bindings =
+            self.lower_refutable_clause_chain(&stmt.clauses, success_block, failure_block);
         if self.current_block.is_some() {
-            self.terminate(ir::Terminator::ret(Some(value)));
+            self.terminate(ir::Terminator::goto(continue_block));
         }
 
+        self.current_block = Some(failure_block);
+        self.lower_let_else_fallback(&stmt.else_block, &bindings, continue_block);
+
         self.current_block = Some(continue_block);
+    }
+
+    fn lower_let_else_fallback(
+        &mut self,
+        block: &Block,
+        bindings: &[AppliedBinding],
+        continue_block: ir::BlockId,
+    ) {
+        let hidden = bindings
+            .iter()
+            .filter_map(|binding| {
+                self.current_scope()
+                    .remove(&binding.name)
+                    .map(|local| (binding.name.clone(), local))
+            })
+            .collect::<Vec<_>>();
+
+        let expected = if bindings.len() == 1 {
+            Some(bindings[0].ty.clone())
+        } else {
+            let tail = block
+                .statements
+                .last()
+                .and_then(|statement| match statement {
+                    Stmt::Expr(statement) => Some(&statement.expr),
+                    _ => None,
+                });
+            match tail {
+                Some(Expr::TupleLiteral { .. }) => Some(ir::Type::Tuple(
+                    bindings.iter().map(|binding| binding.ty.clone()).collect(),
+                )),
+                Some(Expr::RecordLiteral { .. })
+                | Some(Expr::ContextualNew {
+                    style: core::CallStyle::Brace,
+                    ..
+                }) => Some(ir::Type::Record(
+                    bindings
+                        .iter()
+                        .map(|binding| ir::NamedType {
+                            name: binding.name.clone(),
+                            ty: binding.ty.clone(),
+                        })
+                        .collect(),
+                )),
+                _ => None,
+            }
+        };
+        let value = self.lower_block_value_with_expected(block, expected.as_ref());
+
+        for (name, local) in hidden {
+            self.current_scope().insert(name, local);
+        }
+
+        if self.current_block.is_none() {
+            return;
+        }
+        let Some(value) = value else {
+            self.terminate(ir::Terminator::ret(Some(ir::Operand::Const(
+                ir::Constant::Unit,
+            ))));
+            return;
+        };
+        if matches!(self.operand_type(&value), Some(ir::Type::Never)) {
+            self.terminate(ir::Terminator::ret(Some(value)));
+            return;
+        }
+
+        if let [binding] = bindings {
+            self.push_statement(ir::Statement {
+                span: Some(block.span),
+                kind: ir::StatementKind::Assign {
+                    target: ir::Place::Local(binding.local),
+                    value: ir::RValue::Use(value),
+                },
+            });
+        } else {
+            let tuple = matches!(self.operand_type(&value), Some(ir::Type::Tuple(_)));
+            for (index, binding) in bindings.iter().enumerate() {
+                let field_name = if tuple {
+                    format!("_{}", index + 1)
+                } else {
+                    binding.name.clone()
+                };
+                let field = self.emit_temp_from_rvalue(
+                    ir::RValue::Field {
+                        base: value.clone(),
+                        name: field_name,
+                    },
+                    binding.ty.clone(),
+                    Some(block.span),
+                );
+                self.push_statement(ir::Statement {
+                    span: Some(block.span),
+                    kind: ir::StatementKind::Assign {
+                        target: ir::Place::Local(binding.local),
+                        value: ir::RValue::Use(field),
+                    },
+                });
+            }
+        }
+        self.terminate(ir::Terminator::goto(continue_block));
     }
 
     fn lower_refutable_clause_chain(
@@ -2169,7 +2272,8 @@ impl<'a> FunctionLowerer<'a> {
         clauses: &[core::RefutableClause],
         success_target: ir::BlockId,
         failure_target: ir::BlockId,
-    ) {
+    ) -> Vec<AppliedBinding> {
+        let mut bindings = Vec::new();
         for (index, clause) in clauses.iter().enumerate() {
             let scrutinee = self.lower_expr(&clause.value);
             let plan = self.lower_pattern_plan(scrutinee, &clause.pattern);
@@ -2189,11 +2293,12 @@ impl<'a> FunctionLowerer<'a> {
             });
 
             self.current_block = Some(success_block);
-            self.apply_pending_bindings(plan.bindings);
+            bindings.extend(self.apply_pending_bindings(plan.bindings));
             if index + 1 == clauses.len() {
                 break;
             }
         }
+        bindings
     }
 
     fn emit_panic(&mut self, message: &str, span: Span) {
@@ -4245,15 +4350,13 @@ impl<'a> FunctionLowerer<'a> {
         ))
     }
 
-    fn apply_pending_bindings(&mut self, bindings: Vec<PendingBinding>) {
+    fn apply_pending_bindings(&mut self, bindings: Vec<PendingBinding>) -> Vec<AppliedBinding> {
+        let mut applied = Vec::with_capacity(bindings.len());
         for binding in bindings {
-            let local_id = self.add_local(
-                binding.name.clone(),
-                binding.ty,
-                false,
-                ir::LocalKind::Binding,
-            );
-            self.current_scope().insert(binding.name.clone(), local_id);
+            let name = binding.name.clone();
+            let ty = binding.ty.clone();
+            let local_id = self.add_local(name.clone(), binding.ty, false, ir::LocalKind::Binding);
+            self.current_scope().insert(name.clone(), local_id);
             let value = match binding.source {
                 PendingBindingSource::Operand(value) => ir::RValue::Use(value),
                 PendingBindingSource::RValue(value) => value,
@@ -4265,7 +4368,13 @@ impl<'a> FunctionLowerer<'a> {
                     value,
                 },
             });
+            applied.push(AppliedBinding {
+                name,
+                ty,
+                local: local_id,
+            });
         }
+        applied
     }
 
     fn emit_temp_from_rvalue(

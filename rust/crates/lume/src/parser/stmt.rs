@@ -221,7 +221,7 @@ impl<'a> Parser<'a> {
             let else_checkpoint = self.checkpoint();
             self.skip_newlines();
             if self.match_keyword(Keyword::Else) {
-                let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+                let else_block = self.parse_let_else_body()?;
                 let end = else_block.span;
                 return Some(Stmt::LetElse(LetElseStmt {
                     clauses,
@@ -267,7 +267,7 @@ impl<'a> Parser<'a> {
         let else_checkpoint = self.checkpoint();
         self.skip_newlines();
         if self.match_keyword(Keyword::Else) {
-            let else_block = self.parse_block_or_inline_stmt_body("let else")?;
+            let else_block = self.parse_let_else_body()?;
             let end = else_block.span;
             return Some(Stmt::LetElse(LetElseStmt {
                 clauses: Vec::new(),

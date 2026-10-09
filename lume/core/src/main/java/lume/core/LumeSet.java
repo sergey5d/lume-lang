@@ -2,6 +2,7 @@ package lume.core;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.function.Function;
 
 public final class LumeSet<T> {
     private final LinkedHashSet<T> values;
@@ -46,6 +47,14 @@ public final class LumeSet<T> {
 
     public boolean nonEmpty() {
         return !values.isEmpty();
+    }
+
+    public String makeStr(String separator) {
+        return makeStr(separator, String::valueOf);
+    }
+
+    public String makeStr(String separator, Function<? super T, String> render) {
+        return String.join(separator, values.stream().map(render).toList());
     }
 
     public Set<T> asJava() {

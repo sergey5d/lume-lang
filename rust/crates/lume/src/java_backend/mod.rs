@@ -41,6 +41,7 @@ impl JavaBackendOptions {
 #[derive(Debug, Clone, Default)]
 pub struct JavaBackendResult {
     pub diagnostics: Vec<LocatedDiagnostic>,
+    pub warnings: Vec<LocatedDiagnostic>,
     pub written_files: Vec<PathBuf>,
 }
 
@@ -54,6 +55,7 @@ pub fn generate_java_path(
     if !external_resolution.diagnostics.is_empty() {
         return Ok(JavaBackendResult {
             diagnostics: external_resolution.diagnostics,
+            warnings: Vec::new(),
             written_files: Vec::new(),
         });
     }
@@ -65,9 +67,12 @@ pub fn generate_java_path(
     if !bundled.diagnostics.is_empty() {
         return Ok(JavaBackendResult {
             diagnostics: bundled.diagnostics,
+            warnings: bundled.warnings,
             written_files: Vec::new(),
         });
     }
+
+    let warnings = bundled.warnings;
 
     let bundle = bundled
         .bundle
@@ -78,6 +83,7 @@ pub fn generate_java_path(
     if !unsupported_diagnostics.is_empty() {
         return Ok(JavaBackendResult {
             diagnostics: unsupported_diagnostics,
+            warnings,
             written_files: Vec::new(),
         });
     }
@@ -96,6 +102,7 @@ pub fn generate_java_path(
 
     Ok(JavaBackendResult {
         diagnostics: Vec::new(),
+        warnings,
         written_files,
     })
 }
@@ -4357,8 +4364,34 @@ def prefix(values [Int?]) Int {
     total
 }
 
+def scalarFallback(value Int?) Int {
+    let item <- value else 7
+    item
+}
+
+def tupleFallback(left Int?, right Int?) Int {
+    let {
+        a <- left
+        b <- right
+    } else (5, 6)
+    a + b
+}
+
+def shapeFallback(left Int?, right Int?) Int {
+    let {
+        a <- left
+        b <- right
+    } else {
+        a: 7
+        b: 8
+    }
+    a + b
+}
+
 def main() Int =
-    explicit(Some(4)) + pair(Some(2), Some(3)) + pair(Some(2), None) + prefix([Some(1), Some(2), None, Some(9)])
+    explicit(Some(4)) + pair(Some(2), Some(3)) + pair(Some(2), None) +
+        prefix([Some(1), Some(2), None, Some(9)]) + scalarFallback(None) +
+        tupleFallback(None, Some(99)) + shapeFallback(Some(99), None)
 "#,
         )
         .expect("write source");
@@ -4371,6 +4404,8 @@ def main() Int =
             .expect("read module Java");
         assert!(module.contains("if (!(__let"), "{module}");
         assert!(module.contains("instanceof Option.Some<?>"), "{module}");
+        assert!(module.contains("boolean __letMatched"), "{module}");
+        assert!(module.contains("lume.core.LumeShape"), "{module}");
         assert!(module.contains("break;"), "{module}");
         assert!(!module.contains("__block"), "{module}");
 
@@ -4391,7 +4426,7 @@ def main() Int =
             );
             assert_eq!(
                 String::from_utf8(output.stdout).expect("Java stdout utf8"),
-                "11\n"
+                "44\n"
             );
         }
 

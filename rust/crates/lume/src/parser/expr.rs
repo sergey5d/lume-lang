@@ -1088,6 +1088,15 @@ impl<'a> Parser<'a> {
         })
     }
 
+    pub(super) fn parse_let_else_body(&mut self) -> Option<Block> {
+        if self.at(TokenKind::LBrace) {
+            return self
+                .parse_expression_brace_body()
+                .map(ExpressionBraceBody::into_block);
+        }
+        self.parse_block_or_inline_stmt_body("let else")
+    }
+
     pub(super) fn parse_if_body_block(&mut self) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
