@@ -11,6 +11,8 @@ editor_bin="${CODE_BIN:-}"
 if [[ -z "${editor_bin}" ]]; then
   if command -v code >/dev/null 2>&1; then
     editor_bin="code"
+  elif [[ -x "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" ]]; then
+    editor_bin="/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
   elif command -v cursor >/dev/null 2>&1; then
     editor_bin="cursor"
   elif command -v codium >/dev/null 2>&1; then

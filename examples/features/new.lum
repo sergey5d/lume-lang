@@ -1,0 +1,54 @@
+# EXPECT:
+# point 3
+# positional 7
+# origin 0 0
+# worker Ada 42
+# stored 11 12
+# anonymous sample 2
+
+shape Point {
+    x Int
+    y Int
+}
+
+class Worker {
+    name Str
+    age Int
+}
+
+def origin() Point = new {
+    x: 0
+    y: 0
+}
+
+def describe(worker Worker) Str =
+    "${worker.name} ${worker.age}"
+
+def main() Unit {
+    x = 1
+    y = 2
+    point Point = new { x, y }
+    positional Point = new(3, 4)
+    zero = origin()
+
+    workers [Str: Point] = []
+    workers["home"] := new {
+        x: 11
+        y: 12
+    }
+    stored = workers["home"]!
+
+    anonymous = new {
+        name: "sample"
+        count: 2
+    }
+    empty = new {}
+    widened Any = new { x, y }
+
+    println("point", point.x + point.y)
+    println("positional", positional.x + positional.y)
+    println("origin", zero.x, zero.y)
+    println("worker", describe(new { name: "Ada", age: 42 }))
+    println("stored", stored.x, stored.y)
+    println("anonymous", anonymous.name, anonymous.count)
+}

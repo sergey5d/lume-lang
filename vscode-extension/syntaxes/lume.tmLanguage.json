@@ -157,6 +157,10 @@
     "keywords": {
       "patterns": [
         {
+          "name": "keyword.control.lume",
+          "match": "\\bdefault\\b"
+        },
+        {
           "match": "\\b(is)([ \\t]+)(not)\\b",
           "captures": {
             "1": {

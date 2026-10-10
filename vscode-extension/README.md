@@ -43,7 +43,7 @@ cd vscode-extension
 ./install.sh
 ```
 
-The script packages the extension as `lume-syntax-0.0.2.vsix` and installs it
+The script packages the extension as `lume-syntax-0.0.5.vsix` and installs it
 with the first VS Code-compatible CLI it finds: `code`, `cursor`, or `codium`.
 It uses `npx @vscode/vsce`, so Node/npm must be available.
 
@@ -63,8 +63,8 @@ Manual install also works:
 
 ```sh
 cd vscode-extension
-npx --yes @vscode/vsce package --allow-missing-repository --out lume-syntax-0.0.2.vsix
-code --install-extension "$(pwd)/lume-syntax-0.0.2.vsix" --force
+npx --yes @vscode/vsce package --allow-missing-repository --out lume-syntax-0.0.5.vsix
+code --install-extension "$(pwd)/lume-syntax-0.0.5.vsix" --force
 ```
 
 Or use the UI:
@@ -73,7 +73,7 @@ Or use the UI:
 2. Open the Extensions view.
 3. Click the `...` menu.
 4. Choose `Install from VSIX...`.
-5. Select `vscode-extension/lume-syntax-0.0.2.vsix`.
+5. Select `vscode-extension/lume-syntax-0.0.5.vsix`.
 
 For development, the easiest path is:
 
