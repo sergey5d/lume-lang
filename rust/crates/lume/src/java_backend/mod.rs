@@ -3947,6 +3947,37 @@ class EmptyWorker {
     }
 }
 
+class RetrySettings {
+    attempts Int = 3
+}
+
+class ExplicitSettings {
+    attempts Int
+
+    new(attempts Int = 4) {
+        this.attempts = attempts
+    }
+}
+
+shape NestedDefaults {
+    value Str = "nested"
+}
+
+class DefaultConfig {
+    label Str = "kept"
+    enabled Bool
+    retries RetrySettings
+    explicit ExplicitSettings
+    nested NestedDefaults
+    note Str?
+    files [Str]
+}
+
+shape DefaultShape {
+    name Str = "Alex"
+    family Str
+}
+
 interface Printable {
     def print() Str
 }
@@ -3970,6 +4001,10 @@ def main() Unit {
     callbackResult = { ...shapeCallback(), value: 4 }
     callback()
     widened Any = new { x, y }
+    defaults DefaultConfig = default {}
+    changed DefaultConfig = default { label: "changed" }
+    person DefaultShape = default {}
+    flags { enabled Bool, files [Str] } = default {}
     base = 10
     printable Printable = object with Printable {
         x Int = base
@@ -3985,6 +4020,16 @@ def main() Unit {
     println(printable.print())
     println(punned.x + anonymous.y)
     println(emptyWorker.value, emptySet.size, callbackResult.value)
+    println(
+        defaults.label,
+        defaults.enabled,
+        defaults.retries.attempts,
+        defaults.explicit.attempts,
+        defaults.nested.value,
+        defaults.note is None,
+        defaults.files.size
+    )
+    println(changed.label, person.name, person.family, flags.enabled, flags.files.size)
 }
 "#,
         )
@@ -4028,6 +4073,7 @@ def main() Unit {
             module.contains("private final Long __field_y = 12L"),
             "{module}"
         );
+        assert!(module.contains("__LumeDefaultMarker.INSTANCE"), "{module}");
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated Java");
@@ -4045,7 +4091,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("Java stdout utf8"),
-            "30\nAda 42\nBen!\n7\n10:12\n7\n9 0 4\n"
+            "30\nAda 42\nBen!\n7\n10:12\n7\n9 0 4\nkept false 3 4 nested true 0\nchanged Alex  false 0\n"
         );
 
         let _ = fs::remove_dir_all(temp);

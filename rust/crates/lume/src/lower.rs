@@ -5066,7 +5066,12 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|item| self.infer_expr_type_with_overrides(item, overrides))
                     .collect(),
             ),
-            Expr::ContextualNew { args, style, .. } if *style == core::CallStyle::Brace => args
+            Expr::ContextualNew {
+                args,
+                style,
+                default_initialize: false,
+                ..
+            } if *style == core::CallStyle::Brace => args
                 .first()
                 .map(|arg| self.infer_expr_type_with_overrides(&arg.value, overrides))
                 .unwrap_or(ir::Type::Unknown),
@@ -6840,7 +6845,22 @@ impl<'a> FunctionLowerer<'a> {
                     structural: call_uses_structural_record_arg(&normalized_args, *style),
                 })
             }
-            Expr::ContextualNew { args, style, span } => {
+            Expr::ContextualNew {
+                args,
+                style,
+                default_initialize,
+                span,
+            } => {
+                if *default_initialize {
+                    let Some(expected) = expected else {
+                        self.invariant(
+                            "'default { ... }' should have an expected class or shape type before lowering",
+                            *span,
+                        );
+                        return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
+                    };
+                    return Some(self.lower_default_initialization(args, expected, *span));
+                }
                 if *style == core::CallStyle::Brace
                     && expected.is_none_or(|ty| {
                         self.named_construct_fields(ty).is_none()
@@ -7730,7 +7750,60 @@ impl<'a> FunctionLowerer<'a> {
         if !values.is_empty() {
             return None;
         }
-        let expected_fields = self.named_construct_fields(expected)?;
+        self.named_construct_fields(expected)?;
+        self.lower_record_literal_as_construct(fields, values, expected, false)
+    }
+
+    fn lower_default_initialization(
+        &mut self,
+        args: &[core::CallArg],
+        expected: &ir::Type,
+        span: Span,
+    ) -> ir::RValue {
+        let [
+            core::CallArg {
+                value: Expr::RecordLiteral { fields, values, .. },
+                ..
+            },
+        ] = args
+        else {
+            self.invariant(
+                "'default { ... }' should contain one record literal before lowering",
+                span,
+            );
+            return ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit));
+        };
+
+        if let ir::Type::Named { name, .. } = expected
+            && self.named_type_has_explicit_constructors(name)
+        {
+            return ir::RValue::Call {
+                callee: ir::Callee::Named {
+                    path: vec![name.clone()],
+                },
+                args: Vec::new(),
+                structural: false,
+            };
+        }
+
+        self.lower_record_literal_as_construct(fields, values, expected, true)
+            .unwrap_or_else(|| {
+                self.invariant(
+                    "default initialization should resolve all fields before lowering",
+                    span,
+                );
+                ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
+            })
+    }
+
+    fn lower_record_literal_as_construct(
+        &mut self,
+        fields: &[core::CallArg],
+        _values: &[Expr],
+        expected: &ir::Type,
+        initialize_omitted: bool,
+    ) -> Option<ir::RValue> {
+        let expected_fields = self.construct_fields(expected)?;
         if fields
             .iter()
             .filter(|field| field.name.is_some())
@@ -7779,7 +7852,7 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         let mut lowered_fields = Vec::new();
-        for (name, ty, has_initializer, initializer) in expected_fields {
+        for (name, ty, has_initializer, _initializer) in expected_fields {
             let value = if let Some((_, _, value)) = explicit_fields
                 .iter()
                 .find(|(_, field_name, _)| field_name == &name)
@@ -7798,7 +7871,11 @@ impl<'a> FunctionLowerer<'a> {
                     name: name.clone(),
                 }))
             } else if has_initializer {
-                ir::Operand::Const(initializer.unwrap_or_else(|| default_constant_for_type(&ty)))
+                // The target's normal initializer runs during allocation. Omitting
+                // the field here preserves arbitrary initializer expressions.
+                continue;
+            } else if initialize_omitted {
+                self.lower_default_initialized_value(&ty, fields.first().map(|field| field.span))
             } else {
                 return None;
             };
@@ -7808,6 +7885,76 @@ impl<'a> FunctionLowerer<'a> {
         Some(ir::RValue::Construct {
             ty: expected.clone(),
             fields: lowered_fields,
+        })
+    }
+
+    fn construct_fields(
+        &self,
+        expected: &ir::Type,
+    ) -> Option<Vec<(String, ir::Type, bool, Option<ir::Constant>)>> {
+        if let ir::Type::Record(fields) = expected {
+            return Some(
+                fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone(), false, None))
+                    .collect(),
+            );
+        }
+        self.named_construct_fields(expected)
+    }
+
+    fn lower_default_initialized_value(
+        &mut self,
+        ty: &ir::Type,
+        span: Option<Span>,
+    ) -> ir::Operand {
+        let constant = match ty {
+            ir::Type::Unit => Some(ir::Constant::Unit),
+            ir::Type::Bool => Some(ir::Constant::Bool(false)),
+            ir::Type::Int => Some(ir::Constant::Int(0)),
+            ir::Type::Float => Some(ir::Constant::Float(0.0)),
+            ir::Type::Str => Some(ir::Constant::String(String::new())),
+            ir::Type::Named { name, .. } if name == "Option" => Some(ir::Constant::OptionNone),
+            ir::Type::Named { name, .. } if name == "Bool" => Some(ir::Constant::Bool(false)),
+            ir::Type::Named { name, .. } if matches!(name.as_str(), "Int" | "Rune") => {
+                Some(ir::Constant::Int(0))
+            }
+            ir::Type::Named { name, .. } if name == "Float" => Some(ir::Constant::Float(0.0)),
+            ir::Type::Named { name, .. } if name == "Str" => {
+                Some(ir::Constant::String(String::new()))
+            }
+            _ => None,
+        };
+        if let Some(constant) = constant {
+            return ir::Operand::Const(constant);
+        }
+        if matches!(ty, ir::Type::Record(fields) if fields.is_empty()) {
+            return self.emit_temp_from_rvalue(ir::RValue::Record(Vec::new()), ty.clone(), span);
+        }
+        let ir::Type::Named { name, .. } = ty else {
+            return ir::Operand::Const(default_constant_for_type(ty));
+        };
+        self.emit_temp_from_rvalue(
+            ir::RValue::Call {
+                callee: ir::Callee::Named {
+                    path: vec![name.clone()],
+                },
+                args: Vec::new(),
+                structural: false,
+            },
+            ty.clone(),
+            span,
+        )
+    }
+
+    fn named_type_has_explicit_constructors(&self, name: &str) -> bool {
+        self.program.types.iter().any(|ty| {
+            ty.name == name
+                && ty.methods.iter().copied().any(|id| {
+                    self.program
+                        .function(id)
+                        .is_some_and(|function| function.name == "new")
+                })
         })
     }
 

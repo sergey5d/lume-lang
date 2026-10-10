@@ -1,0 +1,38 @@
+# EXPECT:
+# Alex  false true 0 0 3
+# Jordan Doe true 0
+
+class RetrySettings {
+    attempts Int = 3
+}
+
+shape Person {
+    name Str = "Alex"
+    family Str
+    active Bool
+    nickname Str?
+    tags [Str]
+    scores [Str: Int]
+    retries RetrySettings
+}
+
+def main() Unit {
+    person Person = default {}
+    changed Person = default {
+        name: "Jordan"
+        family: "Doe"
+        active: true
+    }
+    flags { active Bool, tags [Str] } = default {}
+
+    println(
+        person.name,
+        person.family,
+        person.active,
+        person.nickname is None,
+        person.tags.size,
+        person.scores.size,
+        person.retries.attempts
+    )
+    println(changed.name, changed.family, changed.active, flags.tags.size)
+}

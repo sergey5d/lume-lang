@@ -894,13 +894,22 @@ impl<'a> Parser<'a> {
 
     fn parse_contextual_new_expr(&mut self) -> Option<Expr> {
         let start = self.current_span();
+        let default_initialize = self.current().lexeme == "default";
         self.advance();
+        if default_initialize && !self.at(TokenKind::LBrace) {
+            self.error_at_current(
+                "expected_expression",
+                "default initialization uses 'default { ... }'",
+            );
+            return None;
+        }
         if self.match_token(TokenKind::LParen) {
             let args = self.with_trailing_block_calls_allowed(|parser| parser.parse_call_args())?;
             let end = self.consume(TokenKind::RParen, "expected ')' after constructor inputs")?;
             return Some(Expr::ContextualNew {
                 args,
                 uses_brace_syntax: false,
+                default_initialize: false,
                 span: start.cover(end),
             });
         }
@@ -920,12 +929,13 @@ impl<'a> Parser<'a> {
                     span,
                 }],
                 uses_brace_syntax: true,
+                default_initialize,
                 span,
             });
         }
         self.error_at_current(
             "expected_expression",
-            "contextual construction uses 'new(...)' or 'new { ... }'",
+            "contextual construction uses 'new(...)', 'new { ... }', or 'default { ... }'",
         );
         None
     }
@@ -2015,8 +2025,9 @@ impl<'a> Parser<'a> {
             return self.with_trailing_block_calls_allowed(|parser| parser.parse_object_expr());
         }
         if self.at(TokenKind::Identifier)
-            && self.current().lexeme == "new"
-            && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace))
+            && ((self.current().lexeme == "new"
+                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace)))
+                || (self.current().lexeme == "default" && self.at_next(TokenKind::LBrace)))
         {
             return self
                 .with_trailing_block_calls_allowed(|parser| parser.parse_contextual_new_expr());

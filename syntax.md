@@ -1277,6 +1277,60 @@ point Point = { x: 1, y: 2 }
 point Point = new { x: 1, y: 2 }
 ```
 
+### Default initialization
+
+`default { ... }` explicitly fills omitted immediate construction fields. A
+declared field initializer is preserved. Otherwise, `Bool`, `Int`, `Float`,
+`Str`, and `Rune` receive their primitive defaults, `Option[T]` receives
+`None`, and another concrete field type is constructed only when its ordinary
+accessible constructor accepts zero supplied arguments:
+
+```txt
+class RetrySettings {
+    attempts Int = 3
+}
+
+shape Person {
+    name Str = "Alex"
+    family Str
+    active Bool
+    nickname Str?
+    tags [Str]
+    retries RetrySettings
+}
+
+person Person = default {}
+# name == "Alex", family == "", active == false
+# nickname == None, tags is empty, retries.attempts == 3
+
+renamed Person = default { name: "Jordan" }
+```
+
+Default initialization is deliberately nonrecursive. It does not inspect a
+nested type's fields and invent constructor arguments:
+
+```txt
+shape Point {
+    x Int
+    y Int
+}
+
+shape State {
+    origin Point
+    files [Str]
+}
+
+state State = default {} # invalid: Point requires construction inputs
+state State = default { origin: Point(0, 0) } # valid
+```
+
+Empty collections qualify through their existing zero-argument constructors;
+their element types do not need defaults. Explicit fields are evaluated once in
+source order. Remaining automatic values are created once in declaration order.
+`default { ... }` requires one concrete class, named shape, or anonymous-shape
+schema from context; it does not select an interface implementation or a union
+alternative.
+
 Contextual construction never selects between overloaded concrete targets:
 
 ```txt

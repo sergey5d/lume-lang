@@ -4988,8 +4988,15 @@ impl<'a> Checker<'a> {
             Expr::ContextualNew {
                 args,
                 uses_brace_syntax,
+                default_initialize,
                 span,
-            } => self.check_contextual_new_expr(args, *uses_brace_syntax, *span, expected),
+            } => {
+                if *default_initialize {
+                    self.check_default_initialization_expr(args, *span, expected)
+                } else {
+                    self.check_contextual_new_expr(args, *uses_brace_syntax, *span, expected)
+                }
+            }
             Expr::Member {
                 receiver,
                 name,
@@ -6160,6 +6167,308 @@ impl<'a> Checker<'a> {
             &[],
         );
         materialize_type(expected)
+    }
+
+    fn check_default_initialization_expr(
+        &mut self,
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+        expected: &Ty,
+    ) -> Ty {
+        let [
+            crate::ast::CallArg {
+                value: record @ Expr::RecordLiteral { fields, values, .. },
+                ..
+            },
+        ] = args
+        else {
+            for arg in args {
+                self.check_expr(call_arg_value_expr(arg));
+            }
+            self.add_error(
+                "invalid_default_initialization",
+                "default initialization requires construction fields",
+                span,
+            );
+            return Ty::Unknown;
+        };
+
+        if !values.is_empty() {
+            for value in values {
+                self.check_expr(value);
+            }
+            self.add_error(
+                "invalid_default_initialization",
+                "default initialization uses named fields, not positional values",
+                span,
+            );
+            return materialize_type(expected);
+        }
+
+        let (target_name, target_kind, target_fields, explicit_constructors) = match expected {
+            Ty::Record(fields) => (
+                None,
+                TypeKind::Record,
+                fields
+                    .iter()
+                    .map(|(name, ty)| FieldSig {
+                        name: name.clone(),
+                        ty: ty.clone(),
+                        mutable: false,
+                        visibility: Visibility::Default,
+                        hidden: false,
+                        has_initializer: false,
+                        variadic: false,
+                    })
+                    .collect::<Vec<_>>(),
+                Vec::new(),
+            ),
+            Ty::Named(name, type_args) => {
+                let Some(mut sig) = self.lookup_any_type(name) else {
+                    self.check_expr(record);
+                    self.add_error(
+                        "invalid_default_initialization",
+                        format!(
+                            "default initialization target '{}' is not a declared type",
+                            name
+                        ),
+                        span,
+                    );
+                    return Ty::Unknown;
+                };
+                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+                    self.check_expr(record);
+                    self.add_error(
+                        "invalid_default_initialization",
+                        format!(
+                            "default initialization requires a concrete class or shape target, got '{}'",
+                            expected.describe()
+                        ),
+                        span,
+                    );
+                    return Ty::Unknown;
+                }
+
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(type_args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                for field in &mut sig.fields {
+                    field.ty = substitute_type(&field.ty, &subst);
+                }
+                for methods in sig.methods.values_mut() {
+                    for method in methods {
+                        *method = instantiate_function_sig(method.clone(), &subst);
+                    }
+                }
+
+                if sig.kind == TypeKind::Class
+                    && sig.fields.iter().any(|field| {
+                        field.visibility != Visibility::Default && !field.has_initializer
+                    })
+                {
+                    self.check_expr(record);
+                    self.add_error(
+                        "invalid_default_initialization",
+                        format!(
+                            "class '{}' cannot be default-initialized because non-public fields without initializers are not construction inputs",
+                            sig.name
+                        ),
+                        span,
+                    );
+                    return materialize_type(expected);
+                }
+
+                let explicit_constructors = sig.methods.get("new").cloned().unwrap_or_default();
+                let target_fields = sig
+                    .fields
+                    .iter()
+                    .filter(|field| {
+                        if sig.kind == TypeKind::Class {
+                            field.visibility == Visibility::Default
+                        } else {
+                            self.can_access_field(&sig, field)
+                        }
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (
+                    Some(sig.name),
+                    sig.kind,
+                    target_fields,
+                    explicit_constructors,
+                )
+            }
+            _ => {
+                self.check_expr(record);
+                self.add_error(
+                    "invalid_default_initialization",
+                    format!(
+                        "default initialization requires an expected class or shape type, got '{}'",
+                        expected.describe()
+                    ),
+                    span,
+                );
+                return Ty::Unknown;
+            }
+        };
+
+        if !explicit_constructors.is_empty() {
+            let accessible_zero_arg = explicit_constructors.iter().any(|constructor| {
+                self.can_access_constructor_sig(target_name.as_deref(), constructor)
+                    && arrange_param_args(&constructor.params, &[]).missing_required == 0
+            });
+            if !accessible_zero_arg {
+                self.check_expr(record);
+                self.add_error(
+                    "invalid_default_initialization",
+                    format!(
+                        "'{}' cannot be constructed with zero arguments",
+                        target_name.as_deref().unwrap_or("target")
+                    ),
+                    span,
+                );
+                return materialize_type(expected);
+            }
+            if !fields.is_empty() {
+                self.check_expr(record);
+                self.add_error(
+                    "invalid_default_initialization",
+                    "default initialization cannot override fields of a class with explicit constructors",
+                    span,
+                );
+                return materialize_type(expected);
+            }
+            return materialize_type(expected);
+        }
+
+        for field in fields.iter().filter(|field| field.name.is_some()) {
+            let name = field.name.as_deref().expect("filtered named field");
+            if !target_fields.iter().any(|target| target.name == name) {
+                self.add_error(
+                    "invalid_default_initialization",
+                    format!(
+                        "{} '{}' has no construction field '{}'",
+                        type_kind_label(target_kind),
+                        target_name.as_deref().unwrap_or("anonymous shape"),
+                        name
+                    ),
+                    field.span,
+                );
+            }
+        }
+
+        let expected_record = Ty::Record(
+            target_fields
+                .iter()
+                .map(|field| (field.name.clone(), field.ty.clone()))
+                .collect(),
+        );
+        let actual = self.check_expr_against(record, &expected_record);
+        let actual_fields = self.structural_fields_for_type(&actual).unwrap_or_default();
+
+        for field in &target_fields {
+            if let Some((_, actual_ty)) = actual_fields.iter().find(|(name, _)| name == &field.name)
+            {
+                self.require_assignable(
+                    actual_ty,
+                    &field.ty,
+                    span,
+                    "invalid_argument_type",
+                    format!(
+                        "field '{}' expects '{}' but got '{}'",
+                        field.name,
+                        field.ty.describe(),
+                        actual_ty.describe()
+                    ),
+                );
+                continue;
+            }
+            if field.has_initializer || self.type_supports_default_initialization(&field.ty) {
+                continue;
+            }
+            self.add_error(
+                "invalid_default_initialization",
+                format!(
+                    "field '{}' requires an explicit value: '{}' cannot be constructed with zero arguments",
+                    field.name,
+                    field.ty.describe()
+                ),
+                span,
+            );
+        }
+
+        materialize_type(expected)
+    }
+
+    fn can_access_constructor_sig(
+        &self,
+        owner_name: Option<&str>,
+        constructor: &FunctionSig,
+    ) -> bool {
+        let Some(owner_name) = owner_name else {
+            return false;
+        };
+        self.lookup_any_type(owner_name)
+            .is_some_and(|owner| self.can_access_constructor(&owner, constructor.visibility))
+    }
+
+    fn type_supports_default_initialization(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Named(name, _)
+                if matches!(
+                    name.as_str(),
+                    "Bool" | "Int" | "Float" | "Str" | "Rune" | "Unit"
+                ) =>
+            {
+                true
+            }
+            Ty::Named(name, _) if name == "Option" => true,
+            Ty::Record(fields) => fields.is_empty(),
+            Ty::Named(name, type_args) => {
+                let Some(mut sig) = self.lookup_any_type(name) else {
+                    return false;
+                };
+                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
+                    return false;
+                }
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(type_args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                for methods in sig.methods.values_mut() {
+                    for method in methods {
+                        *method = instantiate_function_sig(method.clone(), &subst);
+                    }
+                }
+                if let Some(constructors) = sig.methods.get("new")
+                    && !constructors.is_empty()
+                {
+                    return constructors.iter().any(|constructor| {
+                        self.can_access_constructor(&sig, constructor.visibility)
+                            && arrange_param_args(&constructor.params, &[]).missing_required == 0
+                    });
+                }
+                if sig.kind == TypeKind::Class
+                    && sig.fields.iter().any(|field| {
+                        field.visibility != Visibility::Default && !field.has_initializer
+                    })
+                {
+                    return false;
+                }
+                sig.fields
+                    .iter()
+                    .filter(|field| {
+                        sig.kind != TypeKind::Class || field.visibility == Visibility::Default
+                    })
+                    .all(|field| field.has_initializer)
+            }
+            _ => false,
+        }
     }
 
     fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {
@@ -17086,6 +17395,87 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_nonrecursive_default_initialization() {
+        let program = parse_inline(
+            r#"
+class RetrySettings {
+    attempts Int = 3
+}
+
+class ExplicitSettings {
+    attempts Int
+
+    new(attempts Int = 4) {
+        this.attempts = attempts
+    }
+}
+
+shape NestedDefaults {
+    value Str = "nested"
+}
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Settings {
+    label Str = "kept"
+    enabled Bool
+    retries RetrySettings
+    explicit ExplicitSettings
+    nested NestedDefaults
+    note Str?
+    files [Str]
+    counts [Str: Int]
+}
+
+def main() Unit {
+    settings Settings = default {}
+    overridden Settings = default { label: "changed" }
+    anonymous { enabled Bool, files [Str] } = default {}
+    point Point = default { x: 1, y: 2 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_default_initialization_that_would_require_recursive_derivation() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+shape State {
+    origin Point
+    files [Str]
+}
+
+def main() Unit {
+    state State = default {}
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_default_initialization"
+                    && diagnostic
+                        .message
+                        .contains("field 'origin' requires an explicit value")
+                    && diagnostic.message.contains("Point")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

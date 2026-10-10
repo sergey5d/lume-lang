@@ -2270,6 +2270,19 @@ fn parses_contextual_new_forms() {
 }
 
 #[test]
+fn parses_default_initialization() {
+    assert!(matches!(
+        parse_expr_only("default { name: \"Ada\" }"),
+        Expr::ContextualNew {
+            uses_brace_syntax: true,
+            default_initialize: true,
+            ref args,
+            ..
+        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 1)
+    ));
+}
+
+#[test]
 fn parses_empty_braces_as_construction_in_expression_positions() {
     assert!(matches!(
         parse_expr_only("{}"),

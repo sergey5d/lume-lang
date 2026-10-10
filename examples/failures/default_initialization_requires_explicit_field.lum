@@ -1,0 +1,16 @@
+# FAIL_REGEX:
+# .*field 'origin' requires an explicit value.*Point.*cannot be constructed with zero arguments.*
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape State {
+    origin Point
+    files [Str]
+}
+
+def main() Unit {
+    state State = default {}
+}

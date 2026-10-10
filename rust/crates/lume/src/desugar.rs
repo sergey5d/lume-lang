@@ -206,6 +206,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
         ast::Expr::ContextualNew {
             args,
             uses_brace_syntax,
+            default_initialize,
             span,
         } => {
             let style = if *uses_brace_syntax {
@@ -219,6 +220,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
                     .map(|arg| desugar_call_arg(arg, style))
                     .collect(),
                 style,
+                default_initialize: *default_initialize,
                 span: *span,
             }
         }

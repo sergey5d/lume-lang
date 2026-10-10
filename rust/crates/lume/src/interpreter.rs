@@ -3714,14 +3714,22 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match ty {
             ir::Type::Named { name, .. } => {
-                let args = fields
+                let values = fields
                     .iter()
-                    .map(|field| self.eval_operand_ref(frame, &field.value, span))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.construct_named_type(name, args, span, false)?
-                    .ok_or_else(|| {
-                        self.runtime_error(span, format!("cannot construct type '{name}'"))
+                    .map(|field| {
+                        Ok((
+                            field.name.clone(),
+                            self.eval_operand_ref(frame, &field.value, span)?,
+                        ))
                     })
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.construct_named_type(
+                    name,
+                    vec![Value::Record(Rc::new(RefCell::new(values)))],
+                    span,
+                    true,
+                )?
+                .ok_or_else(|| self.runtime_error(span, format!("cannot construct type '{name}'")))
             }
             ir::Type::Record(field_types) => {
                 let mut out = Vec::new();
@@ -8392,6 +8400,66 @@ mod tests {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "7 11 true\n0 0 0 2 3\n");
+    }
+
+    #[test]
+    fn runs_default_initialization_without_recursive_derivation() {
+        let program = lower_inline(
+            r#"
+            class RetrySettings {
+                attempts Int = 3
+            }
+
+            class ExplicitSettings {
+                attempts Int
+
+                new(attempts Int = 4) {
+                    this.attempts = attempts
+                }
+            }
+
+            shape NestedDefaults {
+                value Str = "nested"
+            }
+
+            class Config {
+                label Str = "kept"
+                enabled Bool
+                retries RetrySettings
+                explicit ExplicitSettings
+                nested NestedDefaults
+                note Str?
+                files [Str]
+                counts [Str: Int]
+            }
+
+            def main() Unit {
+                config Config = default {}
+                changed Config = default { label: "changed" }
+                anonymous { enabled Bool, files [Str] } = default {}
+
+                println(
+                    config.label,
+                    config.enabled,
+                    config.retries.attempts,
+                    config.explicit.attempts,
+                    config.nested.value,
+                    config.note is None,
+                    config.files.size,
+                    config.counts.size
+                )
+                println(changed.label, changed.enabled)
+                println(anonymous.enabled, anonymous.files.size)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "kept false 3 4 nested true 0 0\nchanged false\nfalse 0\n"
+        );
     }
 
     #[test]

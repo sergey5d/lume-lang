@@ -7378,8 +7378,14 @@ impl<'a> SourceBodyEmitter<'a> {
                 self.emit_call(&callee, &args, *span, core::CallStyle::Brace, bindings)
             }
             core::Expr::ContextualNew {
-                args, style, span, ..
+                args,
+                style,
+                default_initialize,
+                span,
             } => {
+                if *default_initialize {
+                    return self.emit_default_initialization(args, *span, bindings, expected);
+                }
                 if let [
                     core::CallArg {
                         value: core::Expr::RecordLiteral { fields, values, .. },
@@ -7667,6 +7673,296 @@ impl<'a> SourceBodyEmitter<'a> {
             return Some(wrapped);
         }
         self.emit_record_literal_against_direct(fields, values, bindings, expected)
+    }
+
+    fn emit_default_initialization(
+        &self,
+        args: &[core::CallArg],
+        span: crate::source::Span,
+        bindings: &HashMap<String, String>,
+        expected: &ir::Type,
+    ) -> Option<String> {
+        let [
+            core::CallArg {
+                value: core::Expr::RecordLiteral { fields, values, .. },
+                ..
+            },
+        ] = args
+        else {
+            return None;
+        };
+        if !values.is_empty() {
+            return None;
+        }
+
+        if let ir::Type::Named { name, .. } = expected
+            && self.type_has_explicit_constructor(name)
+        {
+            return self.emit_zero_arg_constructor(name);
+        }
+
+        let (target_fields, target_def) = match expected {
+            ir::Type::Record(fields) => (
+                fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone(), false, None))
+                    .collect::<Vec<_>>(),
+                None,
+            ),
+            ir::Type::Named { name, args } => {
+                let ty = self.bundle.ir.types.iter().find(|ty| {
+                    ty.name == *name && matches!(ty.kind, TypeKind::Class | TypeKind::Record)
+                })?;
+                let substitution = ty
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                let fields = ty
+                    .fields
+                    .iter()
+                    .filter(|field| {
+                        ty.kind != TypeKind::Class || field.visibility == ast::Visibility::Default
+                    })
+                    .map(|field| {
+                        (
+                            field.name.clone(),
+                            substitute_java_emit_type(&field.ty, &substitution),
+                            field.has_initializer,
+                            field.initializer.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                (fields, Some(ty))
+            }
+            _ => return None,
+        };
+
+        // Explicit values and spreads retain their source evaluation order.
+        let mut preamble = Vec::new();
+        let mut explicit = HashMap::<String, String>::new();
+        let mut spreads = Vec::<core::Expr>::new();
+        let mut rewritten_bindings = bindings.clone();
+        for field in fields {
+            let local = self.synthetic_name("defaultArgument", "defaultArgument", field.span.start);
+            if let Some(name) = &field.name {
+                let ty = target_fields
+                    .iter()
+                    .find(|(target, _, _, _)| target == name)
+                    .map(|(_, ty, _, _)| ty)?;
+                preamble.push(format!(
+                    "{} {local} = {};",
+                    self.names.value_type(ty),
+                    self.emit_expr_against(&field.value, bindings, ty)?
+                ));
+                explicit.insert(name.clone(), local.clone());
+                rewritten_bindings.insert(local.clone(), local);
+                continue;
+            }
+            let core::Expr::Spread { value, .. } = &field.value else {
+                return None;
+            };
+            let source_ty = self.expr_type(value, bindings)?;
+            preamble.push(format!(
+                "{} {local} = {};",
+                self.names.value_type(&source_ty),
+                self.emit_expr_against(value, bindings, &source_ty)?
+            ));
+            rewritten_bindings.insert(local.clone(), local.clone());
+            spreads.push(core::Expr::Identifier {
+                name: local,
+                span: value.span(),
+            });
+        }
+
+        let field_value = |name: &str,
+                           ty: &ir::Type,
+                           has_initializer: bool,
+                           initializer: &Option<ir::Constant>|
+         -> Option<Option<String>> {
+            if let Some(value) = explicit.get(name) {
+                return Some(Some(value.clone()));
+            }
+            if let Some(spread) = spreads
+                .iter()
+                .rev()
+                .find(|spread| self.record_spread_has_field(spread, name, &rewritten_bindings))
+            {
+                return self
+                    .emit_record_spread_field(spread, name, ty, &rewritten_bindings)
+                    .map(Some);
+            }
+            if has_initializer {
+                return Some(initializer.as_ref().map(java_constant));
+            }
+            self.emit_default_value(ty, span, &rewritten_bindings)
+                .map(Some)
+        };
+
+        let construction = match (expected, target_def) {
+            (ir::Type::Record(_), None) => {
+                let mut parts = Vec::with_capacity(target_fields.len() * 2);
+                for (name, ty, has_initializer, initializer) in &target_fields {
+                    parts.push(java_string_literal(name));
+                    parts.push(field_value(name, ty, *has_initializer, initializer)??);
+                }
+                format!("lume.core.LumeShape.of({})", parts.join(", "))
+            }
+            (ir::Type::Named { name, args }, Some(type_def))
+                if type_def.kind == TypeKind::Class =>
+            {
+                let java_ty = self.names.value_type(expected);
+                let local = self.synthetic_name("defaultInstance", "defaultInstance", span.start);
+                let generic = (!args.is_empty()).then_some("<>").unwrap_or("");
+                let mut body = format!(
+                    "{java_ty} {local} = new {}{generic}({}.__LumeDefaultMarker.INSTANCE);",
+                    self.names.named_type(name),
+                    self.names.named_type(name)
+                );
+                for (field_name, field_ty, has_initializer, initializer) in &target_fields {
+                    let value = field_value(field_name, field_ty, *has_initializer, initializer)?;
+                    let Some(value) = value else {
+                        continue;
+                    };
+                    body.push_str(&format!(
+                        " {local}.{} = {value};",
+                        java_member_name(field_name)
+                    ));
+                }
+                body.push_str(&format!(" return {local};"));
+                format!("((java.util.function.Supplier<{java_ty}>) () -> {{ {body} }}).get()")
+            }
+            (ir::Type::Named { name, args }, Some(_)) => {
+                let mut constructor_args = Vec::with_capacity(target_fields.len());
+                for (field_name, field_ty, has_initializer, initializer) in &target_fields {
+                    constructor_args.push(field_value(
+                        field_name,
+                        field_ty,
+                        *has_initializer,
+                        initializer,
+                    )??);
+                }
+                let generic = (!args.is_empty()).then_some("<>").unwrap_or("");
+                format!(
+                    "new {}{generic}({})",
+                    self.names.named_type(name),
+                    constructor_args.join(", ")
+                )
+            }
+            _ => return None,
+        };
+
+        if preamble.is_empty() {
+            return Some(construction);
+        }
+        let java_ty = self.names.value_type(expected);
+        Some(format!(
+            "((java.util.function.Supplier<{java_ty}>) () -> {{ {} return {construction}; }}).get()",
+            preamble.join(" ")
+        ))
+    }
+
+    fn emit_default_value(
+        &self,
+        ty: &ir::Type,
+        _span: crate::source::Span,
+        _bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        if matches!(ty, ir::Type::Named { name, .. } if name == "Option") {
+            return Some("lume.core.LumeRuntime.optionNone()".to_string());
+        }
+        if matches!(ty, ir::Type::Named { name, args } if name == "Rune" && args.is_empty()) {
+            return Some("0".to_string());
+        }
+        if matches!(ty, ir::Type::Record(fields) if fields.is_empty()) {
+            return Some("lume.core.LumeShape.of()".to_string());
+        }
+        let is_primitive = matches!(
+            ty,
+            ir::Type::Unit | ir::Type::Bool | ir::Type::Int | ir::Type::Float | ir::Type::Str
+        ) || matches!(
+            ty,
+            ir::Type::Named { name, args }
+                if args.is_empty()
+                    && matches!(name.as_str(), "Unit" | "Bool" | "Int" | "Float" | "Str")
+        );
+        if is_primitive {
+            return Some(java_default_value(ty));
+        }
+        let ir::Type::Named { name, .. } = ty else {
+            return None;
+        };
+        self.emit_zero_arg_constructor(name)
+    }
+
+    fn emit_zero_arg_constructor(&self, name: &str) -> Option<String> {
+        let value = match name {
+            "Vector" => "lume.core.LumeVector.of()".to_string(),
+            "LinkedList" => "lume.core.LumeLinkedList.of()".to_string(),
+            "Map" => "lume.core.LumeMap.empty()".to_string(),
+            "Set" => "lume.core.LumeSet.empty()".to_string(),
+            "Array" => "lume.core.LumeArray.generate(0L, index -> null)".to_string(),
+            _ => {
+                let type_def = self.bundle.ir.types.iter().find(|item| item.name == name)?;
+                let generic = (!type_def.type_params.is_empty())
+                    .then_some("<>")
+                    .unwrap_or("");
+                if type_def.kind == TypeKind::Record {
+                    let args = type_def
+                        .fields
+                        .iter()
+                        .map(|field| field.initializer.as_ref().map(java_constant))
+                        .collect::<Option<Vec<_>>>()?;
+                    format!(
+                        "new {}{generic}({})",
+                        self.names.named_type(name),
+                        args.join(", ")
+                    )
+                } else if let Some(constructor) = type_def
+                    .methods
+                    .iter()
+                    .filter_map(|id| self.bundle.ir.function(*id))
+                    .filter(|function| function.name == "new")
+                    .find(|function| {
+                        source_function_param_specs(function)
+                            .iter()
+                            .all(|param| param.default.is_some() || param.variadic)
+                    })
+                {
+                    let args = source_function_param_specs(constructor)
+                        .iter()
+                        .map(|param| {
+                            param.default.as_ref().map(java_constant).or_else(|| {
+                                param
+                                    .variadic
+                                    .then(|| "lume.core.LumeVector.of()".to_string())
+                            })
+                        })
+                        .collect::<Option<Vec<_>>>()?;
+                    format!(
+                        "new {}{generic}({})",
+                        self.names.named_type(name),
+                        args.join(", ")
+                    )
+                } else {
+                    format!("new {}{generic}()", self.names.named_type(name))
+                }
+            }
+        };
+        Some(value)
+    }
+
+    fn type_has_explicit_constructor(&self, name: &str) -> bool {
+        self.bundle.ir.types.iter().any(|ty| {
+            ty.name == name
+                && ty.methods.iter().copied().any(|id| {
+                    self.bundle
+                        .ir
+                        .function(id)
+                        .is_some_and(|function| function.name == "new")
+                })
+        })
     }
 
     fn emit_reordered_record_literal(
@@ -10100,6 +10396,19 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
         .iter()
         .filter(|field| field.visibility == Visibility::Default)
         .collect::<Vec<_>>();
+    out.push_str("\n    public static final class __LumeDefaultMarker {\n");
+    out.push_str(
+        "        public static final __LumeDefaultMarker INSTANCE = new __LumeDefaultMarker();\n",
+    );
+    out.push_str("        private __LumeDefaultMarker() {}\n");
+    out.push_str("    }\n");
+    out.push_str("\n    public ");
+    out.push_str(&name);
+    out.push_str("(__LumeDefaultMarker ignored) {\n");
+    if has_field_init {
+        out.push_str("        this.__lume_field_init();\n");
+    }
+    out.push_str("    }\n");
     for arity in 0..=public_fields.len() {
         if public_fields[arity..]
             .iter()
