@@ -2359,6 +2359,40 @@ def lambdas() Unit {
 }
 
 #[test]
+fn normalizes_empty_lambda_bodies_across_newline_layout() {
+    let result = parse(
+        r#"
+def main() Unit {
+    sameLine fn() Unit = () => {}
+    nextLine fn() Unit = () =>
+        {}
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body");
+    };
+
+    for statement in &body.statements {
+        let Stmt::Binding(binding) = statement else {
+            panic!("expected callback binding");
+        };
+        assert!(matches!(
+            binding.values.as_slice(),
+            [Expr::Lambda {
+                body: LambdaBody::Block(block),
+                ..
+            }] if block.statements.is_empty()
+        ));
+    }
+}
+
+#[test]
 fn rejects_expression_level_shape_forms() {
     for source in [
         r#"def main() Unit = shape { x: 10 }"#,
@@ -3025,6 +3059,75 @@ def run(flag Bool) Unit {
             ..
         } if matches!(left.as_ref(), Expr::ForYield { .. })
     ));
+}
+
+#[test]
+fn composes_leading_control_flow_expressions_at_block_tail() {
+    let result = parse(
+        r#"
+def ifAnswer(flag Bool) Int {
+    if flag { 40 } else { 0 } + 2
+}
+
+def matchAnswer(flag Bool) Int {
+    match flag {
+        case true => 40
+        case false => 0
+    } + 2
+}
+
+def statements(flag Bool) Unit {
+    if flag {
+        println("if")
+    }
+    if flag {
+        println("then")
+    } else {
+        println("else")
+    }
+    match flag {
+        case true => println("true")
+        case false => println("false")
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let body = |index: usize| match &program.items[index] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(body) => body,
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    };
+
+    assert!(matches!(
+        &body(0).statements[0],
+        Stmt::Expr(ExprStmt {
+            expr: Expr::Binary {
+                left,
+                op: BinaryOp::Add,
+                ..
+            },
+            ..
+        }) if matches!(left.as_ref(), Expr::If { .. })
+    ));
+    assert!(matches!(
+        &body(1).statements[0],
+        Stmt::Expr(ExprStmt {
+            expr: Expr::Binary {
+                left,
+                op: BinaryOp::Add,
+                ..
+            },
+            ..
+        }) if matches!(left.as_ref(), Expr::Match { .. })
+    ));
+    assert!(matches!(&body(2).statements[0], Stmt::If(_)));
+    assert!(matches!(&body(2).statements[1], Stmt::If(_)));
+    assert!(matches!(&body(2).statements[2], Stmt::Match(_)));
 }
 
 #[test]
@@ -5876,6 +5979,42 @@ def main() Unit {
 }
 
 #[test]
+fn parses_newline_continuation_after_type_test_keywords_in_conditions() {
+    let result = parse(
+        r#"
+def classify(value Any) Int {
+    direct Bool = value is
+        Str
+    negative Bool = value is not
+        Int
+
+    if value is
+        Str {
+        return 1
+    }
+    if value is
+        not
+        Int {
+        return 2
+    }
+    3
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body");
+    };
+
+    assert!(matches!(&body.statements[2], Stmt::If(_)));
+    assert!(matches!(&body.statements[3], Stmt::If(_)));
+}
+
+#[test]
 fn parses_newline_continuation_after_assignment_and_extraction_operators() {
     let result = parse(
         r#"
@@ -6633,9 +6772,89 @@ fn parses_multiple_explicit_generic_call_arguments() {
     assert!(args.is_empty());
     assert!(matches!(
         callee.as_ref(),
-        Expr::Index { receiver, index, .. }
+        Expr::Index {
+            receiver,
+            index,
+            explicit_type_args: Some(type_args),
+            ..
+        }
             if matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "Map")
                 && matches!(index.as_ref(), Expr::TupleLiteral { items, .. } if items.len() == 2)
+                && type_args.len() == 2
+    ));
+}
+
+#[test]
+fn parses_complete_types_as_explicit_generic_call_arguments() {
+    let optional = parse_expr_only("keepValue[Int?](^5)");
+    let Expr::Call { callee, .. } = optional else {
+        panic!("expected optional generic call");
+    };
+    assert!(matches!(
+        callee.as_ref(),
+        Expr::Index {
+            explicit_type_args: Some(type_args),
+            ..
+        } if matches!(type_args.as_slice(), [
+            TypeRef::Named { name, args, .. }
+        ] if name == "Option"
+            && matches!(args.as_slice(), [TypeRef::Named { name, .. }] if name == "Int"))
+    ));
+
+    let function = parse_expr_only("keepValue[fn(Int) Int]((value Int) => value)");
+    let Expr::Call { callee, .. } = function else {
+        panic!("expected function-type generic call");
+    };
+    assert!(matches!(
+        callee.as_ref(),
+        Expr::Index {
+            explicit_type_args: Some(type_args),
+            ..
+        } if matches!(type_args.as_slice(), [TypeRef::Function { params, ret, .. }]
+            if matches!(params.as_slice(), [TypeRef::Named { name, .. }] if name == "Int")
+                && matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Int"))
+    ));
+
+    for (source, expected) in [
+        ("keepValue[(Int, Str)](pair)", "tuple"),
+        ("keepValue[{ value Int }](record)", "record"),
+        ("keepValue[Int | Str](value)", "union"),
+        ("keepValue[[Str: Int]](lookup)", "map"),
+    ] {
+        let Expr::Call { callee, .. } = parse_expr_only(source) else {
+            panic!("expected generic call for {source}");
+        };
+        let Expr::Index {
+            explicit_type_args: Some(type_args),
+            ..
+        } = callee.as_ref()
+        else {
+            panic!("expected parsed type arguments for {source}");
+        };
+        let matches_expected = match (expected, type_args.as_slice()) {
+            ("tuple", [TypeRef::Tuple { fields, .. }]) => fields.len() == 2,
+            ("record", [TypeRef::Record { fields, .. }]) => fields.len() == 1,
+            ("union", [TypeRef::Union { members, .. }]) => members.len() == 2,
+            ("map", [TypeRef::Named { name, args, .. }]) => name == "Map" && args.len() == 2,
+            _ => false,
+        };
+        assert!(matches_expected, "unexpected type arguments for {source}");
+    }
+}
+
+#[test]
+fn keeps_indexed_callable_invocation_as_value_indexing() {
+    let expr = parse_expr_only("handlers[0]()");
+    let Expr::Call { callee, .. } = expr else {
+        panic!("expected indexed callable invocation");
+    };
+    assert!(matches!(
+        callee.as_ref(),
+        Expr::Index {
+            index,
+            explicit_type_args: None,
+            ..
+        } if matches!(index.as_ref(), Expr::Integer { raw, .. } if raw == "0")
     ));
 }
 
@@ -6760,6 +6979,73 @@ class Values {
             Some(TypeRef::Record { ref fields, .. }) if fields.len() == 2
         ));
     }
+}
+
+#[test]
+fn anonymous_shape_signatures_end_before_following_interface_members() {
+    for (callable, getter) in [
+        ("def position { x Int, y Int }", true),
+        ("def position() { x Int, y Int }", false),
+    ] {
+        for (following, description) in [
+            ("def label Str", "getter"),
+            ("def label() Str", "method"),
+            ("shape Metadata { value Str }", "nested declaration"),
+        ] {
+            let result = parse(&format!(
+                r#"
+interface Positioned {{
+    {callable}
+    {following}
+}}
+"#,
+            ));
+            assert!(
+                result.diagnostics.is_empty(),
+                "{callable} followed by {description}: {:#?}",
+                result.diagnostics
+            );
+            let program = result.program.expect("program");
+            let declaration = program
+                .items
+                .iter()
+                .find_map(|item| match item {
+                    Item::Type(declaration) if declaration.name == "Positioned" => {
+                        Some(declaration)
+                    }
+                    _ => None,
+                })
+                .expect("Positioned interface");
+            let TypeMember::Method(position) = &declaration.members[0] else {
+                panic!("expected position callable");
+            };
+            assert_eq!(position.getter, getter, "{callable}");
+            assert!(matches!(
+                position.return_type,
+                Some(TypeRef::Record { ref fields, .. }) if fields.len() == 2
+            ));
+            assert!(position.body.is_none(), "{callable}");
+        }
+    }
+
+    let result = parse(
+        r#"
+interface Defaults {
+    def noop() {}
+    def label Str
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Type(declaration) = &program.items[0] else {
+        panic!("expected Defaults interface");
+    };
+    let TypeMember::Method(noop) = &declaration.members[0] else {
+        panic!("expected noop method");
+    };
+    assert!(noop.return_type.is_none());
+    assert!(noop.body.is_some());
 }
 
 #[test]

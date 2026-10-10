@@ -3991,13 +3991,16 @@ def main() Unit {
     labeled LabeledWorker = { label: "Ben" }
     position Position = new(3, 4)
     anonymous = new { x, y }
-    empty = new {}
+    empty {} = new {}
     structural {} = {}
+    defaultedStructural {} = default {}
+    positional { x Int, y Int } = new(1, 2)
+    reversed { y Int, x Int } = new(3, 4)
     emptyWorker EmptyWorker = {}
     emptySet Set[Str] = {}
     nothing Unit = {}
     callback fn() Unit = () => {}
-    shapeCallback = () => new {}
+    shapeCallback fn() {} = () => new {}
     callbackResult = { ...shapeCallback(), value: 4 }
     callback()
     widened Any = new { x, y }
@@ -4020,6 +4023,7 @@ def main() Unit {
     println(printable.print())
     println(punned.x + anonymous.y)
     println(emptyWorker.value, emptySet.size, callbackResult.value)
+    println(positional.x, positional.y, reversed.x, reversed.y)
     println(
         defaults.label,
         defaults.enabled,
@@ -4066,6 +4070,14 @@ def main() Unit {
             "{module}"
         );
         assert!(
+            module.contains("LumeShape.of(\"x\", 1L, \"y\", 2L)"),
+            "{module}"
+        );
+        assert!(
+            module.contains("LumeShape.of(\"y\", 3L, \"x\", 4L)"),
+            "{module}"
+        );
+        assert!(
             module.contains("private final Long __field_x = base"),
             "{module}"
         );
@@ -4091,7 +4103,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("Java stdout utf8"),
-            "30\nAda 42\nBen!\n7\n10:12\n7\n9 0 4\nkept false 3 4 nested true 0\nchanged Alex  false 0\n"
+            "30\nAda 42\nBen!\n7\n10:12\n7\n9 0 4\n1 2 4 3\nkept false 3 4 nested true 0\nchanged Alex  false 0\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7150,7 +7162,21 @@ shape Items {
     items [Int]
 }
 
+shape X {
+    x Int
+}
+
+shape Position {
+    y Int
+    x Int
+}
+
+shape Label {
+    label Str
+}
+
 def view(point Point) Point = point
+def project(value Point3D | Label) Point | Label = value
 
 def main() Unit {
     first3d = Point3D(1, 2, 3)
@@ -7196,6 +7222,22 @@ def main() Unit {
     items Items = wider
     wider.items.add(2)
     println(items.items.size)
+
+    unique Point | Label = first3d
+    exact Point | X = Position(4, 5)
+    dynamic = project(first3d)
+    match unique {
+        case Point { x, y } => println("unique", x, y)
+        case Label { label } => println(label)
+    }
+    match exact {
+        case Point { x, y } => println("exact", x, y)
+        case X { x } => println("x", x)
+    }
+    match dynamic {
+        case Point { x, y } => println("dynamic", x, y)
+        case Label { label } => println(label)
+    }
 }
 "#,
         )
@@ -7220,7 +7262,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\n"
+            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\nunique 1 2\nexact 5 4\ndynamic 1 2\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -8020,6 +8062,12 @@ class Holder {
     payload { x Int }
 }
 
+class Rank with Ordered[Rank] {
+    value Int
+
+    def compare(other Rank) Int = value - other.value
+}
+
 class GuardTracker {
     var calls Int = 0
 
@@ -8048,6 +8096,13 @@ def main() Int {
     } else {
         println("smaller")
     }
+
+    rankLow = Rank(1)
+    rankHigh = Rank(2)
+    println(rankLow < rankHigh, rankHigh >= rankLow)
+    ranks = [rankHigh, rankLow]
+    ranks.sort()
+    println(ranks[0].value, ranks[1].value)
 
     var next Option[Int] = Some(2)
     while let item <- next && item == 2 {

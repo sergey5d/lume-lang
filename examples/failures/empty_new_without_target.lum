@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*empty construction 'new \{\}' requires an expected concrete type.*
+
+def main() Unit {
+    value = new {}
+}

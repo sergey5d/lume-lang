@@ -22,12 +22,6 @@
 # size 3
 # spread 0 4 7 7
 
-object Descending with Ordering[Int] {
-
-    def compare(left Int, right Int) Int = right - left
-}
-
-
 def main() Unit {
     items = [1, 2, 3]
     items.append(4)
@@ -44,7 +38,7 @@ def main() Unit {
     println("index " + items[0] + " " + items[3])
 
     sorted = [3, 1, 4, 2]
-    sorted.sort(Descending)
+    sorted.sort((left, right) => right - left)
 
     zipped = items.zip(["a", "b"])
     indexed = items.zipWithIndex()

@@ -157,6 +157,14 @@ public final class LumeVector<T> implements Iterable<T> {
         return this;
     }
 
+    @SuppressWarnings("unchecked")
+    public LumeVector<T> sort() {
+        values.sort((left, right) ->
+            Long.compare(((Ordered<T>) left).compare(right), 0)
+        );
+        return this;
+    }
+
     public LumeVector<T> take(long count) {
         var end = Math.min(Math.max(count, 0), values.size());
         return new LumeVector<>(new ArrayList<>(values.subList(0, Math.toIntExact(end))));

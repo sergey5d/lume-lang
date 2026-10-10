@@ -6,10 +6,16 @@ class User {
     age Int
 }
 
+shape UserData {
+    name Str
+    age Int
+}
+
 def main() Unit {
-    data = {
+    data = UserData {
         name: "Ada"
         age: 42
     }
+    explicit = User { ...data }
     user User = data
 }

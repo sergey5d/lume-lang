@@ -6956,6 +6956,7 @@ impl<'a> Interpreter<'a> {
 
     fn coerce_value_to_type(&self, value: Value, ty: &ir::Type) -> Value {
         match ty {
+            ir::Type::Union(members) => self.coerce_value_to_union(value, members),
             ir::Type::Named { name, .. } => self
                 .runtime
                 .type_by_name_kind(name, crate::ast::TypeKind::Record)
@@ -7044,6 +7045,99 @@ impl<'a> Interpreter<'a> {
                 other => other,
             },
             _ => value,
+        }
+    }
+
+    fn coerce_value_to_union(&self, value: Value, members: &[ir::Type]) -> Value {
+        if members
+            .iter()
+            .any(|member| self.value_matches_union_member_without_shape_projection(&value, member))
+        {
+            return value;
+        }
+
+        let candidates = members
+            .iter()
+            .filter(|member| self.value_can_project_to_shape(&value, member))
+            .collect::<Vec<_>>();
+        let source_field_count = self.value_structural_field_count(&value);
+        let exact = candidates
+            .iter()
+            .filter(|member| self.shape_field_count(member) == source_field_count)
+            .copied()
+            .collect::<Vec<_>>();
+        let selected = if exact.len() == 1 {
+            exact.first().copied()
+        } else if exact.is_empty() && candidates.len() == 1 {
+            candidates.first().copied()
+        } else {
+            None
+        };
+        selected
+            .map(|target| self.coerce_value_to_type(value.clone(), target))
+            .unwrap_or(value)
+    }
+
+    fn value_matches_union_member_without_shape_projection(
+        &self,
+        value: &Value,
+        member: &ir::Type,
+    ) -> bool {
+        match member {
+            ir::Type::Named { name, .. }
+                if self
+                    .runtime
+                    .type_by_name_kind(name, crate::ast::TypeKind::Record)
+                    .is_some() =>
+            {
+                matches!(value, Value::Aggregate(aggregate) if {
+                    let aggregate = aggregate.borrow();
+                    aggregate.type_name == *name
+                        && aggregate.kind == crate::ast::TypeKind::Record
+                })
+            }
+            ir::Type::Record(fields) => {
+                self.value_structural_field_count(value) == Some(fields.len())
+                    && self.value_matches_type(value, member)
+            }
+            _ => self.value_matches_type(value, member),
+        }
+    }
+
+    fn value_can_project_to_shape(&self, value: &Value, target: &ir::Type) -> bool {
+        match target {
+            ir::Type::Named { name, .. } => self
+                .runtime
+                .type_by_name_kind(name, crate::ast::TypeKind::Record)
+                .is_some_and(|ty| self.value_matches_runtime_shape(value, ty)),
+            ir::Type::Record(_) => self.value_matches_type(value, target),
+            _ => false,
+        }
+    }
+
+    fn shape_field_count(&self, ty: &ir::Type) -> Option<usize> {
+        match ty {
+            ir::Type::Record(fields) => Some(fields.len()),
+            ir::Type::Named { name, .. } => self
+                .runtime
+                .type_by_name_kind(name, crate::ast::TypeKind::Record)
+                .map(|ty| ty.fields.iter().filter(|field| !field.hidden).count()),
+            _ => None,
+        }
+    }
+
+    fn value_structural_field_count(&self, value: &Value) -> Option<usize> {
+        match value {
+            Value::Record(fields) => Some(fields.borrow().len()),
+            Value::Aggregate(aggregate) => {
+                let aggregate = aggregate.borrow();
+                aggregate
+                    .runtime_type_id
+                    .and_then(|id| self.runtime.type_by_id(id))
+                    .map(|ty| ty.fields.iter().filter(|field| !field.hidden).count())
+                    .or_else(|| Some(aggregate.field_names.len()))
+            }
+            _ => None,
         }
     }
 
@@ -7533,21 +7627,23 @@ fn compare_binary(
     span: Option<Span>,
     int_op: impl FnOnce(i64, i64) -> bool,
     float_op: impl FnOnce(f64, f64) -> bool,
-    in_: &Interpreter<'_>,
+    in_: &mut Interpreter<'_>,
 ) -> Result<Value, Diagnostic> {
-    match (left, right) {
+    match (left.clone(), right.clone()) {
         (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Bool(int_op(lhs, rhs))),
         (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Bool(float_op(lhs, rhs))),
         (Value::Int(lhs), Value::Float(rhs)) => Ok(Value::Bool(float_op(lhs as f64, rhs))),
         (Value::Float(lhs), Value::Int(rhs)) => Ok(Value::Bool(float_op(lhs, rhs as f64))),
-        (left, right) => Err(in_.runtime_error(
-            span,
-            format!(
-                "comparison expects numeric values, got {} and {}",
-                left.render(),
-                right.render()
-            ),
-        )),
+        (Value::String(lhs), Value::String(rhs)) => {
+            let comparison = lhs.cmp(&rhs) as i8 as i64;
+            Ok(Value::Bool(int_op(comparison, 0)))
+        }
+        _ => {
+            let comparison = in_
+                .invoke_method(left, "compare", vec![right], span)?
+                .as_int(in_, span, "Ordered.compare result")?;
+            Ok(Value::Bool(int_op(comparison, 0)))
+        }
     }
 }
 
@@ -8374,12 +8470,15 @@ mod tests {
                 lookup Map[Str, Int] = {}
                 set Set[Str] = {}
                 nothing Unit = {}
-                anonymous = new {}
+                anonymous {} = new {}
                 structural {} = {}
-                widened Any = new {}
+                defaultedStructural {} = default {}
+                widened Any = anonymous
                 extended = { ...anonymous, value: 2 }
+                positional { x Int, y Int } = new(1, 2)
+                reversed { y Int, x Int } = new(3, 4)
                 callback fn() Unit = () => {}
-                shapeCallback = () => new {}
+                shapeCallback fn() {} = () => new {}
                 callbackResult = { ...shapeCallback(), value: 3 }
                 callback()
                 noop()
@@ -8393,13 +8492,14 @@ mod tests {
                     extended.value,
                     callbackResult.value
                 )
+                println(positional.x, positional.y, reversed.x, reversed.y)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "7 11 true\n0 0 0 2 3\n");
+        assert_eq!(run.output, "7 11 true\n0 0 0 2 3\n1 2 4 3\n");
     }
 
     #[test]
@@ -9246,6 +9346,27 @@ mod tests {
     }
 
     #[test]
+    fn runs_explicit_generic_calls_with_complete_type_arguments() {
+        let program = lower_inline(
+            r#"
+            def keepValue[T](value T) T = value
+
+            def main() Unit {
+                optional Int? = keepValue[Int?](^5)
+                namedOptional Option[Int] = keepValue[Option[Int]](^6)
+                callback fn(Int) Int = keepValue[fn(Int) Int]((value Int) => value + 1)
+
+                println(optional!, namedOptional!, callback(41))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "5 6 42\n");
+    }
+
+    #[test]
     fn runs_contextual_shape_projection_inside_generic_map() {
         let program = lower_inline(
             r#"
@@ -9373,6 +9494,67 @@ mod tests {
             run.output,
             "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\n"
         );
+    }
+
+    #[test]
+    fn shape_union_projection_prefers_exact_schema_then_unique_target() {
+        let program = lower_inline(
+            r#"
+            shape X {
+                x Int
+            }
+
+            shape XY {
+                x Int
+                y Int
+            }
+
+            shape XYZ {
+                x Int
+                y Int
+                z Int
+            }
+
+            shape Position {
+                y Int
+                x Int
+            }
+
+            shape Label {
+                label Str
+            }
+
+            def project(value XYZ | Label) XY | Label = value
+
+            def printSelected(value XY | X) Unit {
+                match value {
+                    case XY { x, y } => println("xy", x, y)
+                    case X { x } => println("x", x)
+                }
+            }
+
+            def main() Unit {
+                wider = XYZ(1, 2, 3)
+                unique XY | Label = wider
+                exact XY | X = Position(4, 5)
+                dynamic = project(wider)
+
+                match unique {
+                    case XY { x, y } => println("unique", x, y)
+                    case Label { label } => println(label)
+                }
+                printSelected(exact)
+                match dynamic {
+                    case XY { x, y } => println("dynamic", x, y)
+                    case Label { label } => println(label)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "unique 1 2\nxy 5 4\ndynamic 1 2\n");
     }
 
     #[test]
@@ -10268,6 +10450,82 @@ $name
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "7\n");
+    }
+
+    #[test]
+    fn runs_composed_control_flow_expressions_at_block_tail() {
+        let program = lower_inline(
+            r#"
+            def ifAnswer(flag Bool) Int {
+                if flag { 40 } else { 0 } + 2
+            }
+
+            def matchAnswer(flag Bool) Int {
+                match flag {
+                    case true => 40
+                    case false => 0
+                } + 2
+            }
+
+            def main() Unit {
+                println(ifAnswer(true), ifAnswer(false))
+                println(matchAnswer(true), matchAnswer(false))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "42 2\n42 2\n");
+    }
+
+    #[test]
+    fn runs_multiline_type_tests_in_conditions() {
+        let program = lower_inline(
+            r#"
+            def classify(value Any) Int {
+                if value is
+                    Str {
+                    return 1
+                }
+                if value is
+                    not
+                    Int {
+                    return 2
+                }
+                3
+            }
+
+            def main() Unit {
+                println(classify("text"), classify(true), classify(5))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "1 2 3\n");
+    }
+
+    #[test]
+    fn runs_empty_lambda_body_after_newline() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                sameLine fn() Unit = () => {}
+                nextLine fn() Unit = () =>
+                    {}
+
+                sameLine()
+                nextLine()
+                println("complete")
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "complete\n");
     }
 
     #[test]

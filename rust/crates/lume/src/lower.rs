@@ -4439,6 +4439,11 @@ impl<'a> FunctionLowerer<'a> {
         if self.current_block.is_none() {
             return ir::Operand::Const(ir::Constant::Unit);
         }
+        let inferred = self.infer_expr_type(expr);
+        if let Some(target) = self.shape_union_projection_target(&inferred, expected) {
+            let source = self.lower_expr(expr);
+            return self.coerce_shape_equality_operand(source, &target, expr.span());
+        }
         match expr {
             Expr::ListLiteral { items, span }
                 if items.is_empty()
@@ -6886,9 +6891,23 @@ impl<'a> FunctionLowerer<'a> {
                     };
                     return self.lower_rvalue_with_expected(record, expected);
                 }
+                if *style == core::CallStyle::Paren
+                    && let Some(ir::Type::Record(fields)) = expected
+                {
+                    return Some(ir::RValue::Record(
+                        fields
+                            .iter()
+                            .zip(args)
+                            .map(|(field, arg)| ir::NamedOperand {
+                                name: field.name.clone(),
+                                value: self.lower_expr_with_expected(&arg.value, Some(&field.ty)),
+                            })
+                            .collect(),
+                    ));
+                }
                 let Some(ir::Type::Named { name, .. }) = expected else {
                     self.invariant(
-                        "contextual 'new(...)' should have an expected named class or shape before lowering",
+                        "contextual 'new(...)' should have an expected class or shape before lowering",
                         *span,
                     );
                     return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
@@ -8116,6 +8135,86 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
+    fn shape_union_projection_target(
+        &self,
+        source: &ir::Type,
+        expected: &ir::Type,
+    ) -> Option<ir::Type> {
+        let ir::Type::Union(members) = expected else {
+            return None;
+        };
+        if matches!(source, ir::Type::Union(_))
+            || members.iter().any(|member| member == source)
+            || members.iter().any(|member| {
+                self.shape_equality_fields(member).is_none()
+                    && self.ir_type_satisfies_nominal_member(source, member)
+            })
+        {
+            return None;
+        }
+        let Some(source_fields) = self.shape_equality_fields(source) else {
+            return None;
+        };
+        let candidates = members
+            .iter()
+            .filter_map(|member| {
+                let target_fields = self.shape_equality_fields(member)?;
+                target_fields
+                    .iter()
+                    .all(|target| {
+                        source_fields
+                            .iter()
+                            .any(|source| source.name == target.name && source.ty == target.ty)
+                    })
+                    .then_some((member.clone(), target_fields))
+            })
+            .collect::<Vec<_>>();
+        let exact = candidates
+            .iter()
+            .filter(|(_, fields)| fields.len() == source_fields.len())
+            .map(|(member, _)| member.clone())
+            .collect::<Vec<_>>();
+        if exact.len() == 1 {
+            return exact.into_iter().next();
+        }
+        if exact.is_empty() && candidates.len() == 1 {
+            return candidates.into_iter().next().map(|(member, _)| member);
+        }
+        None
+    }
+
+    fn ir_type_satisfies_nominal_member(&self, source: &ir::Type, target: &ir::Type) -> bool {
+        if source == target {
+            return true;
+        }
+        let (
+            ir::Type::Named {
+                name: source_name,
+                args: source_args,
+            },
+            ir::Type::Named {
+                name: target_name, ..
+            },
+        ) = (source, target)
+        else {
+            return false;
+        };
+        let Some(source_def) = self.program.types.iter().find(|ty| ty.name == *source_name) else {
+            return false;
+        };
+        let subst = source_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(source_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        source_def.with_bounds.iter().any(|bound| {
+            let bound = substitute_ir_type(bound, &subst);
+            matches!(&bound, ir::Type::Named { name, .. } if name == target_name)
+                || self.ir_type_satisfies_nominal_member(&bound, target)
+        })
+    }
+
     fn coerce_shape_equality_operand(
         &mut self,
         source: ir::Operand,
@@ -8629,12 +8728,18 @@ impl<'a> FunctionLowerer<'a> {
         callee: &'expr Expr,
     ) -> (&'expr Expr, Vec<ir::Type>) {
         let Expr::Index {
-            receiver, index, ..
+            receiver,
+            index,
+            explicit_type_args,
+            ..
         } = callee
         else {
             return (callee, Vec::new());
         };
-        let Some(type_args) = generic_call_type_arg_refs_from_expr(index) else {
+        let Some(type_args) = explicit_type_args
+            .clone()
+            .or_else(|| generic_call_type_arg_refs_from_expr(index))
+        else {
             return (callee, Vec::new());
         };
         (
@@ -10996,6 +11101,7 @@ fn generic_call_type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
             receiver,
             index,
             span,
+            ..
         } => {
             let TypeRef::Named { name, .. } = generic_call_type_ref_from_expr(receiver)? else {
                 return None;

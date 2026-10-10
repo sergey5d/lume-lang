@@ -173,6 +173,34 @@ assignable to that type. Narrow a union with `match` or `is` before using
 members that are not shared by its alternatives. A union itself is not a
 runtime type-test target.
 
+Shape projection into a union must select one deterministic target. An exact
+member type is kept without projection. Otherwise, an exact structural schema
+is preferred; if there is no exact schema, exactly one wider-to-narrower shape
+projection must be possible. Multiple exact schemas or multiple projection
+targets are ambiguous and rejected. This rule is applied independently to
+every concrete alternative of a source union, and union-member order never
+breaks a tie.
+
+```txt
+shape XY {
+    x Int
+    y Int
+}
+shape XZ {
+    x Int
+    z Int
+}
+shape XYZ {
+    x Int
+    y Int
+    z Int
+}
+
+original = XYZ(1, 2, 3)
+selected XY | XZ = original                 # error: two projection targets
+selected XY | XZ = XY { ...original }       # valid: target chosen explicitly
+```
+
 Common stdlib/prelude types:
 
 - `Array[T]`
@@ -186,7 +214,7 @@ Common stdlib/prelude types:
 - `Iterator[T]`
 - `Type[T]`
 - `TypeKind`
-- `Ordering[T]`
+- `Ordered[T]`
 - `Printer`
 - `OS`
 
@@ -1144,8 +1172,9 @@ Field braces construct values. Parsing is entirely syntactic:
 ```
 
 The type checker then applies the construction fields to a unique concrete
-class or named-shape target supplied by context. Without such a target,
-nonempty labeled fields or spreads infer an anonymous shape:
+class or shape target supplied by context. The shape target may be named or an
+explicit anonymous schema. Without such a target, nonempty labeled fields or
+spreads infer an anonymous shape:
 
 ```txt
 point Point = {
@@ -1170,7 +1199,7 @@ user EmptyUser = {}        # zero-argument contextual construction
 names [Str] = {}           # zero-argument Vector construction
 
 empty = {}                 # error: no construction target
-empty = new {}             # empty anonymous shape
+empty = new {}             # error: no construction target
 ```
 
 Empty braces use the expected type when one exists. A concrete class, named
@@ -1178,13 +1207,13 @@ shape, or collection target invokes its normal zero-argument construction and
 must satisfy the same constructor/default rules as any other call. Expected
 `Unit` produces `()`, and an explicit anonymous shape type supplies a structural
 target. `Any`, an interface, a union, or no expected type does not identify a
-construction target. In those contexts, use `()` for Unit or `new {}` to
-construct an empty anonymous shape explicitly:
+construction target. An empty shape must therefore state its schema explicitly:
 
 ```txt
 unknown Any = {}       # error: Any is not a concrete target
-unknown Any = new {}   # empty shape, then widened to Any
 empty {} = {}          # explicit empty structural target
+forced {} = new {}     # same target, explicit construction spelling
+defaults {} = default {} # default construction of the same empty schema
 point { x Int } = {}   # error: required field x is missing
 ```
 
@@ -1254,13 +1283,14 @@ Use `new { ... }` to force construction syntax. A punned field `x` means
 point Point = new { x, y }
 user User = new { name, age }
 anonymous = new { x, y }
-empty = new {}
+empty {} = new {}
 ```
 
-`new { ... }` uses a concrete class or named-shape target when context supplies
-exactly one. Otherwise it infers an anonymous shape. An anonymous shape may
-then widen to `Any`, but it does not implicitly implement an interface or pick
-one alternative of a union:
+`new { ... }` uses a concrete class or shape target when context supplies
+exactly one. A nonempty construction without a target infers an anonymous
+shape from its fields. Empty construction still requires a target. An inferred
+anonymous shape may then widen to `Any`, but it does not implicitly implement
+an interface or pick one alternative of a union:
 
 ```txt
 value Any = new { x, y }                 # anonymous shape widened to Any
@@ -1414,17 +1444,19 @@ user User = User("Ada", 10)
 maybe = Some(5)
 ```
 
-`new(...)` may omit the type name only when context supplies exactly one
-already-declared class or named shape:
+`new(...)` may omit the type name only when context supplies exactly one class
+or shape schema with a known positional input order:
 
 ```txt
 worker Worker = new("Ada", 42)
+point { x Int, y Int } = new(10, 20)
 ```
 
 Unlike `new { ... }`, positional `new(...)` cannot invent field names and does
-not synthesize anonymous shapes. It is rejected without a concrete target and
-cannot target an interface, `Any`, union, anonymous shape, or unconstrained
-type parameter.
+not infer an anonymous shape. A named shape uses declaration order; an explicit
+anonymous shape uses the schema's written field order. Positional `new(...)` is
+rejected without such a target and cannot target an interface, `Any`, union, or
+unconstrained type parameter.
 
 A class constructor target must therefore be uniquely determined, but it does
 not have to be written at the construction site. `User { ... }` names it
@@ -1759,7 +1791,7 @@ Implicit field construction rules:
 - a positional call may stop only when every remaining public field has an initializer
 - positional arguments never skip an initialized field to initialize a later field
 - the declaration position of initialized non-public fields does not affect positional construction
-- whether a source class field is mutable or read-only does not affect structural shape matching
+- whether a class field is mutable or read-only does not affect explicit spread construction
 - named class values do not structurally convert to other named class values
 
 ```txt
@@ -1786,7 +1818,7 @@ class SecuredAccount {
 Braces carry several meanings. The parser chooses by the tokens before and inside the braces:
 
 ```txt
-{ field: value }                 # contextual or anonymous field construction
+{ field: value }                 # contextual construction or anonymous shape construction
 { ...source }                    # anonymous or contextual shape/class construction
 { expr }                         # block expression
 {}                               # empty contextual construction; target required
@@ -1799,13 +1831,12 @@ new(field Type)                  # constructor declaration
 new(value, other)                # contextual positional construction
 new { field: value }             # forced named-field construction
 new { field }                    # forced punned-field construction
-new {}                           # empty anonymous or contextual construction
+new {}                           # forced empty construction; target required
 ```
 
 Single-expression braces such as `{ value }` are block expressions, not
 anonymous shapes. Use `new { value }` when `value` is a punned field. Bare `{}`
-is empty construction and requires an expected target; `new {}` explicitly
-constructs an empty anonymous shape when no target exists.
+and `new {}` are empty construction and both require an expected target.
 
 Braces that a declaration or control-flow construct requires remain body
 delimiters rather than expressions:
@@ -1866,11 +1897,11 @@ Shape conversion rules:
 - missing fields are rejected
 - defaults are not part of the shape syntax
 - shape-to-shape assignment is structural by field names and field types
-- class-to-shape is allowed through visible fields
+- class-to-shape assignment is not implicit; construct the target shape explicitly with `{ ...instance }`
 - shape-to-interface follows the shape's explicit `with Interface` bounds
-- class-to-interface-through-shape is not automatic; project the class value to an explicit shape first
-- class fields inaccessible at the conversion site are not visible to shape conversion
-- an already-created shape value does not implicitly become a class; use a class constructor
+- class-to-interface-through-shape is not automatic; explicitly construct the interface-bearing shape first
+- only visible class fields may be used by explicit shape construction
+- an already-created shape value does not implicitly become a class; use a class constructor such as `Pixel { ...point }`
 - tuple-to-shape and tuple-to-class are not allowed; use named shape construction, class constructors, or anonymous construction fields
 - ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
 - construction fields inside braces use `field: value`; bare `field` is shorthand for `field: field`
@@ -2017,20 +2048,26 @@ class Pixel {
     y Int
 }
 
-point Point = Point(1, 2)              # explicit named-shape construction
-contextual Point = new(1, 2)           # contextual named-shape construction
+point Point = Point(1, 2)              # explicit named-shape positional construction
+contextual Point = new(1, 2)           # contextual named-shape positional construction
 anon = { x: 1, y: 2 }                  # anonymous structural construction
-fromClass Point = Pixel { x: 1, y: 2 } # class -> shape
+pixel = Pixel { x: 1, y: 2 }           # explicit structural construciton
+fromClass Point = { ...pixel }         # explicit class -> shape snapshot
+backToClass Pixel = Pixel { ...fromClass } # normal class construction
 named Point = { x: 1, y: 2 }           # contextual named-shape construction
 
 user User = ("Ada", 10)                # invalid: tuple -> class
 point Point = (1, 2)                   # invalid: tuple -> named shape
-anon { x Int, y Int } = new(1, 2)      # invalid: positional new cannot target an anonymous shape
+anon { x Int, y Int } = new(1, 2)      # x = 1, y = 2 from schema order
+reversed { y Int, x Int } = new(1, 2)  # y = 1, x = 2
 unknown = new(1, 2)                    # invalid: no concrete expected target
 user User = { name: "Ada", age: 10 }   # contextual class construction
-empty = {}                              # invalid: no construction target
-explicitEmpty = new {}                  # empty anonymous shape
-nothing Unit = {}                       # Unit from expected type
+empty = {}                             # invalid: no construction target
+explicitEmpty = new {}                 # invalid: no construction target
+emptyShape {} = {}                     # explicit empty anonymous shape
+forcedEmpty {} = new {}                # same explicit target
+defaultEmpty {} = default {}           # same target with default initialization
+nothing Unit = {}                      # Unit from expected type
 ```
 
 Anonymous shape field types come from the surrounding declaration:
@@ -3187,11 +3224,12 @@ last = values.last ?? fallback
 ```
 
 `take(count)` returns a new vector containing at most the first `count` values;
-a non-positive count produces an empty vector. `sort` mutates the vector and
-accepts either an `Ordering[T]` or a comparator function:
+a non-positive count produces an empty vector. `sort` mutates the vector.
+Values implementing `Ordered[T]` can use the parameterless form; an explicit
+comparator function provides an ad hoc ordering:
 
 ```txt
-values.sort(ordering)
+values.sort()
 values.sort((left, right) => left.score - right.score)
 firstTen = values.take(10)
 ```
@@ -4465,7 +4503,7 @@ Every `match` branch must start with `case`.
 Every case must have an explicit body after `=>`: an expression, `()` for Unit,
 or a nonempty block. In an expression body, `{}` is empty construction and uses
 the match expression's expected type. Without a concrete target, use `()` for
-Unit or `new {}` for an empty anonymous shape.
+Unit.
 
 ```txt
 match value {
@@ -5020,7 +5058,7 @@ Current operator overloading constraints:
   - logical operators: `&&`, `||`, `!`
   - equality operators: `==`, `!=`, `===`, `!==`
   - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
-- Comparison operators are intended to work through `Ordering[T]` rather than custom operator declarations.
+- Comparison operators use intrinsic numeric and string ordering, or `Ordered[T]` for user-defined values. `Ordered[T]` declares `compare(other T) Int`.
 - `==`, `!=`, `===`, and `!==` use the applicable `Eq[T]` contract and cannot be overloaded independently; `===` and `!==` additionally test concrete type.
 - Reference identity is expressed by equality between opaque `referenceId` values; `ReferenceId` equality and hashing cannot be overloaded.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.

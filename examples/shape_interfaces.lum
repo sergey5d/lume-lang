@@ -34,7 +34,7 @@ def main() Unit {
     named Named = point
 
     pixel Pixel = Pixel(9, 10)
-    view PointView = pixel
+    view PointView = { ...pixel }
 
     println("point", point.label())
     println("moved", moved.label())

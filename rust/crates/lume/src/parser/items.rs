@@ -580,7 +580,7 @@ impl<'a> Parser<'a> {
             ));
         }
         let params = self.parse_param_list()?;
-        let return_type = if self.callable_body_starts_here(false) {
+        let return_type = if self.callable_body_starts_here(false, false) {
             None
         } else {
             self.parse_optional_return_type()
@@ -1136,7 +1136,7 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_param_list()?
         };
-        let return_type = if self.callable_body_starts_here(allow_signature_only && getter) {
+        let return_type = if self.callable_body_starts_here(allow_signature_only, getter) {
             None
         } else {
             self.parse_optional_return_type()
@@ -1293,7 +1293,7 @@ impl<'a> Parser<'a> {
         Some(CallableBody::Expr(expr))
     }
 
-    fn callable_body_starts_here(&self, allow_signature_only_return: bool) -> bool {
+    fn callable_body_starts_here(&self, allow_signature_only_return: bool, getter: bool) -> bool {
         match self.next_significant_token().kind {
             TokenKind::Eq => true,
             TokenKind::LBrace => {
@@ -1305,12 +1305,16 @@ impl<'a> Parser<'a> {
                     type_path: self.type_path.clone(),
                     nested_items: Vec::new(),
                 };
-                if parser.parse_type_ref().is_some() {
-                    parser.skip_newlines();
+                if let Some(return_type) = parser.parse_type_ref()
+                    && parser.diagnostics.is_empty()
+                {
                     if matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LBrace) {
                         return false;
                     }
+                    let empty_record_method = !getter
+                        && matches!(return_type, TypeRef::Record { ref fields, .. } if fields.is_empty());
                     if allow_signature_only_return
+                        && !empty_record_method
                         && matches!(
                             parser.current_kind(),
                             TokenKind::Newline | TokenKind::RBrace | TokenKind::Eof

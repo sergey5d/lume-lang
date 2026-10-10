@@ -5,6 +5,7 @@
 # x=10
 # hello
 # 9
+# 1 2 4 3
 
 shape Point {
     x Int
@@ -45,7 +46,9 @@ def main() Unit {
         def read() Str = "hello"
     }
     anonymous = new { x, y }
-    empty = new {}
+    empty {} = new {}
+    positional { x Int, y Int } = new(1, 2)
+    reversed { y Int, x Int } = new(3, 4)
     widened Any = new { x, y }
 
     println(point.x + point.y)
@@ -54,4 +57,5 @@ def main() Unit {
     println(printable.print())
     println(reader.read())
     println(anonymous.x + anonymous.y)
+    println(positional.x, positional.y, reversed.x, reversed.y)
 }

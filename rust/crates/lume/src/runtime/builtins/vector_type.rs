@@ -42,7 +42,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(8, "exists", vec![function_unknown()], list_exists),
             builtin_method(9, "forEach", vec![function_unknown()], list_for_each),
             builtin_method(10, "forAll", vec![function_unknown()], list_for_all),
-            builtin_method(11, "sort", vec![ir::Type::Unknown], list_sort),
+            builtin_method(11, "sort", vec![function_unknown()], list_sort),
+            builtin_method(43, "sort", Vec::new(), list_sort),
             builtin_method(40, "take", vec![ir::Type::Int], list_take),
             builtin_method(12, "zip", vec![ir::Type::Unknown], list_zip),
             builtin_method(13, "zipWithIndex", Vec::new(), list_zip_with_index),
@@ -343,8 +344,15 @@ fn list_sort(
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let [ordering_or_compare] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "Vector.sort expects 1 argument"));
+    let compare = match args.as_slice() {
+        [] => None,
+        [compare] => Some(compare.clone()),
+        _ => {
+            return Err(interpreter.runtime_error(
+                span,
+                "Vector.sort expects no arguments or one comparator function",
+            ));
+        }
     };
     let items = list_items(&receiver);
     let mut values = {
@@ -354,14 +362,17 @@ fn list_sort(
     let len = values.len();
     for i in 0..len {
         for j in (i + 1)..len {
-            let compare_args = vec![values[i].clone(), values[j].clone()];
-            let cmp = if matches!(ordering_or_compare, Value::Closure(_)) {
-                interpreter.invoke_value(ordering_or_compare.clone(), compare_args, span)?
+            let cmp = if let Some(compare) = &compare {
+                interpreter.invoke_value(
+                    compare.clone(),
+                    vec![values[i].clone(), values[j].clone()],
+                    span,
+                )?
             } else {
                 interpreter.invoke_method(
-                    ordering_or_compare.clone(),
+                    values[i].clone(),
                     "compare",
-                    compare_args,
+                    vec![values[j].clone()],
                     span,
                 )?
             };

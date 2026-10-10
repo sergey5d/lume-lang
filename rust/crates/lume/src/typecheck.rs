@@ -4740,6 +4740,7 @@ impl<'a> Checker<'a> {
                 receiver,
                 index,
                 span,
+                ..
             } => {
                 if operator == AssignOp::Assign {
                     self.add_error(
@@ -5042,6 +5043,7 @@ impl<'a> Checker<'a> {
                 receiver,
                 index,
                 span,
+                ..
             } => {
                 let receiver_ty = self.check_expr(receiver);
                 let index_ty = self.check_expr(index);
@@ -5155,9 +5157,7 @@ impl<'a> Checker<'a> {
                             "empty construction '{}' requires an expected concrete type",
                             expr.span(),
                         )
-                        .with_help(
-                            "use '()' for Unit, 'new {}' for an empty shape, or specify the intended construction type",
-                        ),
+                        .with_help("use '()' for Unit or specify the intended construction type"),
                     );
                     return Ty::Unknown;
                 }
@@ -6076,7 +6076,32 @@ impl<'a> Checker<'a> {
                     Expr::RecordLiteral { fields, values, .. }
                         if fields.is_empty() && values.is_empty()
                 ) {
-                    return Ty::Record(Vec::new());
+                    return match expected {
+                        Ty::Record(fields) if fields.is_empty() => Ty::Record(Vec::new()),
+                        Ty::Record(fields) => {
+                            for (name, _) in fields {
+                                self.add_error(
+                                    "invalid_contextual_construction",
+                                    format!("missing required field '{name}'"),
+                                    span,
+                                );
+                            }
+                            materialize_type(expected)
+                        }
+                        _ => {
+                            self.diagnostics.push(
+                                Diagnostic::error(
+                                    "missing_empty_construction_target",
+                                    "empty construction 'new {}' requires an expected concrete type",
+                                    span,
+                                )
+                                .with_help(
+                                    "use '()' for Unit or specify the intended construction type, such as 'value {} = new {}'",
+                                ),
+                            );
+                            Ty::Unknown
+                        }
+                    };
                 }
                 let record_expected = if matches!(expected, Ty::Record(_)) {
                     expected
@@ -6092,18 +6117,57 @@ impl<'a> Checker<'a> {
                     .to_string(),
             );
         }
+        if !uses_brace_syntax && let Ty::Record(fields) = expected {
+            if args.iter().any(|arg| arg.name.is_some()) {
+                return reject(
+                    self,
+                    "contextual anonymous-shape construction uses positional arguments; use 'new(value, ...)' or field braces"
+                        .to_string(),
+                );
+            }
+            if args.len() != fields.len() {
+                for arg in args {
+                    self.check_expr(call_arg_value_expr(arg));
+                }
+                self.add_error(
+                    "invalid_argument_count",
+                    format!(
+                        "anonymous shape construction expects {} argument{}, got {}",
+                        fields.len(),
+                        if fields.len() == 1 { "" } else { "s" },
+                        args.len()
+                    ),
+                    span,
+                );
+                return materialize_type(expected);
+            }
+            for (arg, (name, field_ty)) in args.iter().zip(fields) {
+                let actual = self.check_expr_against(call_arg_value_expr(arg), field_ty);
+                self.require_assignable(
+                    &actual,
+                    field_ty,
+                    arg.span,
+                    "invalid_argument_type",
+                    format!(
+                        "argument for field '{}' has type '{}' but expects '{}'",
+                        name,
+                        actual.describe(),
+                        field_ty.describe()
+                    ),
+                );
+            }
+            return materialize_type(expected);
+        }
         let Ty::Named(name, type_args) = expected else {
             let message = match expected {
-                Ty::Unknown => "contextual 'new(...)' requires an expected named class or shape type"
-                    .to_string(),
-                Ty::Record(_) => "contextual 'new(...)' does not construct anonymous shapes; use field braces"
+                Ty::Unknown => "contextual 'new(...)' requires an expected class or shape type"
                     .to_string(),
                 Ty::Union(_) => "contextual 'new(...)' cannot choose an alternative from a union; use an explicit constructor"
                     .to_string(),
                 Ty::TypeParam(_) => "contextual 'new(...)' requires an exact declared class or shape, not an unconstrained type parameter"
                     .to_string(),
                 other => format!(
-                    "contextual 'new(...)' requires an expected named class or shape type, got '{}'",
+                    "contextual 'new(...)' requires an expected class or shape type, got '{}'",
                     other.describe()
                 ),
             };
@@ -8510,7 +8574,10 @@ impl<'a> Checker<'a> {
 
     fn split_generic_call_callee<'expr>(&self, callee: &'expr Expr) -> (&'expr Expr, Vec<Ty>) {
         let Expr::Index {
-            receiver, index, ..
+            receiver,
+            index,
+            explicit_type_args,
+            ..
         } = callee
         else {
             return (callee, Vec::new());
@@ -8518,7 +8585,10 @@ impl<'a> Checker<'a> {
         if !self.is_explicit_generic_call_target(receiver) {
             return (callee, Vec::new());
         }
-        let Some(type_args) = type_arg_refs_from_expr(index) else {
+        let Some(type_args) = explicit_type_args
+            .clone()
+            .or_else(|| type_arg_refs_from_expr(index))
+        else {
             return (callee, Vec::new());
         };
         (
@@ -8591,8 +8661,13 @@ impl<'a> Checker<'a> {
     fn brace_call_type_sig(&self, callee: &Expr) -> Option<TypeSig> {
         let callee = match callee {
             Expr::Index {
-                receiver, index, ..
-            } if type_arg_refs_from_expr(index).is_some() => receiver.as_ref(),
+                receiver,
+                index,
+                explicit_type_args,
+                ..
+            } if explicit_type_args.is_some() || type_arg_refs_from_expr(index).is_some() => {
+                receiver.as_ref()
+            }
             _ => callee,
         };
         let class_sig = match callee {
@@ -8750,16 +8825,13 @@ impl<'a> Checker<'a> {
                 self.check_equality_operands(left, right, span);
                 Ty::bool()
             }
-            BinaryOp::Less
-            | BinaryOp::LessEq
-            | BinaryOp::Greater
-            | BinaryOp::GreaterEq
-            | BinaryOp::And
-            | BinaryOp::Or => {
-                if matches!(op, BinaryOp::And | BinaryOp::Or) {
-                    self.require_bool(left, span, "logical operator expects Bool operands");
-                    self.require_bool(right, span, "logical operator expects Bool operands");
-                }
+            BinaryOp::Less | BinaryOp::LessEq | BinaryOp::Greater | BinaryOp::GreaterEq => {
+                self.check_ordered_operands(left, right, span);
+                Ty::bool()
+            }
+            BinaryOp::And | BinaryOp::Or => {
+                self.require_bool(left, span, "logical operator expects Bool operands");
+                self.require_bool(right, span, "logical operator expects Bool operands");
                 Ty::bool()
             }
             BinaryOp::StrictEq | BinaryOp::StrictNotEq => {
@@ -8768,6 +8840,28 @@ impl<'a> Checker<'a> {
             }
             BinaryOp::Colon => Ty::Unknown,
         }
+    }
+
+    fn check_ordered_operands(&mut self, left: &Ty, right: &Ty, span: crate::source::Span) {
+        if matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown) {
+            return;
+        }
+        if (left.is_numeric() && right.is_numeric())
+            || (left.is_str() && right.is_str())
+            || self.is_assignable(left, &Ty::Named("Ordered".to_string(), vec![right.clone()]))
+        {
+            return;
+        }
+        self.add_error(
+            "invalid_comparison_operands",
+            format!(
+                "comparison requires numeric values, Str values, or a left operand implementing Ordered[{}]; got '{}' and '{}'",
+                right.describe(),
+                left.describe(),
+                right.describe()
+            ),
+            span,
+        );
     }
 
     fn check_equality_operands(&mut self, left: &Ty, right: &Ty, span: crate::source::Span) {
@@ -12009,6 +12103,23 @@ impl<'a> Checker<'a> {
         code: &'static str,
         message: impl Into<String>,
     ) {
+        if let Some(targets) = self.ambiguous_shape_union_projection_targets(actual, expected) {
+            let targets = targets
+                .iter()
+                .map(|target| format!("'{}'", target.describe()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.add_error(
+                "ambiguous_shape_union_projection",
+                format!(
+                    "value of type '{}' can project to multiple members of union '{}': {targets}; construct the intended shape explicitly, for example 'Target {{ ...value }}'",
+                    actual.describe(),
+                    expected.describe(),
+                ),
+                span,
+            );
+            return;
+        }
         if !self.is_assignable(actual, expected) {
             self.add_error(code, message, span);
         }
@@ -12147,6 +12258,13 @@ impl<'a> Checker<'a> {
             return false;
         };
 
+        if matches!(actual, Ty::Named(name, _) if self
+            .lookup_any_type(name)
+            .is_some_and(|sig| sig.kind == TypeKind::Class))
+        {
+            return false;
+        }
+
         let Some(actual_fields) = self.structural_fields_for_type(actual) else {
             return false;
         };
@@ -12177,6 +12295,85 @@ impl<'a> Checker<'a> {
                             && self.is_assignable(&right_field.ty, &left_field.ty)
                     })
             })
+    }
+
+    fn shape_union_projection_candidates(&self, actual: &Ty, members: &[Ty]) -> Vec<Ty> {
+        members
+            .iter()
+            .filter(|member| self.structurally_assignable_to_shape(actual, member))
+            .cloned()
+            .collect()
+    }
+
+    fn union_accepts_without_shape_projection(&self, actual: &Ty, members: &[Ty]) -> bool {
+        if matches!(actual, Ty::Unknown | Ty::Never)
+            || members.iter().any(|member| member == actual)
+        {
+            return true;
+        }
+        members.iter().any(|member| {
+            self.shape_target_fields(member).is_none() && self.is_assignable(actual, member)
+        })
+    }
+
+    fn shape_union_projection_targets(&self, actual: &Ty, members: &[Ty]) -> Vec<Ty> {
+        if self.union_accepts_without_shape_projection(actual, members) {
+            return Vec::new();
+        }
+        let candidates = self.shape_union_projection_candidates(actual, members);
+        let exact = candidates
+            .iter()
+            .filter(|member| self.shape_fields_match_exactly(actual, member))
+            .cloned()
+            .collect::<Vec<_>>();
+        if exact.is_empty() { candidates } else { exact }
+    }
+
+    fn ambiguous_shape_union_projection_targets(
+        &self,
+        actual: &Ty,
+        expected: &Ty,
+    ) -> Option<Vec<Ty>> {
+        let Ty::Union(members) = expected else {
+            return None;
+        };
+        match actual {
+            Ty::Union(actual_members) => actual_members.iter().find_map(|actual_member| {
+                self.ambiguous_shape_union_projection_targets(actual_member, expected)
+            }),
+            actual => {
+                let targets = self.shape_union_projection_targets(actual, members);
+                (targets.len() > 1).then_some(targets)
+            }
+        }
+    }
+
+    fn is_assignable_to_union(
+        &self,
+        actual: &Ty,
+        members: &[Ty],
+        seen: &mut HashSet<(String, String)>,
+    ) -> bool {
+        if let Ty::Union(actual_members) = actual {
+            return actual_members
+                .iter()
+                .all(|member| self.is_assignable_to_union(member, members, seen));
+        }
+        if self.union_accepts_without_shape_projection(actual, members) {
+            return true;
+        }
+        let targets = self.shape_union_projection_targets(actual, members);
+        if targets.len() == 1 {
+            return true;
+        }
+
+        // Preserve ordinary non-structural assignability for special and
+        // constrained types that cannot be classified as shape projections.
+        members.iter().any(|member| {
+            let mut branch_seen = seen.clone();
+            self.is_assignable_inner(actual, member, &mut branch_seen)
+                && self.shape_target_fields(member).is_none()
+        })
     }
 
     fn implicitly_satisfies_value_bound(&self, actual: &Ty, expected: &Ty) -> bool {
@@ -12433,16 +12630,7 @@ impl<'a> Checker<'a> {
                 && self.is_assignable_inner(actual_ret, expected_ret, seen);
         }
         if let Ty::Union(expected_members) = expected {
-            return match actual {
-                Ty::Union(actual_members) => actual_members.iter().all(|actual_member| {
-                    expected_members
-                        .iter()
-                        .any(|expected_member| self.is_assignable(actual_member, expected_member))
-                }),
-                actual => expected_members
-                    .iter()
-                    .any(|expected_member| self.is_assignable(actual, expected_member)),
-            };
+            return self.is_assignable_to_union(actual, expected_members, seen);
         }
         if let Ty::Union(actual_members) = actual {
             return actual_members
@@ -14343,6 +14531,7 @@ fn type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
             receiver,
             index,
             span,
+            ..
         } => {
             let TypeRef::Named { name, .. } = type_ref_from_expr(receiver)? else {
                 return None;
@@ -17364,6 +17553,8 @@ shape Point {
 
 def main() Unit {
     point Point = new(4, 5)
+    anonymous { x Int, y Int } = new(4, 5)
+    reversed { y Int, x Int } = new(4, 5)
 }
 "#,
         );
@@ -17437,6 +17628,7 @@ def main() Unit {
     settings Settings = default {}
     overridden Settings = default { label: "changed" }
     anonymous { enabled Bool, files [Str] } = default {}
+    empty {} = default {}
     point Point = default { x: 1, y: 2 }
 }
 "#,
@@ -17512,14 +17704,15 @@ def main() Unit {
     lookup Map[Str, Int] = {}
     set Set[Str] = {}
     nothing Unit = {}
-    anonymous = new {}
+    anonymous {} = new {}
     structural {} = {}
-    widened Any = new {}
+    defaultedStructural {} = default {}
+    widened Any = anonymous
     accept({})
     result Unit = noop2()
     methodResult Unit = defaulted.noop()
     callback fn() Unit = () => {}
-    shapeCallback = () => new {}
+    shapeCallback fn() {} = () => new {}
     callbackResult = { ...shapeCallback(), value: 1 }
 }
 "#,
@@ -17536,8 +17729,11 @@ interface Marker {}
 
 def main() Unit {
     untyped = {}
+    forced = new {}
     widened Any = {}
+    forcedWidened Any = new {}
     abstract Marker = {}
+    forcedAbstract Marker = new {}
 }
 "#,
         );
@@ -17547,7 +17743,7 @@ def main() Unit {
             .iter()
             .filter(|diagnostic| diagnostic.code == "missing_empty_construction_target")
             .collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 3, "{:#?}", result.diagnostics);
+        assert_eq!(diagnostics.len(), 6, "{:#?}", result.diagnostics);
         assert!(diagnostics.iter().all(|diagnostic| {
             diagnostic
                 .message
@@ -17641,7 +17837,6 @@ def main() Unit {
     rollups["main"] := new { count: 0, total: 0 }
 
     anonymous = new { x, y }
-    empty = new {}
     widened Any = new { x, y }
 }
 "#,
@@ -17658,9 +17853,14 @@ class User {
     name Str
 }
 
+shape UserData {
+    name Str
+}
+
 def main() Unit {
     fresh User = { name: "Ada" }
-    data = { name: "Grace" }
+    data = UserData { name: "Grace" }
+    explicit User = User { ...data }
     existing User = data
 }
 "#,
@@ -17672,7 +17872,7 @@ def main() Unit {
                 diagnostic.code == "invalid_binding_type"
                     && diagnostic
                         .message
-                        .contains("cannot assign value of type '{name Str}'")
+                        .contains("cannot assign value of type 'UserData'")
                     && diagnostic
                         .message
                         .contains("to binding 'existing' of type 'User'")
@@ -17849,9 +18049,7 @@ def main() Unit {
         assert!(
             result.diagnostics.iter().any(|diag| {
                 diag.code == "invalid_contextual_construction"
-                    && diag
-                        .message
-                        .contains("requires an expected named class or shape")
+                    && diag.message.contains("requires an expected class or shape")
             }),
             "{:#?}",
             result.diagnostics
@@ -17884,7 +18082,7 @@ def route() Result[HttpResponse, HttpError] {
     }
 
     #[test]
-    fn allows_class_to_named_shape_assignment() {
+    fn requires_explicit_construction_from_class_to_shape() {
         let program = parse_inline(
             r#"
 class Pixel {
@@ -17899,13 +18097,28 @@ shape Point {
 
 def main() Int {
     pixel Pixel = Pixel(4, 5)
-    point Point = pixel
-    point.x + point.y
+    implicit Point = pixel
+    explicit Point = { ...pixel }
+    roundTrip Pixel = Pixel { ...explicit }
+    explicit.x + explicit.y + roundTrip.x + roundTrip.y
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic
+                        .message
+                        .contains("cannot assign value of type 'Pixel'")
+                    && diagnostic
+                        .message
+                        .contains("to binding 'implicit' of type 'Point'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -17931,7 +18144,7 @@ class Pixel {
 
 def main() Unit {
     pixel Pixel = Pixel(4, 5)
-    view PointView = pixel
+    view PointView = { ...pixel }
     named Named = view
     _ Str = named.label()
 }
@@ -20216,6 +20429,108 @@ def narrow(value Cat | Dog) Dog | Bird = value
     }
 
     #[test]
+    fn rejects_ambiguous_shape_projection_into_union() {
+        let program = parse_inline(
+            r#"
+shape XY {
+    x Int
+    y Int
+}
+
+shape XZ {
+    x Int
+    z Int
+}
+
+shape XYZ {
+    x Int
+    y Int
+    z Int
+}
+
+def main() Unit {
+    original = XYZ(1, 2, 3)
+    selected XY | XZ = original
+    reordered XZ | XY = original
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "ambiguous_shape_union_projection")
+                .count(),
+            2,
+            "{:#?}",
+            result.diagnostics
+        );
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "ambiguous_shape_union_projection")
+            .expect("ambiguous projection diagnostic");
+        assert!(diagnostic.message.contains("XYZ"), "{diagnostic:#?}");
+        assert!(diagnostic.message.contains("XY"), "{diagnostic:#?}");
+        assert!(diagnostic.message.contains("XZ"), "{diagnostic:#?}");
+        assert!(
+            diagnostic
+                .message
+                .contains("construct the intended shape explicitly"),
+            "{diagnostic:#?}"
+        );
+    }
+
+    #[test]
+    fn selects_exact_or_unique_shape_projection_into_union() {
+        let program = parse_inline(
+            r#"
+shape X {
+    x Int
+}
+
+shape XY {
+    x Int
+    y Int
+}
+
+shape XZ {
+    x Int
+    z Int
+}
+
+shape XYZ {
+    x Int
+    y Int
+    z Int
+}
+
+shape Position {
+    y Int
+    x Int
+}
+
+shape Label {
+    label Str
+}
+
+def project(value XYZ | Label) XY | Label = value
+
+def main() Unit {
+    original = XYZ(1, 2, 3)
+    unique XY | Label = original
+    exact XY | X = Position(2, 1)
+    resolved XY | XZ = XY { ...original }
+    dynamic XY | Label = project(original)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn rejects_cyclic_type_aliases() {
         let program = parse_inline(
             r#"
@@ -20365,6 +20680,32 @@ def read(values Accessors) Unit {
     callbacks [fn(Int) Int] = values.callbacks
     position { x Int, y Int } = values.position
     println(counts.size, rows.size, optionalValues.size, callbacks.size, position.x)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_anonymous_shape_method_signature_before_following_member() {
+        let program = parse_inline(
+            r#"
+interface Positioned {
+    def position() { x Int, y Int }
+    def label Str
+}
+
+class Located with Positioned {
+    def position() { x Int, y Int } = { x: 3, y: 4 }
+    def label Str = "point"
+}
+
+def coordinate(value Positioned) Int = value.position().x
+
+def main() Unit {
+    value Positioned = Located()
+    println(value.label, coordinate(value))
 }
 "#,
         );

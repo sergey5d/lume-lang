@@ -6663,6 +6663,12 @@ impl<'a> SourceBodyEmitter<'a> {
                 ast::BinaryOp::StrictNotEq => {
                     self.emit_strict_equality(left, right, bindings, true)
                 }
+                ast::BinaryOp::Less
+                | ast::BinaryOp::LessEq
+                | ast::BinaryOp::Greater
+                | ast::BinaryOp::GreaterEq => {
+                    self.emit_ordered_comparison(left, *op, right, bindings)
+                }
                 ast::BinaryOp::Colon => None,
                 _ => {
                     let left = self.emit_expr(left, bindings)?;
@@ -6670,10 +6676,6 @@ impl<'a> SourceBodyEmitter<'a> {
                     let operator = match op {
                         ast::BinaryOp::Or => "||",
                         ast::BinaryOp::And => "&&",
-                        ast::BinaryOp::Less => "<",
-                        ast::BinaryOp::LessEq => "<=",
-                        ast::BinaryOp::Greater => ">",
-                        ast::BinaryOp::GreaterEq => ">=",
                         ast::BinaryOp::Add => "+",
                         ast::BinaryOp::Sub => "-",
                         ast::BinaryOp::Mul => "*",
@@ -6683,7 +6685,11 @@ impl<'a> SourceBodyEmitter<'a> {
                         | ast::BinaryOp::Eq
                         | ast::BinaryOp::NotEq
                         | ast::BinaryOp::StrictEq
-                        | ast::BinaryOp::StrictNotEq => unreachable!(),
+                        | ast::BinaryOp::StrictNotEq
+                        | ast::BinaryOp::Less
+                        | ast::BinaryOp::LessEq
+                        | ast::BinaryOp::Greater
+                        | ast::BinaryOp::GreaterEq => unreachable!(),
                     };
                     Some(format!("({left} {operator} {right})"))
                 }
@@ -6986,6 +6992,35 @@ impl<'a> SourceBodyEmitter<'a> {
         })
     }
 
+    fn emit_ordered_comparison(
+        &self,
+        left: &core::Expr,
+        op: ast::BinaryOp,
+        right: &core::Expr,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let left_ty = self.expr_type(left, bindings)?;
+        let right_ty = self.expr_type(right, bindings)?;
+        let left_expr = self.emit_expr(left, bindings)?;
+        let right_expr = self.emit_expr(right, bindings)?;
+        let operator = match op {
+            ast::BinaryOp::Less => "<",
+            ast::BinaryOp::LessEq => "<=",
+            ast::BinaryOp::Greater => ">",
+            ast::BinaryOp::GreaterEq => ">=",
+            _ => return None,
+        };
+        if type_is_numeric(&left_ty) && type_is_numeric(&right_ty) {
+            return Some(format!("({left_expr} {operator} {right_expr})"));
+        }
+        let comparison = if type_is_str(&left_ty) && type_is_str(&right_ty) {
+            format!("{left_expr}.compareTo({right_expr})")
+        } else {
+            format!("{left_expr}.compare({right_expr})")
+        };
+        Some(format!("({comparison} {operator} 0L)"))
+    }
+
     fn emit_strict_equality(
         &self,
         left: &core::Expr,
@@ -7275,6 +7310,23 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         expected: &ir::Type,
     ) -> Option<String> {
+        if let Some(source_ty) = self
+            .source_expr_type(expr.span())
+            .or_else(|| self.expr_type(expr, bindings))
+            && let Some(projection) =
+                self.emit_union_shape_projection(expected, expr, &source_ty, bindings)
+        {
+            return Some(projection);
+        }
+        if let Some(source_ty) = self
+            .source_expr_type(expr.span())
+            .or_else(|| self.expr_type(expr, bindings))
+            && let Some(target) = self.shape_union_projection_target(&source_ty, expected)
+            && let Some(projection) =
+                self.emit_shape_projection(&target, expr, &source_ty, bindings)
+        {
+            return Some(projection);
+        }
         match expr {
             core::Expr::Unary {
                 op: ast::UnaryOp::OptionWrap,
@@ -7426,6 +7478,19 @@ impl<'a> SourceBodyEmitter<'a> {
                         span: *span,
                     };
                     return self.emit_call(&callee, args, *span, *style, bindings);
+                }
+                if *style == core::CallStyle::Paren
+                    && let ir::Type::Record(fields) = expected
+                {
+                    if fields.len() != args.len() || args.iter().any(|arg| arg.name.is_some()) {
+                        return None;
+                    }
+                    let mut parts = Vec::with_capacity(fields.len() * 2);
+                    for (field, arg) in fields.iter().zip(args) {
+                        parts.push(java_string_literal(&field.name));
+                        parts.push(self.emit_expr_against(&arg.value, bindings, &field.ty)?);
+                    }
+                    return Some(format!("lume.core.LumeShape.of({})", parts.join(", ")));
                 }
                 let ir::Type::Named { name, .. } = expected else {
                     return None;
@@ -7658,6 +7723,171 @@ impl<'a> SourceBodyEmitter<'a> {
             self.names.value_type(target),
             self.names.value_type(source_ty)
         ))
+    }
+
+    fn shape_union_projection_target(
+        &self,
+        source: &ir::Type,
+        expected: &ir::Type,
+    ) -> Option<ir::Type> {
+        let ir::Type::Union(members) = expected else {
+            return None;
+        };
+        if matches!(source, ir::Type::Union(_))
+            || members.iter().any(|member| member == source)
+            || members.iter().any(|member| {
+                self.shape_fields(member).is_none()
+                    && self.ir_type_satisfies_nominal_member(source, member)
+            })
+        {
+            return None;
+        }
+        let source_fields = self.shape_fields(source)?;
+        let candidates = members
+            .iter()
+            .filter_map(|member| {
+                let target_fields = self.shape_fields(member)?;
+                target_fields
+                    .iter()
+                    .all(|target| {
+                        source_fields
+                            .iter()
+                            .any(|source| source.name == target.name && source.ty == target.ty)
+                    })
+                    .then_some((member.clone(), target_fields))
+            })
+            .collect::<Vec<_>>();
+        let exact = candidates
+            .iter()
+            .filter(|(_, fields)| fields.len() == source_fields.len())
+            .map(|(member, _)| member.clone())
+            .collect::<Vec<_>>();
+        if exact.len() == 1 {
+            return exact.into_iter().next();
+        }
+        if exact.is_empty() && candidates.len() == 1 {
+            return candidates.into_iter().next().map(|(member, _)| member);
+        }
+        None
+    }
+
+    fn emit_union_shape_projection(
+        &self,
+        expected: &ir::Type,
+        source: &core::Expr,
+        source_ty: &ir::Type,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let ir::Type::Union(source_members) = source_ty else {
+            return None;
+        };
+        let projections = source_members
+            .iter()
+            .filter_map(|member| {
+                self.shape_union_projection_target(member, expected)
+                    .map(|target| (member, target))
+            })
+            .collect::<Vec<_>>();
+        if projections.is_empty() {
+            return None;
+        }
+
+        let source_expr = self.emit_expr(source, bindings)?;
+        let source_local =
+            self.synthetic_name("unionShapeProjection", "value", source.span().start);
+        let mut body = format!("Object {source_local} = {source_expr}; ");
+        for (index, (member, target)) in projections.iter().enumerate() {
+            let ir::Type::Named { name, .. } = member else {
+                return None;
+            };
+            let case_local = format!("{source_local}Case{}", index + 1);
+            let mut case_bindings = bindings.clone();
+            case_bindings.insert(case_local.clone(), case_local.clone());
+            let case_expr = core::Expr::Identifier {
+                name: case_local.clone(),
+                span: source.span(),
+            };
+            let projected =
+                self.emit_shape_projection(target, &case_expr, member, &case_bindings)?;
+            body.push_str(&format!(
+                "if ({source_local} instanceof {} {case_local}) return {projected}; ",
+                self.names.named_type(name)
+            ));
+        }
+        body.push_str(&format!("return {source_local};"));
+        Some(format!(
+            "((java.util.function.Supplier<Object>) () -> {{ {body} }}).get()"
+        ))
+    }
+
+    fn shape_fields(&self, ty: &ir::Type) -> Option<Vec<ir::NamedType>> {
+        match ty {
+            ir::Type::Record(fields) => Some(fields.clone()),
+            ir::Type::Named { name, args } => {
+                let shape = self
+                    .bundle
+                    .ir
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == *name && ty.kind == TypeKind::Record)?;
+                let subst = shape
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect::<HashMap<_, _>>();
+                Some(
+                    shape
+                        .fields
+                        .iter()
+                        .filter(|field| field.visibility != Visibility::Private)
+                        .map(|field| ir::NamedType {
+                            name: field.name.clone(),
+                            ty: substitute_java_emit_type(&field.ty, &subst),
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    fn ir_type_satisfies_nominal_member(&self, source: &ir::Type, target: &ir::Type) -> bool {
+        if source == target {
+            return true;
+        }
+        let (
+            ir::Type::Named {
+                name: source_name,
+                args: source_args,
+            },
+            ir::Type::Named {
+                name: target_name, ..
+            },
+        ) = (source, target)
+        else {
+            return false;
+        };
+        let Some(source_def) = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == *source_name)
+        else {
+            return false;
+        };
+        let subst = source_def
+            .type_params
+            .iter()
+            .cloned()
+            .zip(source_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        source_def.with_bounds.iter().any(|bound| {
+            let bound = substitute_java_emit_type(bound, &subst);
+            matches!(&bound, ir::Type::Named { name, .. } if name == target_name)
+                || self.ir_type_satisfies_nominal_member(&bound, target)
+        })
     }
 
     fn emit_record_literal_against(
@@ -11815,8 +12045,8 @@ impl JavaNames {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            ir::Type::Named { name, args } if name == "Ordering" => format!(
-                "lume.core.Ordering<{}>",
+            ir::Type::Named { name, args } if name == "Ordered" => format!(
+                "lume.core.Ordered<{}>",
                 args.iter()
                     .map(|arg| self.value_type(arg))
                     .collect::<Vec<_>>()
@@ -12016,7 +12246,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Rune" => Some("Integer".to_string()),
         "Eq" => Some("lume.core.Eq".to_string()),
         "Hashed" => Some("lume.core.Hashed".to_string()),
-        "Ordering" => Some("lume.core.Ordering".to_string()),
+        "Ordered" => Some("lume.core.Ordered".to_string()),
         "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
         | "AnnotationType" => Some("lume.core.LumeType".to_string()),
         "TypeKind" => Some("lume.core.LumeTypeKind".to_string()),
@@ -12614,6 +12844,11 @@ fn is_named_builtin(ty: &ir::Type, expected: &str) -> bool {
 
 fn type_is_str(ty: &ir::Type) -> bool {
     type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str))
+}
+
+fn type_is_numeric(ty: &ir::Type) -> bool {
+    type_is_named_or_primitive(ty, "Int", |ty| matches!(ty, ir::Type::Int))
+        || type_is_float_like(ty)
 }
 
 fn type_is_float_like(ty: &ir::Type) -> bool {

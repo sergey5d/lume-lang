@@ -1,0 +1,17 @@
+# FAIL_REGEX:
+# .*cannot assign value of type 'Pixel'.*to binding 'point' of type 'Point'.*
+
+class Pixel {
+    x Int
+    y Int
+}
+
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    pixel = Pixel(1, 2)
+    point Point = pixel
+}

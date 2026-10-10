@@ -3,25 +3,13 @@
 # desc 4 3 2 1
 # 0
 
-object Ascending with Ordering[Int] {
-
-    def compare(left Int, right Int) Int = left - right
-}
-
-
-object Descending with Ordering[Int] {
-
-    def compare(left Int, right Int) Int = right - left
-}
-
-
 def main() Int {
     asc [Int] = [3, 1, 4, 2]
-    asc.sort(Ascending)
+    asc.sort((left, right) => left - right)
     println("asc " + (asc.at(0) ?? 0) + " " + (asc.at(1) ?? 0) + " " + (asc.at(2) ?? 0) + " " + (asc.at(3) ?? 0))
 
     desc [Int] = [3, 1, 4, 2]
-    desc.sort(Descending)
+    desc.sort((left, right) => right - left)
     println("desc " + (desc.at(0) ?? 0) + " " + (desc.at(1) ?? 0) + " " + (desc.at(2) ?? 0) + " " + (desc.at(3) ?? 0))
 
     0

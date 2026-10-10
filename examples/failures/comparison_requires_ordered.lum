@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*comparison requires numeric values, Str values, or a left operand implementing Ordered\[Plain\].*
+
+class Plain {
+    value Int
+}
+
+def main() Bool = Plain(1) < Plain(2)

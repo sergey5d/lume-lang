@@ -461,32 +461,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 TokenKind::Newline
-                    if at_top_level
-                        && !self.tokens[..i]
-                            .iter()
-                            .rev()
-                            .find(|candidate| candidate.kind != TokenKind::Newline)
-                            .is_some_and(|previous| {
-                                matches!(
-                                    previous.kind,
-                                    TokenKind::AndAnd
-                                        | TokenKind::OrOr
-                                        | TokenKind::EqEq
-                                        | TokenKind::NotEq
-                                        | TokenKind::StrictEq
-                                        | TokenKind::StrictNotEq
-                                        | TokenKind::Less
-                                        | TokenKind::LessEq
-                                        | TokenKind::Greater
-                                        | TokenKind::GreaterEq
-                                        | TokenKind::Plus
-                                        | TokenKind::Minus
-                                        | TokenKind::Star
-                                        | TokenKind::Slash
-                                        | TokenKind::Percent
-                                        | TokenKind::QuestionQuestion
-                                )
-                            }) =>
+                    if at_top_level && !self.condition_segment_continues_after(i) =>
                 {
                     break;
                 }
@@ -495,6 +470,45 @@ impl<'a> Parser<'a> {
             i += 1;
         }
         i
+    }
+
+    fn condition_segment_continues_after(&self, newline_index: usize) -> bool {
+        let Some(previous_index) = self.tokens[..newline_index]
+            .iter()
+            .rposition(|token| token.kind != TokenKind::Newline)
+        else {
+            return false;
+        };
+        let previous = &self.tokens[previous_index];
+        if matches!(
+            previous.kind,
+            TokenKind::AndAnd
+                | TokenKind::OrOr
+                | TokenKind::EqEq
+                | TokenKind::NotEq
+                | TokenKind::StrictEq
+                | TokenKind::StrictNotEq
+                | TokenKind::Less
+                | TokenKind::LessEq
+                | TokenKind::Greater
+                | TokenKind::GreaterEq
+                | TokenKind::Plus
+                | TokenKind::Minus
+                | TokenKind::Star
+                | TokenKind::Slash
+                | TokenKind::Percent
+                | TokenKind::QuestionQuestion
+                | TokenKind::Keyword(Keyword::Is)
+        ) {
+            return true;
+        }
+
+        previous.kind == TokenKind::Identifier
+            && previous.lexeme == "not"
+            && self.tokens[..previous_index]
+                .iter()
+                .rfind(|token| token.kind != TokenKind::Newline)
+                .is_some_and(|token| token.kind == TokenKind::Keyword(Keyword::Is))
     }
 
     pub(super) fn scan_match_guard_expr_end(&self, start: usize) -> usize {

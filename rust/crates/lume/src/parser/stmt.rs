@@ -58,7 +58,9 @@ impl<'a> Parser<'a> {
                 let function = self.parse_function_decl(Vec::new(), Visibility::Default)?;
                 Some(Stmt::LocalFunction(function))
             }
-            TokenKind::Keyword(Keyword::Match) => self.parse_match_stmt().map(Stmt::Match),
+            TokenKind::Keyword(Keyword::Match) => self
+                .try_parse_composed_control_flow_expr_stmt(Keyword::Match)
+                .or_else(|| self.parse_match_stmt().map(Stmt::Match)),
             TokenKind::Keyword(Keyword::Let) => {
                 let checkpoint = self.checkpoint();
                 if let Some(expr) = self.try_parse_lambda_expr() {
@@ -86,7 +88,9 @@ impl<'a> Parser<'a> {
                 Some(Stmt::Binding(stmt))
             }
             TokenKind::Keyword(Keyword::Defer) => self.parse_defer_stmt().map(Stmt::Defer),
-            TokenKind::Keyword(Keyword::If) => self.parse_if_stmt().map(Stmt::If),
+            TokenKind::Keyword(Keyword::If) => self
+                .try_parse_composed_control_flow_expr_stmt(Keyword::If)
+                .or_else(|| self.parse_if_stmt().map(Stmt::If)),
             TokenKind::Keyword(Keyword::While) => self.parse_while_stmt().map(Stmt::While),
             TokenKind::Keyword(Keyword::For) => {
                 if self.is_for_yield_start() {
@@ -130,6 +134,26 @@ impl<'a> Parser<'a> {
                 Some(Stmt::Expr(ExprStmt { expr, span }))
             }
         }
+    }
+
+    fn try_parse_composed_control_flow_expr_stmt(&mut self, keyword: Keyword) -> Option<Stmt> {
+        let checkpoint = self.checkpoint();
+        let Some(expr) = self.parse_expr() else {
+            self.restore(checkpoint);
+            return None;
+        };
+        let is_bare_control_flow = match keyword {
+            Keyword::If => matches!(expr, Expr::If { .. }),
+            Keyword::Match => matches!(expr, Expr::Match { .. }),
+            _ => unreachable!("only if and match have statement and expression forms"),
+        };
+        if is_bare_control_flow {
+            self.restore(checkpoint);
+            return None;
+        }
+
+        let span = expr.span();
+        Some(Stmt::Expr(ExprStmt { expr, span }))
     }
 
     fn starts_named_type_declaration_in_callable(&self) -> bool {

@@ -33,7 +33,7 @@ def main() Unit {
         name: "Ben"
         age: 12
     }
-    empty = new {}
+    empty {} = new {}
     a = 1
     inferred = {
         count: a

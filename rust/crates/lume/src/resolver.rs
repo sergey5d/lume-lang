@@ -3388,12 +3388,18 @@ impl<'a> Resolver<'a> {
 
 fn generic_call_callee_parts(callee: &Expr) -> Option<(&Expr, Vec<TypeRef>)> {
     let Expr::Index {
-        receiver, index, ..
+        receiver,
+        index,
+        explicit_type_args,
+        ..
     } = callee
     else {
         return None;
     };
-    Some((receiver.as_ref(), generic_call_type_refs(index)?))
+    let type_args = explicit_type_args
+        .clone()
+        .or_else(|| generic_call_type_refs(index))?;
+    Some((receiver.as_ref(), type_args))
 }
 
 fn generic_call_type_refs(expr: &Expr) -> Option<Vec<TypeRef>> {
@@ -3428,6 +3434,7 @@ fn generic_call_type_ref(expr: &Expr) -> Option<TypeRef> {
             receiver,
             index,
             span,
+            ..
         } => {
             let TypeRef::Named { name, .. } = generic_call_type_ref(receiver)? else {
                 return None;

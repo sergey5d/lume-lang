@@ -336,6 +336,7 @@ pub enum Expr {
     Index {
         receiver: Box<Expr>,
         index: Box<Expr>,
+        explicit_type_args: Option<Vec<TypeRef>>,
         span: Span,
     },
     RecordUpdate {

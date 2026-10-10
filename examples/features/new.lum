@@ -42,7 +42,7 @@ def main() Unit {
         name: "sample"
         count: 2
     }
-    empty = new {}
+    empty {} = new {}
     widened Any = new { x, y }
 
     println("point", point.x + point.y)

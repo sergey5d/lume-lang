@@ -236,10 +236,12 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
         ast::Expr::Index {
             receiver,
             index,
+            explicit_type_args,
             span,
         } => core::Expr::Index {
             receiver: Box::new(desugar_expr(receiver)),
             index: Box::new(desugar_expr(index)),
+            explicit_type_args: explicit_type_args.clone(),
             span: *span,
         },
         ast::Expr::RecordUpdate {

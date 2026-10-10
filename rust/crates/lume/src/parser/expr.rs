@@ -107,6 +107,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_lambda_body(&mut self) -> Option<LambdaBody> {
+        self.skip_newlines();
         if self.at(TokenKind::LBrace) {
             return self
                 .parse_expression_brace_body_with_continuation()
@@ -123,7 +124,6 @@ impl<'a> Parser<'a> {
                     ExpressionBraceBody::Block(block) => LambdaBody::Block(block),
                 });
         }
-        self.skip_newlines();
         let Some(first) = self.parse_stmt() else {
             self.synchronize_stmt();
             self.error_at_current(
@@ -1534,123 +1534,63 @@ impl<'a> Parser<'a> {
                     };
                     continue;
                 }
-                self.skip_newlines();
-                let first =
-                    if self.at(TokenKind::Colon) {
-                        None
-                    } else {
-                        Some(self.with_trailing_block_calls_allowed(|parser| {
-                            parser.parse_slice_bound()
-                        })?)
-                    };
-                if self.match_token(TokenKind::Colon) {
-                    let colon = self.previous_span();
-                    self.skip_newlines();
-                    let second = if self.at(TokenKind::RBracket) {
-                        None
-                    } else {
-                        Some(self.with_trailing_block_calls_allowed(|parser| {
-                            parser.parse_slice_bound()
-                        })?)
-                    };
-                    self.skip_newlines();
-                    let end = self.consume(TokenKind::RBracket, "expected ']' after slice")?;
-                    let mut args = Vec::new();
-                    match (first, second) {
-                        (None, None) => {}
-                        (None, Some(end_expr)) => {
-                            let zero = Expr::Integer {
-                                raw: "0".to_string(),
-                                span: colon,
-                            };
-                            args.push(CallArg {
-                                name: None,
-                                ty: None,
-                                span: zero.span(),
-                                value: zero,
+                let contents = self.checkpoint();
+                let type_attempt =
+                    self.parse_explicit_type_argument_list()
+                        .map(|(type_args, end)| {
+                            let end_state = self.checkpoint();
+                            let diagnostics = self.diagnostics[contents.diagnostics_len..].to_vec();
+                            (type_args, end, end_state, diagnostics)
+                        });
+                self.restore(contents);
+
+                if let Some(mut bracket_expr) = self.parse_bracket_postfix_value(expr.clone()) {
+                    if let Expr::Index {
+                        index,
+                        explicit_type_args,
+                        ..
+                    } = &mut bracket_expr
+                        && let Some((type_args, end, end_state, type_diagnostics)) = &type_attempt
+                        && end_state.index == self.index
+                    {
+                        if self.diagnostics.len() > contents.diagnostics_len {
+                            let argument_span = type_args
+                                .first()
+                                .map(TypeRef::span)
+                                .unwrap_or(*end)
+                                .cover(type_args.last().map(TypeRef::span).unwrap_or(*end));
+                            *index = Box::new(Expr::Unit {
+                                span: argument_span,
                             });
-                            args.push(CallArg {
-                                name: None,
-                                ty: None,
-                                span: end_expr.span(),
-                                value: end_expr,
-                            });
+                            self.diagnostics.truncate(contents.diagnostics_len);
+                            self.diagnostics.extend(type_diagnostics.clone());
                         }
-                        (Some(start_expr), None) => args.push(CallArg {
-                            name: None,
-                            ty: None,
-                            span: start_expr.span(),
-                            value: start_expr,
-                        }),
-                        (Some(start_expr), Some(end_expr)) => {
-                            args.push(CallArg {
-                                name: None,
-                                ty: None,
-                                span: start_expr.span(),
-                                value: start_expr,
-                            });
-                            args.push(CallArg {
-                                name: None,
-                                ty: None,
-                                span: end_expr.span(),
-                                value: end_expr,
-                            });
-                        }
+                        *explicit_type_args = Some(type_args.clone());
                     }
-                    let slice_span = start.cover(end);
-                    expr = Expr::Call {
-                        callee: Box::new(Expr::Member {
-                            receiver: Box::new(expr),
-                            name: "slice".to_string(),
-                            span: slice_span,
-                        }),
-                        args,
-                        uses_brace_syntax: false,
-                        span: slice_span,
-                    };
-                } else {
-                    let Some(mut index) = first else {
-                        self.error_at_current(
-                            "expected_expression",
-                            "expected index expression or ':' in brackets",
-                        );
-                        return None;
-                    };
-                    if self.match_token(TokenKind::Comma) {
-                        let mut comma = self.previous_span();
-                        let mut items = vec![index];
-                        loop {
-                            self.skip_newlines();
-                            if self.at(TokenKind::RBracket) {
-                                self.report_trailing_comma(comma, "index list");
-                                break;
-                            }
-                            items.push(self.with_trailing_block_calls_allowed(|parser| {
-                                parser.parse_slice_bound()
-                            })?);
-                            self.skip_newlines();
-                            if !self.match_token(TokenKind::Comma) {
-                                break;
-                            }
-                            comma = self.previous_span();
-                        }
-                        let tuple_span = items
-                            .first()
-                            .map(Expr::span)
-                            .unwrap_or(start)
-                            .cover(items.last().map(Expr::span).unwrap_or(start));
-                        index = Expr::TupleLiteral {
-                            items,
-                            span: tuple_span,
-                        };
-                    }
-                    let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
-                    expr = Expr::Index {
-                        receiver: Box::new(expr),
-                        index: Box::new(index),
-                        span: start.cover(end),
-                    };
+                    expr = bracket_expr;
+                    continue;
                 }
+
+                let Some((type_args, end, end_state, diagnostics)) = type_attempt else {
+                    return None;
+                };
+                self.restore(contents);
+                self.index = end_state.index;
+                self.allow_trailing_block_call = end_state.allow_trailing_block_call;
+                self.diagnostics.extend(diagnostics);
+                let argument_span = type_args
+                    .first()
+                    .map(TypeRef::span)
+                    .unwrap_or(end)
+                    .cover(type_args.last().map(TypeRef::span).unwrap_or(end));
+                expr = Expr::Index {
+                    receiver: Box::new(expr),
+                    index: Box::new(Expr::Unit {
+                        span: argument_span,
+                    }),
+                    explicit_type_args: Some(type_args),
+                    span: start.cover(end),
+                };
                 continue;
             }
             if self.match_token(TokenKind::Bang) {
@@ -1710,6 +1650,148 @@ impl<'a> Parser<'a> {
             break;
         }
         Some(expr)
+    }
+
+    fn parse_explicit_type_argument_list(&mut self) -> Option<(Vec<TypeRef>, Span)> {
+        self.skip_newlines();
+        if self.at(TokenKind::RBracket) {
+            return None;
+        }
+
+        let mut type_args = vec![self.parse_type_ref()?];
+        loop {
+            self.skip_newlines();
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+            let comma = self.previous_span();
+            self.skip_newlines();
+            if self.at(TokenKind::RBracket) {
+                self.report_trailing_comma(comma, "type argument list");
+                break;
+            }
+            type_args.push(self.parse_type_ref()?);
+        }
+        self.skip_newlines();
+        let end = self.consume(TokenKind::RBracket, "expected ']' after type arguments")?;
+        Some((type_args, end))
+    }
+
+    fn parse_bracket_postfix_value(&mut self, receiver: Expr) -> Option<Expr> {
+        let start = receiver.span();
+        self.skip_newlines();
+        let first = if self.at(TokenKind::Colon) {
+            None
+        } else {
+            Some(self.with_trailing_block_calls_allowed(|parser| parser.parse_slice_bound())?)
+        };
+        if self.match_token(TokenKind::Colon) {
+            let colon = self.previous_span();
+            self.skip_newlines();
+            let second = if self.at(TokenKind::RBracket) {
+                None
+            } else {
+                Some(self.with_trailing_block_calls_allowed(|parser| parser.parse_slice_bound())?)
+            };
+            self.skip_newlines();
+            let end = self.consume(TokenKind::RBracket, "expected ']' after slice")?;
+            let mut args = Vec::new();
+            match (first, second) {
+                (None, None) => {}
+                (None, Some(end_expr)) => {
+                    let zero = Expr::Integer {
+                        raw: "0".to_string(),
+                        span: colon,
+                    };
+                    args.push(CallArg {
+                        name: None,
+                        ty: None,
+                        span: zero.span(),
+                        value: zero,
+                    });
+                    args.push(CallArg {
+                        name: None,
+                        ty: None,
+                        span: end_expr.span(),
+                        value: end_expr,
+                    });
+                }
+                (Some(start_expr), None) => args.push(CallArg {
+                    name: None,
+                    ty: None,
+                    span: start_expr.span(),
+                    value: start_expr,
+                }),
+                (Some(start_expr), Some(end_expr)) => {
+                    args.push(CallArg {
+                        name: None,
+                        ty: None,
+                        span: start_expr.span(),
+                        value: start_expr,
+                    });
+                    args.push(CallArg {
+                        name: None,
+                        ty: None,
+                        span: end_expr.span(),
+                        value: end_expr,
+                    });
+                }
+            }
+            let slice_span = start.cover(end);
+            return Some(Expr::Call {
+                callee: Box::new(Expr::Member {
+                    receiver: Box::new(receiver),
+                    name: "slice".to_string(),
+                    span: slice_span,
+                }),
+                args,
+                uses_brace_syntax: false,
+                span: slice_span,
+            });
+        }
+
+        let Some(mut index) = first else {
+            self.error_at_current(
+                "expected_expression",
+                "expected index expression or ':' in brackets",
+            );
+            return None;
+        };
+        if self.match_token(TokenKind::Comma) {
+            let mut comma = self.previous_span();
+            let mut items = vec![index];
+            loop {
+                self.skip_newlines();
+                if self.at(TokenKind::RBracket) {
+                    self.report_trailing_comma(comma, "index list");
+                    break;
+                }
+                items.push(
+                    self.with_trailing_block_calls_allowed(|parser| parser.parse_slice_bound())?,
+                );
+                self.skip_newlines();
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                comma = self.previous_span();
+            }
+            let tuple_span = items
+                .first()
+                .map(Expr::span)
+                .unwrap_or(start)
+                .cover(items.last().map(Expr::span).unwrap_or(start));
+            index = Expr::TupleLiteral {
+                items,
+                span: tuple_span,
+            };
+        }
+        let end = self.consume(TokenKind::RBracket, "expected ']' after index")?;
+        Some(Expr::Index {
+            receiver: Box::new(receiver),
+            index: Box::new(index),
+            explicit_type_args: None,
+            span: start.cover(end),
+        })
     }
 
     fn parse_slice_bound(&mut self) -> Option<Expr> {

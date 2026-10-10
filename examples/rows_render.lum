@@ -12,26 +12,23 @@
 # 246
 # 1
 
-object RowOrdering with Ordering[(Int, Int, Str)] {
+def compareRows(left (Int, Int, Str), right (Int, Int, Str)) Int {
+    let (leftX Int, leftY Int, _) = left
+    let (rightX Int, rightY Int, _) = right
 
-    def compare(left (Int, Int, Str), right (Int, Int, Str)) Int {
-        let (leftX Int, leftY Int, _) = left
-        let (rightX Int, rightY Int, _) = right
-
-        if leftY > rightY {
-            return -1
-        }
-        if leftY < rightY {
-            return 1
-        }
-        if leftX < rightX {
-            return -1
-        }
-        if leftX > rightX {
-            return 1
-        }
-        return 0
+    if leftY > rightY {
+        return -1
     }
+    if leftY < rightY {
+        return 1
+    }
+    if leftX < rightX {
+        return -1
+    }
+    if leftX > rightX {
+        return 1
+    }
+    return 0
 }
 
 
@@ -141,7 +138,7 @@ def main() Unit {
         (2, 2, "7"),
         (3, 2, "8")
     ]
-    rows.sort(RowOrdering)
+    rows.sort(compareRows)
 
     syntax1(rows)
     syntax2(rows)

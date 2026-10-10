@@ -1,0 +1,23 @@
+# EXPECT:
+# true true true true
+# ascending 1 2 3
+# descending 3 2 1
+
+class Score with Ordered[Score] {
+    value Int
+
+    def compare(other Score) Int = value - other.value
+}
+
+def main() Unit {
+    low = Score(1)
+    high = Score(2)
+    println(low < high, low <= high, high > low, high >= low)
+
+    scores = [Score(3), low, high]
+    scores.sort()
+    println("ascending", scores[0].value, scores[1].value, scores[2].value)
+
+    scores.sort((left, right) => right.compare(left))
+    println("descending", scores[0].value, scores[1].value, scores[2].value)
+}

@@ -13,16 +13,10 @@
 # two-pointer sample2 0 0 0
 # 0
 
-object Ascending with Ordering[Int] {
-
-    def compare(left Int, right Int) Int = left - right
-}
-
-
 object Solution {
 
     def sol2(nums [Int]) [[Int]] {
-        nums.sort(Ascending)
+        nums.sort((left, right) => left - right)
 
         res [[Int]] = []
 
@@ -80,7 +74,7 @@ object Solution {
     }
 
     def threeSum(nums [Int]) [[Int]] {
-        nums.sort(Ascending)
+        nums.sort((left, right) => left - right)
 
         res [[Int]] = []
 

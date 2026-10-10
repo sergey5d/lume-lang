@@ -24,6 +24,7 @@ def main() Unit {
         active: true
     }
     flags { active Bool, tags [Str] } = default {}
+    empty {} = default {}
 
     println(
         person.name,

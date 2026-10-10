@@ -20,9 +20,11 @@ def main() Unit {
     cache Cache = {}
     marker Marker = {}
     structural {} = {}
+    forced {} = new {}
+    defaulted {} = default {}
     nothing Unit = {}
     explicitUnit = ()
-    widened Any = new {}
+    widened Any = forced
 
     noop()
     noop2()
