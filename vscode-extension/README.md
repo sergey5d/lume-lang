@@ -73,7 +73,7 @@ Or use the UI:
 2. Open the Extensions view.
 3. Click the `...` menu.
 4. Choose `Install from VSIX...`.
-5. Select `vscode-extension/lume-syntax-0.0.1.vsix`.
+5. Select `vscode-extension/lume-syntax-0.0.2.vsix`.
 
 For development, the easiest path is:
 

@@ -1,9 +1,7 @@
 # Rust Implementation
 
-This folder contains the active Rust implementation of `Lume`.
-
-The goal is not to mirror the Go code file-for-file. The goal is to keep the
-same broad pipeline while moving toward a runtime that is easier to optimize:
+This folder contains the active Rust implementation of `Lume`. It owns the
+shared frontend, formatter, IR interpreter, and readable Java generator:
 
 ```txt
 source
@@ -23,7 +21,7 @@ The Rust implementation now has these real building blocks:
 - a lexer that tokenizes Lume source and reports lexical diagnostics
 - a recursive-descent parser that builds a source-shaped AST
 - a semantic resolver that performs early name binding and structure checks
-- a first-pass type checker for values, calls, constructors, use declarations, and
+- a type checker for values, calls, constructors, use declarations, and
   common control-flow forms
 - a real interpreter-oriented IR with program, type, global, function, local,
   block, statement, terminator, operand, and rvalue structures
@@ -31,8 +29,9 @@ The Rust implementation now has these real building blocks:
 - a lowering pass that maps declarations plus Core bodies into IR
 - a real IR interpreter that executes lowered multi-module programs with
   globals, user-defined types/methods, `match`, `for`, `for ... yield`,
-  `try`, `expect`, closures, shape updates, use declarations, and the stdlib/runtime helpers
+  `try`, extraction operators, closures, shape updates, use declarations, and the stdlib/runtime helpers
   needed by the checked-in examples
+- a source-shaped Java generator with shared backend capability diagnostics
 - a repo-wide Rust parity test that runs non-skipped `examples/*.lum` files and
   validates `# EXPECT:`, `# FAIL:`, and `# FAIL_REGEX:` headers
 
@@ -50,7 +49,9 @@ rust/
         lib.rs
         source.rs
         diagnostic.rs
+        diagnostic_render.rs
         lexer.rs
+        formatter.rs
         ast.rs
         parser/
         resolver.rs
@@ -59,6 +60,8 @@ rust/
         typecheck.rs
         ir.rs
         lower.rs
+        backend/
+        java_backend/
         runtime/
         interpreter.rs
 ```
@@ -73,6 +76,7 @@ cargo run --manifest-path rust/Cargo.toml -p lume -- parse examples/random_code/
 cargo run --manifest-path rust/Cargo.toml -p lume -- fmt examples/random_code/bumper.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- check examples/import_forms.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/range.lum
+cargo run --manifest-path rust/Cargo.toml -p lume -- test examples/unit_tests.lum
 cargo run --manifest-path rust/Cargo.toml -p lume -- gen examples/range.lum --out build/generated/lume
 ```
 
@@ -110,7 +114,7 @@ as:
 - invalid `break` outside a loop
 - unknown used module members
 
-The library also has a `lower_program(...)` entry point that produces the new
+The library also has a `lower_program(...)` entry point that produces the
 IR used by the interpreter and the Rust tests.
 
 The `run` command executes the lowered IR for the current Rust implementation.
@@ -120,7 +124,7 @@ It supports:
 - user-defined classes/objects and declared unions with methods
 - `if`, `while`, `match`, `for`, `for ... yield`, `defer`,
   `return`, `break`, and `continue`
-- `try` propagation and `expect` assertions over `Option`, `Result`, and `Either`
+- `try`, `??`, and postfix `!` over `Option`, `Result`, and `Either`
 - builtin constructors and helpers like `Range`, `Vector`, `Array`, `Some`, `None`,
   `Ok`, `Err`, `Left`, `Right`, and `OS.println`
 - imported-module execution through the resolver/runtime merge path
@@ -133,4 +137,4 @@ The intended next steps are:
 1. remove the remaining latent `unsupported` branches in lowering/runtime
 2. widen unexercised stdlib/runtime behavior beyond the current sample set
 3. tighten diagnostics and runtime parity across the checked-in examples
-4. keep simplifying the implementation around one maintained runtime path
+4. keep the interpreter and readable-Java paths aligned behind one frontend

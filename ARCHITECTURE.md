@@ -16,7 +16,9 @@ a-lang/
         lib.rs                library exports
         source.rs             source files and spans
         diagnostic.rs         diagnostics
+        diagnostic_render.rs  terminal diagnostic rendering
         lexer.rs              tokenization
+        formatter.rs          source formatter
         ast.rs                source-shaped syntax tree
         parser/               recursive-descent parser
         resolver.rs           module loading + name resolution
@@ -25,6 +27,8 @@ a-lang/
         desugar.rs            AST -> Core desugaring
         ir.rs                 execution-oriented IR
         lower.rs              AST/Core -> IR lowering
+        backend/              shared backend metadata and capabilities
+        java_backend/         readable Java generation
         runtime/              runtime type metadata + builtin methods
         interpreter.rs        IR interpreter
   stdlib/                     language-visible standard library source
@@ -36,7 +40,7 @@ a-lang/
 
 ## End-to-End Flow
 
-The current runtime pipeline is:
+The checked frontend feeds two execution paths:
 
 ```txt
 source file(s)
@@ -45,10 +49,12 @@ source file(s)
 -> AST
 -> resolver
 -> type checker
--> body-level desugaring to Core
--> lowering to IR
--> runtime metadata assembly
--> IR interpreter
+   -> readable Java generator
+   or
+   -> body-level desugaring to Core
+   -> lowering to IR
+   -> runtime metadata assembly
+   -> IR interpreter
 ```
 
 Two important details:
@@ -185,17 +191,27 @@ At startup it:
 The interpreter executes IR, not AST and not Core. Core only exists to make
 lowering cleaner.
 
+### 10. Java backend
+
+`java_backend/` emits readable, source-shaped Java from the resolved and checked
+program. Shared backend descriptors and capability checks live in `backend/`.
+Java generation deliberately does not consume the interpreter IR: the two
+backends share the frontend but preserve representations suited to their output.
+
 ## Execution Model
 
-The CLI in `main.rs` exposes four user-facing entry points:
+The CLI in `main.rs` exposes seven user-facing entry points:
 
 - `tokens` for raw lexing output
 - `parse` for AST inspection
+- `fmt` for in-place source formatting
 - `check` for module-aware semantic/type validation
 - `run` for full checked execution
+- `test` for running Lume spec files
+- `gen` for readable Java generation
 
-There is currently no separate bytecode VM or native backend. The interpreter
-is the execution engine.
+There is currently no bytecode VM or native machine-code backend. `run` uses the
+IR interpreter, while `gen` emits Java for JVM compilation.
 
 ## Standard Library and Builtins
 
@@ -218,8 +234,8 @@ throughout the interpreter.
 - Many Rust modules keep unit tests next to the implementation, and
   `parser/tests.rs` holds parser-focused coverage.
 - `syntax.md` is the main language reference.
-- `features.md` and the proposal markdown files at the repo root track design
-  status and open language questions.
+- `features.md` tracks general open language work, while focused proposal files
+  such as `async_proposal.md` retain designs that need more room.
 
 ## Current Design Boundary
 
@@ -229,6 +245,7 @@ The most important architectural boundary in the codebase today is:
 - Core is the first cleanup/desugaring layer for callable bodies.
 - IR is the execution model.
 - Runtime metadata is the interpreter's dense lookup model.
+- The Java backend consumes checked source structure rather than interpreter IR.
 
 That separation is what keeps the current implementation understandable while
 still leaving room to grow toward a more explicit Core-first or VM-like future.

@@ -6,11 +6,24 @@ belong in `syntax.md`.
 
 ## Highest Priority
 
-### 1. Type Pattern Analysis
+### 1. Pattern Analysis
 
 Open checker/runtime work:
 - generic type-aware type patterns at runtime
 - unreachable-case detection
+- deeper exhaustiveness for nested declared unions and finite tuple domains
+- clearer missing-case diagnostics for richer patterns
+
+Possible later ergonomics, after the analysis model is complete:
+
+```txt
+values.map(match {
+    case Some(value) => value
+    case None => 0
+})
+```
+
+This would be contextual lambda sugar, not a second match model.
 
 ## Important Next Tier
 
@@ -35,13 +48,15 @@ Open stdlib collection/query ergonomics:
 
 These can mostly live in the stdlib, but may still need runtime support in places.
 
-Open shape/construction ergonomics:
-- whether spread should be extended to named construction fields, for example `User { ...anon }`
-- whether `User { ...anon }` should construct only when `anon` exactly matches the accepted constructor inputs, or whether extra fields may be ignored
-
 Open construction helper naming direction:
 - whether collection/custom construction helpers should consistently prefer names like `of`, `from`, `empty`, `create`, or `make`
 - whether any collection-like type deserves special construction sugar, or whether descriptive factory names are enough
+
+Open extraction model:
+- formalize the protocol behind `<-` so user-defined containers and classes can
+  participate without compiler special cases
+- define how success type, failure behavior, and iteration differ when one type
+  supports both extraction and `Iterable`
 
 ## Medium Priority
 
@@ -246,16 +261,11 @@ The critical distinction:
 - `Type[_]` should not be produced by reified inference, because `_` is an existential capture, not a runtime type name
 
 Constraints to preserve:
-- automatic reification of every generic parameter
-- reified type parameters on classes, shapes, declared unions, annotations, or named objects
+- do not automatically reify every generic parameter
+- keep `reified` limited to function and method type parameters; type
+  declarations continue to use ordinary erased generic parameters
 
-### 12. Deferred Cleanup Follow-Ups
-
-Open questions:
-- whether runtime errors should also run pending defers
-- whether future async/concurrency features need a stronger cleanup model
-
-### 13. Explicit Tuple Projection
+### 12. Explicit Tuple Projection
 
 Possible later syntax:
 

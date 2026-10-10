@@ -16,7 +16,7 @@ def loadUsers(db Database) Result[[User], DbError] {
         .decodeAll[User]()
 }
 
-def loadUser(db Database, id Int) Result[Option[User], DbError] {
+def loadUser(db Database, id Int) Result[User?, DbError] {
     db.queryRow("select id, name from users where id = ?")
         .bind(id)
         .decodeOne[User]()
@@ -33,7 +33,7 @@ def updateUserStaged(db Database, id Int, name Str) Result[Int, DbError] {
 }
 
 def replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
-    db.transactionally(tx -> {
+    db.transactionally(tx => {
         try tx.exec("delete from users where id = ?", id)
         try tx.exec("insert into users(id, name) values (?, ?)", id, name)
         Ok(())
@@ -51,12 +51,12 @@ Supported binding styles:
 Main execution forms:
 
 - `db.query(sql).bind(...).rows()` returns all rows.
-- `db.query(sql).bind(...).map(row -> pureValue(row))` maps all rows with a pure mapper.
-- `db.query(sql).bind(...).flatMap(row -> decode(row))` decodes all rows with a mapper that returns `Result`.
+- `db.query(sql).bind(...).map(row => pureValue(row))` maps all rows with a pure mapper.
+- `db.query(sql).bind(...).flatMap(row => decode(row))` decodes all rows with a mapper that returns `Result`.
 - `db.query(sql).bind(...).decodeAll[User]()` decodes all rows into generated Lume class/shape values using reified type metadata.
-- `db.queryRow(sql).bind(...).row()` returns `Option[Row]` and errors if more than one row is returned.
-- `db.queryRow(sql).bind(...).map(row -> pureValue(row))` maps zero-or-one row with a pure mapper.
-- `db.queryRow(sql).bind(...).flatMap(row -> decode(row))` decodes zero-or-one row with a mapper that returns `Result`.
+- `db.queryRow(sql).bind(...).row()` returns `Row?` and errors if more than one row is returned.
+- `db.queryRow(sql).bind(...).map(row => pureValue(row))` maps zero-or-one row with a pure mapper.
+- `db.queryRow(sql).bind(...).flatMap(row => decode(row))` decodes zero-or-one row with a mapper that returns `Result`.
 - `db.queryRow(sql).bind(...).decodeOne[User]()` decodes zero-or-one row into a generated Lume class/shape value.
 - `db.exec(sql, args...)` runs insert/update/delete/DDL immediately and returns affected row count.
 - `db.exec(sql).bind(...).run()` is the staged/builder form for the same operation.
@@ -67,10 +67,9 @@ Reified row decoding:
 - `T` must currently be a generated Lume class or named shape with a public positional constructor.
 - Row columns are matched to visible field names case-insensitively; SQL column order does not matter.
 - Primitive fields are converted for `Str`, `Int`, `Float`, `Bool`, and `Rune`.
-- Nullable columns map to `Option[...]` fields as `None`; non-null values become `Some(value)`.
-- Use manual `map` / `flatMap` when decoding needs custom column names, joins, nested objects, interfaces, enums, or validation logic.
+- Nullable columns map to `T?` fields as `None`; non-null values become `Some(value)`.
+- Use manual `map` / `flatMap` when decoding needs custom column names, joins, nested objects, interfaces, declared unions, or validation logic.
 
 Named binding uses `:name` placeholders in SQL and lowers them to JDBC `?`
-parameters. True anonymous-shape binding should be added when generated Java
-can materialize anonymous shape literals at runtime. For now, shape-like named
-binding is represented with `Map[Str, Any]`.
+parameters. The JDBC adapter currently accepts named bindings as `[Str: Any]`;
+it does not interpret arbitrary anonymous-shape values as SQL bindings.

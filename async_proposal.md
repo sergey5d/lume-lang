@@ -19,9 +19,9 @@ def summary(ctx Context) Result[HttpResponse, HttpError] {
         expenseTask = fork this.repo().expenseTotals(orgId)
         agingTask   = fork this.repo().arAging(orgId)
 
-        revenue = try revenueTask.join().mapError { error -> ApiResult.httpError(500, error.toStr()) }
-        expenses = try expenseTask.join().mapError { error -> ApiResult.httpError(500, error.toStr()) }
-        aging = try agingTask.join().mapError { error -> ApiResult.httpError(500, error.toStr()) }
+        revenue = try revenueTask.join().mapError { error => ApiResult.httpError(500, error.toStr()) }
+        expenses = try expenseTask.join().mapError { error => ApiResult.httpError(500, error.toStr()) }
+        aging = try agingTask.join().mapError { error => ApiResult.httpError(500, error.toStr()) }
 
         Ok({ body: Json.stringify({ revenue: revenue, expenses: expenses, aging: aging }) })
     }
@@ -53,13 +53,13 @@ avoid re-validating the same token on every request:
 
 ```lume
 keeper AuthCache {
-    entries Map[Str, CachedAuth] = Map()
+    private var entries [Str: CachedAuth] = []
 
-    def lookup(token Str) Option[CachedAuth] =
+    def lookup(token Str) CachedAuth? =
         entries[token]
 
     def store(token Str, auth CachedAuth) Unit {
-        entries.put(token, auth)
+        this.entries := this.entries.put(token, auth)
     }
 }
 ```
@@ -67,14 +67,15 @@ keeper AuthCache {
 Callers would use it like a singleton:
 
 ```lume
-cached Option[CachedAuth] = AuthCache.lookup(token)
+cached CachedAuth? = AuthCache.lookup(token)
 ```
 
 Mental model:
 
 - A `keeper` owns mutable state.
 - Calls into a keeper are serialized by the runtime.
-- The mutable map inside the keeper stays safe even when many HTTP handlers call it concurrently.
+- The keeper's mutable `entries` field stays safe even when many HTTP handlers
+  call it concurrently.
 - Keepers are for shared process-local coordination, not ordinary domain objects.
 
 Open questions:
