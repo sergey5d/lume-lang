@@ -10830,6 +10830,11 @@ fn generic_call_type_arg_refs_from_expr(expr: &Expr) -> Option<Vec<TypeRef>> {
 
 fn generic_call_type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
     match expr {
+        Expr::ListLiteral { items, span } if items.len() == 1 => Some(TypeRef::Named {
+            name: "Vector".to_string(),
+            args: vec![generic_call_type_ref_from_expr(&items[0])?],
+            span: *span,
+        }),
         Expr::Identifier { name, span } => Some(TypeRef::Named {
             name: name.clone(),
             args: Vec::new(),

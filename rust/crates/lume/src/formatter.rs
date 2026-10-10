@@ -217,8 +217,7 @@ fn normalize_horizontal_spacing(
 
         let gap = &source[cursor..token.span.start];
         if gap.chars().all(|ch| matches!(ch, ' ' | '\t')) {
-            if !gap.is_empty()
-                && should_preserve_horizontal_gap(previous_token, token, tokens, index)
+            if should_write_horizontal_space(previous_token, token, tokens, index, !gap.is_empty())
             {
                 output.push(' ');
             }
@@ -234,11 +233,12 @@ fn normalize_horizontal_spacing(
     output
 }
 
-fn should_preserve_horizontal_gap(
+fn should_write_horizontal_space(
     previous: Option<&Token>,
     current: &Token,
     tokens: &[&Token],
     current_index: usize,
+    had_space: bool,
 ) -> bool {
     let Some(previous) = previous else {
         return false;
@@ -259,10 +259,50 @@ fn should_preserve_horizontal_gap(
     }
 
     if current.kind == TokenKind::LParen && can_end_callee(previous.kind) {
-        return is_parenthesized_getter_return(tokens, current_index);
+        return had_space && is_parenthesized_getter_return(tokens, current_index);
     }
 
-    true
+    if current.kind == TokenKind::LBracket {
+        return had_space;
+    }
+
+    had_space || requires_horizontal_space(previous.kind, current.kind)
+}
+
+fn requires_horizontal_space(previous: TokenKind, current: TokenKind) -> bool {
+    matches!(previous, TokenKind::LBrace) && current != TokenKind::RBrace
+        || matches!(current, TokenKind::LBrace) && previous != TokenKind::LBrace
+        || matches!(current, TokenKind::RBrace) && previous != TokenKind::LBrace
+        || matches!(previous, TokenKind::Comma | TokenKind::Colon)
+        || horizontal_operator(previous)
+        || horizontal_operator(current)
+}
+
+fn horizontal_operator(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Eq
+            | TokenKind::FatArrow
+            | TokenKind::LeftArrow
+            | TokenKind::QuestionQuestion
+            | TokenKind::ColonAssign
+            | TokenKind::EqEq
+            | TokenKind::NotEq
+            | TokenKind::StrictEq
+            | TokenKind::StrictNotEq
+            | TokenKind::Less
+            | TokenKind::LessEq
+            | TokenKind::Greater
+            | TokenKind::GreaterEq
+            | TokenKind::PlusEq
+            | TokenKind::MinusEq
+            | TokenKind::StarEq
+            | TokenKind::SlashEq
+            | TokenKind::PercentEq
+            | TokenKind::AndAnd
+            | TokenKind::OrOr
+            | TokenKind::Pipe
+    )
 }
 
 fn can_end_callee(kind: TokenKind) -> bool {
@@ -304,17 +344,20 @@ fn update_nesting(
     delimiters: &mut Vec<OpenDelimiter>,
 ) {
     let mut carry_continuation = carry_continuation;
-    for token in tokens {
+    for (index, token) in tokens.iter().enumerate() {
         match token.kind {
             TokenKind::LBrace => {
+                let closes_on_line = matching_brace_closes_on_line(tokens, index);
                 *braces += 1;
-                brace_continuations.push(carry_continuation);
-                carry_continuation = false;
-                for delimiter in delimiters.iter_mut().rev() {
-                    if delimiter.opened_line != line {
-                        break;
+                brace_continuations.push(carry_continuation && !closes_on_line);
+                if !closes_on_line {
+                    carry_continuation = false;
+                    for delimiter in delimiters.iter_mut().rev() {
+                        if delimiter.opened_line != line {
+                            break;
+                        }
+                        delimiter.suspended_by_brace_depth.get_or_insert(*braces);
                     }
-                    delimiter.suspended_by_brace_depth.get_or_insert(*braces);
                 }
             }
             TokenKind::RBrace => {
@@ -336,6 +379,23 @@ fn update_nesting(
             _ => {}
         }
     }
+}
+
+fn matching_brace_closes_on_line(tokens: &[&Token], opening: usize) -> bool {
+    let mut depth = 0usize;
+    for token in &tokens[opening..] {
+        match token.kind {
+            TokenKind::LBrace => depth += 1,
+            TokenKind::RBrace => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn pop_delimiter(delimiters: &mut Vec<OpenDelimiter>, kind: DelimiterKind) {
@@ -504,6 +564,18 @@ mod tests {
         assert_eq!(
             result.text,
             "def readString(path Str) Result[Str, Str] =\n    File.readText(path).mapError { err =>\n        fileErrorMessage(err)\n    }\n"
+        );
+    }
+
+    #[test]
+    fn inline_record_argument_does_not_consume_lambda_indentation() {
+        let result = format(
+            "def main() Unit {\nargs { verbose Bool, help Bool }=\nOS.args.reduce({verbose: false, help : false}, (acc, arg) => {\nif arg == \"--verbose\" {\nacc with {verbose: true}\n} else if arg == \"--help\" {\nacc with {help: true}\n} else {\nacc\n}\n})\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def main() Unit {\n    args { verbose Bool, help Bool } =\n        OS.args.reduce({ verbose: false, help: false }, (acc, arg) => {\n            if arg == \"--verbose\" {\n                acc with { verbose: true }\n            } else if arg == \"--help\" {\n                acc with { help: true }\n            } else {\n                acc\n            }\n        })\n}\n"
         );
     }
 

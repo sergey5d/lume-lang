@@ -3698,6 +3698,28 @@ let User { name, value } = candidate else (defaultName, defaultValue)
 # error: use a shape with fields {name, value}
 ```
 
+When a pattern aliases a whole value and also binds components inside that
+value, its fallback must exit control flow. A value fallback could otherwise
+initialize the whole and its components independently, breaking the
+relationship expressed by the successful pattern:
+
+```txt
+let User { name } as user = candidate else return       # valid
+let Some(User { name }) = candidate else "Unknown"      # valid: one binding
+
+let User { name } as user = candidate else {            # invalid
+    name: "Unknown"
+    user: User("Ada")
+}
+```
+
+To recover with another whole value, select it first and then destructure it:
+
+```txt
+let user User = candidate else User("Unknown")
+let { name } = user
+```
+
 `let ... else` remains statement-oriented:
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement

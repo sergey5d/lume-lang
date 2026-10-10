@@ -3596,6 +3596,13 @@ impl<'a> Checker<'a> {
             return;
         }
         let mut binding_names = Vec::new();
+        let overlapping_alias = if !stmt.clauses.is_empty() {
+            stmt.clauses
+                .iter()
+                .find_map(|clause| overlapping_whole_pattern_alias(&clause.pattern))
+        } else {
+            overlapping_whole_pattern_alias(&stmt.pattern)
+        };
         if !stmt.clauses.is_empty() {
             for clause in &stmt.clauses {
                 let value_ty = self.check_expr(&clause.value);
@@ -3621,7 +3628,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        self.check_let_else_fallback(&stmt.else_block, &bindings);
+        self.check_let_else_fallback(&stmt.else_block, &bindings, overlapping_alias);
 
         if let Some(scope) = self.scopes.last_mut() {
             for (name, value) in bindings {
@@ -3630,9 +3637,27 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_let_else_fallback(&mut self, block: &Block, bindings: &[(String, ValueInfo)]) {
+    fn check_let_else_fallback(
+        &mut self,
+        block: &Block,
+        bindings: &[(String, ValueInfo)],
+        overlapping_alias: Option<String>,
+    ) {
         if self.block_guarantees_control_exit(block) {
             self.check_block(block);
+            return;
+        }
+
+        if let Some(alias) = overlapping_alias {
+            self.check_block(block);
+            self.add_error(
+                "invalid_let_else_fallback",
+                format!(
+                    "pattern alias '{}' binds a whole value and components inside it; its let else fallback must exit control flow instead of supplying independent replacement bindings",
+                    alias
+                ),
+                block.span,
+            );
             return;
         }
 
@@ -12208,6 +12233,29 @@ fn pattern_without_alias(mut pattern: &Pattern) -> &Pattern {
     pattern
 }
 
+fn overlapping_whole_pattern_alias(pattern: &Pattern) -> Option<String> {
+    match pattern {
+        Pattern::Alias { inner, name, .. } => {
+            if name != "_" && !crate::ast::pattern_binding_names(inner).is_empty() {
+                return Some(name.clone());
+            }
+            overlapping_whole_pattern_alias(inner)
+        }
+        Pattern::Extract { inner, .. } => overlapping_whole_pattern_alias(inner),
+        Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+            elements.iter().find_map(overlapping_whole_pattern_alias)
+        }
+        Pattern::Record { fields, .. } => fields
+            .iter()
+            .find_map(|field| overlapping_whole_pattern_alias(&field.pattern)),
+        Pattern::Constructor { args, .. } => args.iter().find_map(overlapping_whole_pattern_alias),
+        Pattern::Wildcard { .. }
+        | Pattern::Binding { .. }
+        | Pattern::Type { .. }
+        | Pattern::Literal { .. } => None,
+    }
+}
+
 fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
     params
         .iter()
@@ -13967,6 +14015,11 @@ fn type_arg_refs_from_expr(expr: &Expr) -> Option<Vec<TypeRef>> {
 
 fn type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
     match expr {
+        Expr::ListLiteral { items, span } if items.len() == 1 => Some(TypeRef::Named {
+            name: "Vector".to_string(),
+            args: vec![type_ref_from_expr(&items[0])?],
+            span: *span,
+        }),
         Expr::Identifier { name, span } => Some(TypeRef::Named {
             name: name.clone(),
             args: Vec::new(),
@@ -17752,6 +17805,61 @@ def main() Unit {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn rejects_value_fallback_for_whole_pattern_alias_with_component_bindings() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+def main() Unit {
+    candidate Any = 0
+    let User { name } as user = candidate else {
+        name: "Unknown"
+        user: User("Ada")
+    }
+    OS.println(name, user.name)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_let_else_fallback"
+                    && diag.message.contains(
+                        "pattern alias 'user' binds a whole value and components inside it",
+                    )
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_exiting_alias_fallback_and_nested_single_binding_value_fallback() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+def read(candidate Any) Str {
+    let User { name } as user = candidate else return "missing"
+    name + user.name
+}
+
+def main() Unit {
+    candidate Option[User] = None
+    let Some(User { name }) = candidate else "Unknown"
+    OS.println(name)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]

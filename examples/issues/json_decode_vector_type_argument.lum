@@ -1,0 +1,25 @@
+# EXPECT:
+# Ada
+# Grace
+
+module json_decode_vector_type_argument
+
+use lume/json/{Json}
+
+shape User {
+    name Str
+}
+
+def decodeUsers(text Str) Result[[User], Str] {
+    users [User] = try Json.decode[[User]](text)
+    Ok(users)
+}
+
+def main() Unit {
+    text = """[{"name":"Ada"},{"name":"Grace"}]"""
+    users = decodeUsers(text)!
+
+    for user <- users {
+        println(user.name)
+    }
+}

@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# invalid_let_else_fallback at .*: pattern alias 'user' binds a whole value and components inside it; its let else fallback must exit control flow instead of supplying independent replacement bindings
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    candidate Any = 0
+    let User { name } as user = candidate else {
+        name: "Unknown"
+        user: User("Ada")
+    }
+    println(name, user.name)
+}
