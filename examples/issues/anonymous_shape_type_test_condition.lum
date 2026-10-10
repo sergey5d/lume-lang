@@ -1,0 +1,17 @@
+# EXPECT:
+# has x
+# no nested field
+
+module anonymous_shape_type_test_condition
+
+def main() Unit {
+    value Any = { x: 1 }
+
+    if value is { x Int } {
+        println("has x")
+    }
+
+    if value is not { x Int, nested { name Str } } {
+        println("no nested field")
+    }
+}

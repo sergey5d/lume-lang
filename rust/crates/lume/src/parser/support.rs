@@ -448,6 +448,12 @@ impl<'a> Parser<'a> {
                     }
                     bracket_depth -= 1;
                 }
+                TokenKind::Keyword(Keyword::Is) if at_top_level => {
+                    if let Some(type_end) = self.scan_type_test_target_end(i + 1) {
+                        i = type_end;
+                        continue;
+                    }
+                }
                 TokenKind::AndAnd
                     if at_top_level
                         && (stop_at_any_and
@@ -470,6 +476,36 @@ impl<'a> Parser<'a> {
             i += 1;
         }
         i
+    }
+
+    fn scan_type_test_target_end(&self, mut start: usize) -> Option<usize> {
+        while self
+            .tokens
+            .get(start)
+            .is_some_and(|token| token.kind == TokenKind::Newline)
+        {
+            start += 1;
+        }
+        if self
+            .tokens
+            .get(start)
+            .is_some_and(|token| token.kind == TokenKind::Identifier && token.lexeme == "not")
+        {
+            start += 1;
+            while self
+                .tokens
+                .get(start)
+                .is_some_and(|token| token.kind == TokenKind::Newline)
+            {
+                start += 1;
+            }
+        }
+
+        let mut parser = Parser::new(self.tokens);
+        parser.index = start;
+        parser.type_path = self.type_path.clone();
+        parser.parse_type_ref()?;
+        Some(parser.index)
     }
 
     fn condition_segment_continues_after(&self, newline_index: usize) -> bool {
@@ -553,54 +589,27 @@ impl<'a> Parser<'a> {
         self.at(TokenKind::Identifier) && self.current().lexeme == "_"
     }
 
-    pub(super) fn is_for_yield_start(&self) -> bool {
+    pub(super) fn is_for_yield_start(&mut self) -> bool {
         if !self.at_keyword(Keyword::For) {
             return false;
         }
-        if self
-            .tokens
-            .get(self.index + 1)
-            .is_some_and(|token| token.kind == TokenKind::LBrace)
+        let checkpoint = self.checkpoint();
+        self.advance();
+
+        let parsed_generator = if self.match_token(TokenKind::LBrace) {
+            self.parse_for_binding_block().is_some()
+        } else if self.match_keyword(Keyword::Let) {
+            self.parse_for_let_generator_head().is_some()
+        } else if self.parse_plain_for_generator_binding().is_some()
+            && self.consume_for_generator_arrow().is_some()
         {
-            let mut i = self.index + 1;
-            let mut brace_depth = 0isize;
-            while let Some(token) = self.tokens.get(i) {
-                match token.kind {
-                    TokenKind::LBrace => brace_depth += 1,
-                    TokenKind::RBrace => {
-                        brace_depth -= 1;
-                        if brace_depth == 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    TokenKind::Eof => return false,
-                    _ => {}
-                }
-                i += 1;
-            }
-            while self
-                .tokens
-                .get(i)
-                .is_some_and(|token| token.kind == TokenKind::Newline)
-            {
-                i += 1;
-            }
-            return self
-                .tokens
-                .get(i)
-                .is_some_and(|token| matches!(token.kind, TokenKind::Keyword(Keyword::Yield)));
-        }
-        let mut i = self.index + 1;
-        while let Some(token) = self.tokens.get(i) {
-            match token.kind {
-                TokenKind::Keyword(Keyword::Yield) => return true,
-                TokenKind::LBrace => return false,
-                TokenKind::Newline | TokenKind::Eof => return false,
-                _ => i += 1,
-            }
-        }
-        false
+            self.parse_expr_without_trailing_block_call().is_some()
+        } else {
+            false
+        };
+        let is_for_yield = parsed_generator && self.at_keyword(Keyword::Yield);
+        self.restore(checkpoint);
+        is_for_yield
     }
 
     pub(super) fn current(&self) -> &Token {

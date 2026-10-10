@@ -1112,6 +1112,20 @@ patch = { age: 43 }
 updated2 = value with patch
 ```
 
+A fresh update literal receives field-specific context from the base shape. This
+keeps partial updates concise even when a replacement needs an expected type:
+
+```txt
+cleared = batch with {
+    items: []
+    position: new(0, 0)
+}
+```
+
+Here `items` is checked using the base field's collection type and `position`
+uses the base field's concrete shape type. Fields omitted from the patch remain
+unchanged; the patch is not required to construct the complete base shape.
+
 Anonymous-shape spread:
 
 ```txt
@@ -1574,7 +1588,17 @@ point Point = {
     y: 2
     yy: 3                         # invalid: no `yy` construction input
 }
+
+anonymous { x Int, y Int } = {
+    x: 1
+    y: 2
+    yy: 3                         # invalid for anonymous targets too
+}
 ```
+
+This restriction applies equally to named and anonymous target schemas. It
+checks only explicitly written construction entries; assigning an existing
+wider shape or supplying it through a spread remains a valid projection.
 
 A member expression in a construction entry must have an explicit field label:
 
@@ -2831,6 +2855,22 @@ Ordinary methods may still overload one another. Getters cannot be overloaded
 and cannot share a name with an ordinary method. A function-valued field remains
 an ordinary field value and can be called normally.
 
+An overloaded callable reference is resolved from its expected function type.
+An exact signature match is preferred; otherwise exactly one assignable overload
+must remain. Missing context or multiple compatible overloads are ambiguous:
+
+```txt
+class Formatter {
+    def render(value Int) Str = value.toStr()
+    def render(value Str) Str = value
+}
+
+formatter = Formatter()
+
+renderText fn(Str) Str = formatter.render  # selects render(Str)
+untyped = formatter.render                 # error: ambiguous callable reference
+```
+
 Block lambda:
 
 ```txt
@@ -3554,12 +3594,19 @@ if value is Str {
 if value is not Worker {
     return "not a worker"
 }
+
+if value is { x Int } {
+    println("value has the anonymous shape { x Int }")
+}
 ```
 
 `not` is contextual after `is`; it is not a second general Boolean-negation
 operator. `value is not Worker` means exactly `!(value is Worker)`. The right
 side is always a type reference, so value comparisons continue to use `!=` or
 `!==`; reference identity compares the operands' `referenceId` values.
+Anonymous-shape type references use the same rule without requiring the
+condition to be parenthesized; their braces are part of the type, not the `if`
+body.
 
 `is` is non-associative. A type test has the grammar
 `comparison ["is" ["not"] type]`, so chained tests are rejected:
@@ -4249,6 +4296,15 @@ loop. Use `for let` for an irrefutable tuple or shape pattern:
 sums = for let (left, right) <- pairs yield left + right
 
 names = for let { name } <- users yield name
+```
+
+The short form is an ordinary expression in initializers, expression-bodied
+callables, and block-tail positions:
+
+```txt
+def names(users [User]) [Str] {
+    for let { name } <- users yield name
+}
 ```
 
 This has the same generator capability as the grouped form:

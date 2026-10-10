@@ -1,6 +1,7 @@
 # EXPECT:
 # short tuple 3 7
 # short record Ada Lin
+# block record Ada Lin
 # grouped 3 7
 # loop 10
 
@@ -9,6 +10,10 @@ module short_for_yield_destructuring
 shape User {
     name Str
     age Int
+}
+
+def namesFromBlock(users [User]) [Str] {
+    for let { name } <- users yield name
 }
 
 def main() Unit {
@@ -29,6 +34,8 @@ def main() Unit {
 
     println("short tuple", sums[0], sums[1])
     println("short record", names[0], names[1])
+    blockNames = namesFromBlock(users)
+    println("block record", blockNames[0], blockNames[1])
     println("grouped", grouped[0], grouped[1])
     println("loop", loopTotal)
 }

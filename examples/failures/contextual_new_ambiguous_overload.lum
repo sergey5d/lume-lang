@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*brace construction matches multiple concrete overload targets.*
+# .*contextual construction matches multiple concrete overload targets.*
 
 class User {
     name Str

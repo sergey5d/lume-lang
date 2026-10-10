@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*anonymous shape target has no construction field 'yy'.*
+
+def main() Unit {
+    point { x Int, y Int } = {
+        x: 1
+        y: 2
+        yy: 3
+    }
+}

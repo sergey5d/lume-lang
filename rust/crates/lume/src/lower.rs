@@ -4500,6 +4500,15 @@ impl<'a> FunctionLowerer<'a> {
                     Some(*span),
                 )
             }
+            Expr::ListLiteral { items, .. }
+                if items.is_empty()
+                    && matches!(
+                        expected,
+                        ir::Type::Named { name, args } if name == "Vector" && args.len() == 1
+                    ) =>
+            {
+                self.lower_expr_from_rvalue_with_expected(expr, Some(expected))
+            }
             Expr::ListLiteral { items, span }
                 if list_literal_has_spread(items)
                     && self.spread_only_literal_is_map(items, Some(expected)) =>
@@ -6717,6 +6726,10 @@ impl<'a> FunctionLowerer<'a> {
                         return Some(value);
                     }
                 }
+                let expected_fields = match expected {
+                    Some(ir::Type::Record(fields)) => Some(fields.as_slice()),
+                    _ => None,
+                };
                 if fields.is_empty() && !values.is_empty() {
                     Some(ir::RValue::Tuple(
                         values.iter().map(|value| self.lower_expr(value)).collect(),
@@ -6727,9 +6740,20 @@ impl<'a> FunctionLowerer<'a> {
                             .iter()
                             .map(|field| {
                                 if let Some(name) = &field.name {
+                                    let value = expected_fields
+                                        .and_then(|fields| {
+                                            fields.iter().find(|expected| expected.name == *name)
+                                        })
+                                        .map(|expected| {
+                                            self.lower_expr_with_expected(
+                                                &field.value,
+                                                Some(&expected.ty),
+                                            )
+                                        })
+                                        .unwrap_or_else(|| self.lower_expr(&field.value));
                                     ir::RecordSpreadPart::Field(ir::NamedOperand {
                                         name: name.clone(),
-                                        value: self.lower_expr(&field.value),
+                                        value,
                                     })
                                 } else {
                                     let Expr::Spread {
@@ -6754,9 +6778,20 @@ impl<'a> FunctionLowerer<'a> {
                     Some(ir::RValue::Record(
                         fields
                             .iter()
-                            .map(|field| ir::NamedOperand {
-                                name: field.name.clone().unwrap_or_default(),
-                                value: self.lower_expr(&field.value),
+                            .map(|field| {
+                                let name = field.name.clone().unwrap_or_default();
+                                let value = expected_fields
+                                    .and_then(|fields| {
+                                        fields.iter().find(|expected| expected.name == name)
+                                    })
+                                    .map(|expected| {
+                                        self.lower_expr_with_expected(
+                                            &field.value,
+                                            Some(&expected.ty),
+                                        )
+                                    })
+                                    .unwrap_or_else(|| self.lower_expr(&field.value));
+                                ir::NamedOperand { name, value }
                             })
                             .collect(),
                     ))
@@ -7063,10 +7098,18 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::RecordUpdate {
                 receiver, patch, ..
-            } => Some(ir::RValue::RecordUpdate {
-                base: self.lower_expr(receiver),
-                patch: self.lower_expr(patch),
-            }),
+            } => {
+                let base_ty = self.infer_expr_type(receiver);
+                let patch_expected = self.shape_equality_fields(&base_ty).map(ir::Type::Record);
+                let base = self.lower_expr(receiver);
+                let patch = match (patch.as_ref(), patch_expected.as_ref()) {
+                    (Expr::RecordLiteral { .. }, Some(expected)) => {
+                        self.lower_record_update_literal(patch, expected)
+                    }
+                    _ => self.lower_expr(patch),
+                };
+                Some(ir::RValue::RecordUpdate { base, patch })
+            }
             Expr::Placeholder { .. } => None,
             _ => None,
         }
@@ -7838,6 +7881,15 @@ impl<'a> FunctionLowerer<'a> {
         }
         self.named_construct_fields(expected)?;
         self.lower_record_literal_as_construct(fields, values, expected, false)
+    }
+
+    fn lower_record_update_literal(&mut self, patch: &Expr, expected: &ir::Type) -> ir::Operand {
+        self.retain_source_expr(patch, Some(expected));
+        let patch_ty = self.infer_expr_type_against_with_overrides(patch, expected, &[]);
+        let value = self
+            .lower_rvalue_with_expected(patch, Some(expected))
+            .expect("record update literals should lower to an rvalue");
+        self.emit_temp_from_rvalue(value, patch_ty, Some(patch.span()))
     }
 
     fn lower_default_initialization(
@@ -11140,6 +11192,24 @@ fn contextualize_inferred_ir_type(actual: ir::Type, expected: &ir::Type) -> ir::
                 .collect(),
             ret: Box::new(contextualize_inferred_ir_type(*actual_ret, expected_ret)),
         },
+        (ir::Type::Record(actual_fields), ir::Type::Record(expected_fields)) => ir::Type::Record(
+            actual_fields
+                .into_iter()
+                .map(|actual| {
+                    let ty = expected_fields
+                        .iter()
+                        .find(|expected| expected.name == actual.name)
+                        .map(|expected| {
+                            contextualize_inferred_ir_type(actual.ty.clone(), &expected.ty)
+                        })
+                        .unwrap_or(actual.ty);
+                    ir::NamedType {
+                        name: actual.name,
+                        ty,
+                    }
+                })
+                .collect(),
+        ),
         (actual, _) => actual,
     }
 }
@@ -12203,6 +12273,35 @@ mod tests {
                 )
             })
         }));
+    }
+
+    #[test]
+    fn lowers_shape_update_fields_with_base_field_context() {
+        let program = parse_inline(
+            r#"
+            shape Point {
+                x Int
+                y Int
+            }
+
+            shape Batch {
+                items [Int]
+                position Point
+            }
+
+            def main() Int {
+                original = Batch([1, 2], Point(3, 4))
+                updated = original with {
+                    items: []
+                    position: new(0, 0)
+                }
+                updated.items.size + updated.position.x
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
     }
 
     #[test]

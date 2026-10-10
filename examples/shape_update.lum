@@ -5,6 +5,8 @@
 # chained Ada 42
 # equal true
 # not equal true
+# cleared 0
+# reset 0 0
 
 shape Amount {
     amount Int
@@ -14,6 +16,16 @@ shape Amount {
 shape Profile {
     name Str
     age Int
+}
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Batch {
+    items [Int]
+    position Point
 }
 
 def main() Unit {
@@ -44,4 +56,12 @@ def main() Unit {
     println("chained " + chained.name + " " + chained.age)
     println("equal " + equal)
     println("not equal " + notEqual)
+
+    batch = Batch([1, 2], Point(3, 4))
+    cleared = batch with {
+        items: []
+        position: new(0, 0)
+    }
+    println("cleared " + cleared.items.size)
+    println("reset " + cleared.position.x + " " + cleared.position.y)
 }

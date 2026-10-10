@@ -3016,9 +3016,23 @@ impl<'a> Checker<'a> {
     }
 
     fn check_record_update(&mut self, base: &Ty, patch: &Expr, span: crate::source::Span) {
-        let patch_ty = self.check_expr(patch);
         let Some(base_fields) = self.record_update_shape_fields(base, "base", span) else {
+            self.check_expr(patch);
             return;
+        };
+        let patch_ty = if let Some(fields) = shape_update_literal_fields(patch) {
+            let mut patch_context = base_fields.clone();
+            for name in fields.iter().filter_map(|field| field.name.as_ref()) {
+                if !patch_context
+                    .iter()
+                    .any(|(expected_name, _)| expected_name == name)
+                {
+                    patch_context.push((name.clone(), Ty::Unknown));
+                }
+            }
+            self.check_expr_against(patch, &Ty::Record(patch_context))
+        } else {
+            self.check_expr(patch)
         };
         let Some(patch_fields) = self.record_update_shape_fields(&patch_ty, "patch", patch.span())
         else {
@@ -4908,19 +4922,34 @@ impl<'a> Checker<'a> {
 
     fn check_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
         match expr {
-            Expr::Identifier { name, span } => self
-                .lookup_scoped_value(name)
-                .map(|value| value.ty)
-                .or_else(|| self.lookup_implicit_field(name).map(|field| field.ty))
-                .or_else(|| self.lookup_implicit_getter(name).map(|getter| getter.ret))
-                .or_else(|| self.lookup_global_value(name).map(|value| value.ty))
-                .or_else(|| self.lookup_function_type(name))
-                .or_else(|| self.lookup_bare_enum_case_value_type(name, expected))
-                .or_else(|| self.lookup_named_constructor_type(name))
-                .unwrap_or_else(|| {
-                    self.add_error("undefined_name", self.undefined_value_message(name), *span);
-                    Ty::Unknown
-                }),
+            Expr::Identifier { name, span } => {
+                if let Some(value) = self.lookup_scoped_value(name) {
+                    return value.ty;
+                }
+                if let Some(field) = self.lookup_implicit_field(name) {
+                    return field.ty;
+                }
+                if let Some(getter) = self.lookup_implicit_getter(name) {
+                    return getter.ret;
+                }
+                if let Some(value) = self.lookup_global_value(name) {
+                    return value.ty;
+                }
+                if let Some(functions) = self.lookup_functions(name) {
+                    return self.select_callable_reference_type(name, &functions, expected, *span);
+                }
+                if let Some(methods) = self.lookup_implicit_method_functions(name) {
+                    return self.select_callable_reference_type(name, &methods, expected, *span);
+                }
+                if let Some(ty) = self.lookup_bare_enum_case_value_type(name, expected) {
+                    return ty;
+                }
+                if let Some(ty) = self.lookup_named_constructor_type(name) {
+                    return ty;
+                }
+                self.add_error("undefined_name", self.undefined_value_message(name), *span);
+                Ty::Unknown
+            }
             Expr::Placeholder { span } => {
                 self.add_error(
                     "invalid_placeholder_expr",
@@ -5075,11 +5104,17 @@ impl<'a> Checker<'a> {
                 name,
                 span,
             } => {
+                if let Some(functions) = self.module_member_functions(expr) {
+                    return self.select_callable_reference_type(name, &functions, expected, *span);
+                }
                 if let Some(ty) = self.module_member_value_type(expr) {
                     return ty;
                 }
                 if self.reject_inaccessible_static_member(receiver, name, *span) {
                     return Ty::Unknown;
+                }
+                if let Some(methods) = self.static_callable_reference_sigs(receiver, name) {
+                    return self.select_callable_reference_type(name, &methods, expected, *span);
                 }
                 if let Some(ty) = self.static_member_value_type(receiver, name, expected) {
                     return ty;
@@ -5101,6 +5136,14 @@ impl<'a> Checker<'a> {
                 }
                 if self.reject_inaccessible_member(&receiver_ty, name, *span) {
                     return Ty::Unknown;
+                }
+                let value_member = self.field_sig_for_member(&receiver_ty, name).is_some()
+                    || self.member_getter_sig(&receiver_ty, name).is_some();
+                if !value_member
+                    && let Some(methods) = self.member_method_sigs(&receiver_ty, name)
+                    && !methods.is_empty()
+                {
+                    return self.select_callable_reference_type(name, &methods, expected, *span);
                 }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
@@ -5247,8 +5290,8 @@ impl<'a> Checker<'a> {
                 }
                 if !fields.is_empty() {
                     let expected_fields = match expected {
-                        Ty::Record(fields) => fields.as_slice(),
-                        _ => &[],
+                        Ty::Record(fields) => Some(fields.as_slice()),
+                        _ => None,
                     };
                     let explicit_names = fields
                         .iter()
@@ -5261,10 +5304,27 @@ impl<'a> Checker<'a> {
                         if let Some(name) = &field.name {
                             let annotated_ty =
                                 field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
+                            if expected_fields.is_some_and(|fields| {
+                                !fields
+                                    .iter()
+                                    .any(|(expected_name, _)| expected_name == name)
+                            }) {
+                                self.add_error(
+                                    "invalid_contextual_construction",
+                                    format!(
+                                        "anonymous shape target has no construction field '{}'",
+                                        name
+                                    ),
+                                    field.span,
+                                );
+                            }
                             let expected_ty = annotated_ty.clone().unwrap_or_else(|| {
                                 expected_fields
-                                    .iter()
-                                    .find(|(expected_name, _)| expected_name == name)
+                                    .and_then(|fields| {
+                                        fields
+                                            .iter()
+                                            .find(|(expected_name, _)| expected_name == name)
+                                    })
                                     .map(|(_, ty)| ty.clone())
                                     .unwrap_or(Ty::Unknown)
                             });
@@ -7993,7 +8053,7 @@ impl<'a> Checker<'a> {
                 .filter(|ctor| self.can_access_constructor(sig, ctor.visibility))
                 .cloned()
                 .collect::<Vec<_>>();
-            self.diagnose_ambiguous_shape_context_call(&visible, args, span);
+            self.diagnose_ambiguous_contextual_construction_call(&visible, args, span);
             if let Some(ctor) = self.choose_overload(&visible, args) {
                 let params = constructor_field_sigs_from_params(&ctor.params);
                 let constructed = self.check_constructor_signature(&params, &ret, args, span);
@@ -8354,7 +8414,7 @@ impl<'a> Checker<'a> {
         match callee {
             Expr::Identifier { name, .. } => {
                 if let Some(functions) = self.lookup_functions(name) {
-                    self.diagnose_ambiguous_shape_context_call(&functions, args, span);
+                    self.diagnose_ambiguous_contextual_construction_call(&functions, args, span);
                     let sig = self
                         .choose_overload(&functions, args)
                         .or_else(|| self.closest_overload(&functions, args))?
@@ -8365,7 +8425,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 if let Some(methods) = self.lookup_implicit_method_functions(name) {
-                    self.diagnose_ambiguous_shape_context_call(&methods, args, span);
+                    self.diagnose_ambiguous_contextual_construction_call(&methods, args, span);
                     let sig = self
                         .choose_overload(&methods, args)
                         .or_else(|| self.closest_overload(&methods, args))?
@@ -8386,7 +8446,7 @@ impl<'a> Checker<'a> {
                     })
                 {
                     if let Some(functions) = module.functions.get(&member) {
-                        self.diagnose_ambiguous_shape_context_call(functions, args, span);
+                        self.diagnose_ambiguous_contextual_construction_call(functions, args, span);
                         let sig = self
                             .choose_overload(functions, args)
                             .or_else(|| self.closest_overload(functions, args))?
@@ -8398,7 +8458,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
-                    self.diagnose_ambiguous_shape_context_call(&sigs, args, span);
+                    self.diagnose_ambiguous_contextual_construction_call(&sigs, args, span);
                     let sig = self
                         .choose_overload(&sigs, args)
                         .or_else(|| self.closest_overload(&sigs, args))?
@@ -8410,7 +8470,7 @@ impl<'a> Checker<'a> {
                 }
                 let receiver_ty = self.check_expr(receiver);
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
-                self.diagnose_ambiguous_shape_context_call(&methods, args, span);
+                self.diagnose_ambiguous_contextual_construction_call(&methods, args, span);
                 let method = self
                     .choose_overload(&methods, args)
                     .or_else(|| self.closest_overload(&methods, args))?
@@ -8424,21 +8484,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn diagnose_ambiguous_shape_context_call(
+    fn diagnose_ambiguous_contextual_construction_call(
         &mut self,
         overloads: &[FunctionSig],
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) {
-        for contextual_arg in args.iter().filter(|arg| {
-            matches!(
-                &arg.value,
-                Expr::RecordLiteral { .. }
-                    | Expr::ContextualNew {
-                        uses_brace_syntax: true,
-                        ..
-                    }
-            )
+        for (contextual_arg, construction) in args.iter().filter_map(|arg| {
+            contextual_construction_expr(&arg.value).map(|construction| (arg, construction))
         }) {
             let mut targets = HashSet::new();
             for sig in overloads {
@@ -8471,8 +8524,8 @@ impl<'a> Checker<'a> {
             if targets.len() > 1 {
                 self.add_error(
                     "ambiguous_contextual_construction",
-                    "brace construction matches multiple concrete overload targets; name the target explicitly, for example 'User { ... }'",
-                    contextual_arg.span,
+                    "contextual construction matches multiple concrete overload targets; name the target explicitly, for example 'User { ... }' or 'User(...)'",
+                    construction.span(),
                 );
             }
         }
@@ -8791,6 +8844,17 @@ impl<'a> Checker<'a> {
         class_sig
     }
 
+    fn probe_named_constructor_result_type(&self, callee: &Expr) -> Option<Ty> {
+        let (_, explicit_type_args) = self.split_generic_call_callee(callee);
+        let sig = self.brace_call_type_sig(callee)?;
+        let type_args = if explicit_type_args.is_empty() {
+            sig.type_params.iter().map(|_| Ty::Unknown).collect()
+        } else {
+            explicit_type_args
+        };
+        Some(Ty::Named(sig.name, type_args))
+    }
+
     fn static_member_value_type(&self, receiver: &Expr, name: &str, expected: &Ty) -> Option<Ty> {
         if let Some(mut path) = expr_path_for_known_value(receiver) {
             path.push(name.to_string());
@@ -8829,6 +8893,26 @@ impl<'a> Checker<'a> {
             }
         }
         None
+    }
+
+    fn static_callable_reference_sigs(
+        &self,
+        receiver: &Expr,
+        name: &str,
+    ) -> Option<Vec<FunctionSig>> {
+        let Expr::Identifier {
+            name: type_name, ..
+        } = receiver
+        else {
+            return None;
+        };
+        let sig = self.lookup_any_object(type_name)?;
+        let methods = self
+            .method_sigs_for_type(&sig, name)?
+            .into_iter()
+            .filter(|method| !method.getter)
+            .collect::<Vec<_>>();
+        (!methods.is_empty()).then_some(methods)
     }
 
     fn static_method_sigs(&self, receiver: &Expr, name: &str) -> Option<Vec<FunctionSig>> {
@@ -8885,7 +8969,21 @@ impl<'a> Checker<'a> {
                     Ty::float()
                 } else if left.is_int_like() && right.is_int_like() {
                     Ty::int()
+                } else if matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown) {
+                    Ty::Unknown
+                } else if let Some(ret) = self.binary_operator_method_return_type(left, "+", right)
+                {
+                    ret
                 } else {
+                    self.add_error(
+                        "invalid_binary_operand",
+                        format!(
+                            "operator '+' expects numeric operands, a Str operand, or a compatible '+' method; got '{}' and '{}'",
+                            left.describe(),
+                            right.describe()
+                        ),
+                        span,
+                    );
                     Ty::Unknown
                 }
             }
@@ -8929,6 +9027,22 @@ impl<'a> Checker<'a> {
             }
             BinaryOp::Colon => Ty::Unknown,
         }
+    }
+
+    fn binary_operator_method_return_type(
+        &self,
+        receiver: &Ty,
+        method_name: &str,
+        argument: &Ty,
+    ) -> Option<Ty> {
+        self.member_method_sigs(receiver, method_name)?
+            .into_iter()
+            .find(|method| {
+                !method.getter
+                    && method.params.len() == 1
+                    && self.is_assignable(argument, &method.params[0].ty)
+            })
+            .map(|method| method.ret)
     }
 
     fn check_ordered_operands(&mut self, left: &Ty, right: &Ty, span: crate::source::Span) {
@@ -10920,6 +11034,12 @@ impl<'a> Checker<'a> {
         None
     }
 
+    fn module_member_functions(&self, expr: &Expr) -> Option<Vec<FunctionSig>> {
+        let (alias, member) = module_alias_and_member(expr)?;
+        let module = self.world.lookup_module_alias(self.module, &alias)?;
+        module.functions.get(&member).cloned()
+    }
+
     fn lookup_value(&self, name: &str) -> Option<ValueInfo> {
         self.lookup_scoped_value(name)
             .or_else(|| self.lookup_global_value(name))
@@ -11294,12 +11414,16 @@ impl<'a> Checker<'a> {
                 uses_brace_syntax,
                 ..
             } => {
+                if let Some(ty) = self.probe_named_constructor_result_type(callee) {
+                    return ty;
+                }
                 let normalized_args =
                     self.normalize_trailing_brace_call_args(callee, args, *uses_brace_syntax);
                 self.callable_signature_for_args_probe(callee, &normalized_args, *uses_brace_syntax)
                     .map(|(_, ret)| ret)
                     .unwrap_or(Ty::Unknown)
             }
+            Expr::Group { inner, .. } => self.probe_expr_type(inner),
             _ => Ty::Unknown,
         }
     }
@@ -11467,6 +11591,87 @@ impl<'a> Checker<'a> {
             .filter(|method| !method.getter)
             .collect::<Vec<_>>();
         (!methods.is_empty()).then_some(methods)
+    }
+
+    fn select_callable_reference_type(
+        &mut self,
+        name: &str,
+        overloads: &[FunctionSig],
+        expected: &Ty,
+        span: crate::source::Span,
+    ) -> Ty {
+        let candidates = overloads
+            .iter()
+            .filter(|sig| !sig.getter)
+            .map(function_sig_type)
+            .collect::<Vec<_>>();
+
+        if candidates.is_empty() {
+            return Ty::Unknown;
+        }
+        if candidates.len() == 1 {
+            return candidates[0].clone();
+        }
+
+        if matches!(expected, Ty::Function(_, _)) {
+            let exact = candidates
+                .iter()
+                .filter(|candidate| *candidate == expected)
+                .cloned()
+                .collect::<Vec<_>>();
+            if exact.len() == 1 {
+                return exact[0].clone();
+            }
+            if exact.len() > 1 {
+                self.add_ambiguous_callable_reference_error(name, expected, &exact, span);
+                return Ty::Unknown;
+            }
+
+            let compatible = candidates
+                .iter()
+                .filter(|candidate| self.is_assignable(candidate, expected))
+                .cloned()
+                .collect::<Vec<_>>();
+            if compatible.len() == 1 {
+                return compatible[0].clone();
+            }
+            if compatible.len() > 1 {
+                self.add_ambiguous_callable_reference_error(name, expected, &compatible, span);
+                return Ty::Unknown;
+            }
+
+            // Preserve the normal assignment diagnostic when no overload can
+            // satisfy the requested callable contract.
+            return candidates[0].clone();
+        }
+
+        self.add_ambiguous_callable_reference_error(name, expected, &candidates, span);
+        Ty::Unknown
+    }
+
+    fn add_ambiguous_callable_reference_error(
+        &mut self,
+        name: &str,
+        expected: &Ty,
+        candidates: &[Ty],
+        span: crate::source::Span,
+    ) {
+        let signatures = candidates
+            .iter()
+            .map(Ty::describe)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let message = if matches!(expected, Ty::Function(_, _)) {
+            format!(
+                "callable reference '{name}' is ambiguous for expected type '{}'; matching overloads: {signatures}",
+                expected.describe()
+            )
+        } else {
+            format!(
+                "callable reference '{name}' is overloaded; add a function type annotation to select one overload: {signatures}"
+            )
+        };
+        self.add_error("ambiguous_callable_reference", message, span);
     }
 
     fn lookup_function_type(&self, name: &str) -> Option<Ty> {
@@ -12857,6 +13062,13 @@ fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
         .collect()
 }
 
+fn function_sig_type(sig: &FunctionSig) -> Ty {
+    Ty::Function(
+        sig.params.iter().map(|param| param.ty.clone()).collect(),
+        Box::new(sig.ret.clone()),
+    )
+}
+
 fn constructor_target_name(ret: &Ty) -> Option<&str> {
     match ret {
         Ty::Named(name, _) => Some(name.as_str()),
@@ -12958,6 +13170,22 @@ fn empty_collection_literal_span(expr: &Expr) -> Option<crate::source::Span> {
     match expr {
         Expr::ListLiteral { items, span } if items.is_empty() => Some(*span),
         Expr::Group { inner, .. } => empty_collection_literal_span(inner),
+        _ => None,
+    }
+}
+
+fn contextual_construction_expr(expr: &Expr) -> Option<&Expr> {
+    match expr {
+        Expr::Group { inner, .. } => contextual_construction_expr(inner),
+        Expr::RecordLiteral { .. } | Expr::ContextualNew { .. } => Some(expr),
+        _ => None,
+    }
+}
+
+fn shape_update_literal_fields(expr: &Expr) -> Option<&[crate::ast::CallArg]> {
+    match expr {
+        Expr::Group { inner, .. } => shape_update_literal_fields(inner),
+        Expr::RecordLiteral { fields, .. } => Some(fields),
         _ => None,
     }
 }
@@ -14879,6 +15107,72 @@ def main() Int {
     value Int = add(1, 2)
     return value
 }
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_invalid_known_addition_operands_without_cascading_unknowns() {
+        let invalid = parse_inline(
+            r#"
+def broken() Int = true + false
+"#,
+        );
+        let invalid_result = check_program(&invalid);
+        assert_eq!(
+            invalid_result.diagnostics.len(),
+            1,
+            "{:#?}",
+            invalid_result.diagnostics
+        );
+        assert!(
+            invalid_result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binary_operand"
+                    && diagnostic.message.contains("Bool")
+                    && diagnostic.message.contains("operator '+'")
+            }),
+            "{:#?}",
+            invalid_result.diagnostics
+        );
+
+        let unknown = parse_inline(
+            r#"
+def broken() Int = missing + false
+"#,
+        );
+        let unknown_result = check_program(&unknown);
+        assert!(
+            unknown_result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "undefined_name"),
+            "{:#?}",
+            unknown_result.diagnostics
+        );
+        assert!(
+            unknown_result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "invalid_binary_operand"),
+            "{:#?}",
+            unknown_result.diagnostics
+        );
+    }
+
+    #[test]
+    fn preserves_compatible_user_defined_addition() {
+        let program = parse_inline(
+            r#"
+class Pair {
+    left Int
+    right Int
+
+    def +(other Pair) Pair = Pair(left + other.left, right + other.right)
+}
+
+def combine(left Pair, right Pair) Pair = left + right
 "#,
         );
         let result = check_program(&program);
@@ -17318,6 +17612,35 @@ def main() Unit {
     }
 
     #[test]
+    fn shape_update_literals_receive_field_types_from_the_base() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+shape Batch {
+    items [Int]
+    position Point
+}
+
+def main() Unit {
+    original = Batch([1, 2], Point(3, 4))
+    updated = original with {
+        items: []
+        position: new(0, 0)
+    }
+    items [Int] = updated.items
+    position Point = updated.position
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn shape_fields_are_shallowly_read_only() {
         let program = parse_inline(
             r#"
@@ -18177,6 +18500,35 @@ def main() Unit {
     }
 
     #[test]
+    fn anonymous_shape_targets_reject_extra_explicit_fields_but_allow_projection() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    wider = { x: 1, y: 2, z: 3 }
+    assigned { x Int, y Int } = wider
+    spread { x Int, y Int } = { ...wider }
+
+    typo { x Int, y Int } = { x: 1, y: 2, yy: 3 }
+    forcedTypo { x Int, y Int } = new { x: 1, y: 2, yy: 3 }
+}
+"#,
+        );
+        let result = check_program(&program);
+        let unknown_fields = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == "invalid_contextual_construction"
+                    && diagnostic
+                        .message
+                        .contains("anonymous shape target has no construction field 'yy'")
+            })
+            .count();
+        assert_eq!(unknown_fields, 2, "{:#?}", result.diagnostics);
+        assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn shape_assignment_does_not_apply_target_field_initializers() {
         let program = parse_inline(
             r#"
@@ -18354,7 +18706,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_contextual_braces_that_would_choose_an_overload_target() {
+    fn rejects_contextual_construction_that_would_choose_an_overload_target() {
         let program = parse_inline(
             r#"
 class User { name Str }
@@ -18368,18 +18720,46 @@ class Saver {
 def main() Unit {
     saver = Saver()
     saver.save(new { name: "Ada" })
+    saver.save((new { name: "Grace" }))
+    saver.save(new("Linus"))
+    saver.save((new("Margaret")))
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(
+        assert_eq!(
             result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| { diagnostic.code == "ambiguous_contextual_construction" }),
+                .filter(|diagnostic| diagnostic.code == "ambiguous_contextual_construction")
+                .count(),
+            4,
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn allows_explicit_construction_to_resolve_an_overload_target() {
+        let program = parse_inline(
+            r#"
+class User { name Str }
+class Admin { name Str }
+
+class Saver {
+    def save(user User) Unit = ()
+    def save(admin Admin) Unit = ()
+}
+
+def main() Unit {
+    saver = Saver()
+    saver.save(User { name: "Ada" })
+    saver.save(User("Grace"))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -21109,6 +21489,65 @@ def main(formatter Formatter) Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn selects_overloaded_callable_references_from_expected_function_types() {
+        let program = parse_inline(
+            r#"
+def render(value Int) Str = value.toStr()
+def render(value Str) Str = value
+
+class Formatter {
+    def render(value Int) Str = value.toStr()
+    def render(value Str) Str = value
+
+    def selected() fn(Str) Str = render
+}
+
+object SharedFormatter {
+    def render(value Int) Str = value.toStr()
+    def render(value Str) Str = value
+}
+
+def main(formatter Formatter) Unit {
+    topLevel fn(Str) Str = render
+    instance fn(Str) Str = formatter.render
+    shared fn(Str) Str = SharedFormatter.render
+    println(topLevel("top"), instance("instance"), shared("shared"))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_callable_references_when_expected_type_does_not_select_one_overload() {
+        let program = parse_inline(
+            r#"
+class Formatter {
+    def render(value Any) Str = "any"
+    def render(value Str) Str = value
+}
+
+def main(formatter Formatter) Unit {
+    untyped = formatter.render
+    compatible fn(Str) Any = formatter.render
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "ambiguous_callable_reference")
+                .count(),
+            2,
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

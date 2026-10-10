@@ -5,6 +5,8 @@
 # object Grace
 # assigned Katherine
 # assigned instance Alan
+# overloaded text text
+# overloaded number 42
 # indexed 26
 # 0
 
@@ -25,6 +27,11 @@ class UserMapper {
 
     def mapUser(user UserEntity) UserDto =
         UserDto { id: user.id, name: user.name }
+}
+
+class Formatter {
+    def render(value Int) Str = value.toStr()
+    def render(value Str) Str = value
 }
 
 
@@ -55,6 +62,7 @@ def main() Int {
     ]
     mapper UserMapper = UserMapper {}
     service UserService = UserService {}
+    formatter Formatter = Formatter {}
 
     printAt("top-level", users.map(mapUser), 0)
     printAt("instance", users.map(mapper.mapUser), 1)
@@ -63,10 +71,14 @@ def main() Int {
 
     topLevelFn fn(UserEntity) UserDto = mapUser
     instanceFn fn(UserEntity) UserDto = mapper.mapUser
+    renderText fn(Str) Str = formatter.render
+    renderNumber fn(Int) Str = formatter.render
     handlers [fn() Int] = [() => 26]
 
     println("assigned", topLevelFn(UserEntity { id: 3, name: "Katherine" }).name)
     println("assigned instance", instanceFn(UserEntity { id: 4, name: "Alan" }).name)
+    println("overloaded text", renderText("text"))
+    println("overloaded number", renderNumber(42))
     println("indexed", handlers[0]())
     0
 }

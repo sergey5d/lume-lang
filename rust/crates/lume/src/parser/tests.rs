@@ -980,6 +980,44 @@ def ages(users [User]) [Int] =
 }
 
 #[test]
+fn parses_short_for_yield_record_pattern_as_block_tail_expression() {
+    let result = parse(
+        r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def xs(points [Point]) [Int] {
+    for let { x } <- points yield x
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    match &program.items[1] {
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => match &block.statements[0] {
+                Stmt::Expr(ExprStmt {
+                    expr: Expr::ForYield { bindings, .. },
+                    ..
+                }) => {
+                    assert_eq!(bindings.len(), 1);
+                    assert!(matches!(
+                        &bindings[0].pattern,
+                        Some(Pattern::Record { path, fields, .. })
+                            if path.is_empty() && fields.len() == 1
+                    ));
+                }
+                other => panic!("expected for-yield tail expression, got {other:#?}"),
+            },
+            other => panic!("expected block body, got {other:#?}"),
+        },
+        other => panic!("expected function, got {other:#?}"),
+    }
+}
+
+#[test]
 fn parses_for_yield_let_refutable_generator_pattern() {
     let result = parse(
         r#"
@@ -6111,6 +6149,38 @@ def classify(value Any) Int {
 
     assert!(matches!(&body.statements[2], Stmt::If(_)));
     assert!(matches!(&body.statements[3], Stmt::If(_)));
+}
+
+#[test]
+fn anonymous_shape_type_tests_do_not_consume_condition_bodies() {
+    let result = parse(
+        r#"
+def classify(value Any) Int {
+    if value is { x Int } {
+        return 1
+    }
+    if value is not { x Int, nested { name Str } } {
+        return 2
+    }
+    if value is Str | { x Int } {
+        return 3
+    }
+    4
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body");
+    };
+
+    assert!(matches!(&body.statements[0], Stmt::If(_)));
+    assert!(matches!(&body.statements[1], Stmt::If(_)));
+    assert!(matches!(&body.statements[2], Stmt::If(_)));
 }
 
 #[test]
