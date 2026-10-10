@@ -7462,6 +7462,21 @@ impl<'a> SourceBodyEmitter<'a> {
                         };
                         return self.emit_call(&callee, args, *span, *style, bindings);
                     }
+                    if let ir::Type::Named { name, .. } = expected
+                        && self.type_has_explicit_constructor(name)
+                    {
+                        let callee = core::Expr::Identifier {
+                            name: name.clone(),
+                            span: *span,
+                        };
+                        return self.emit_call(
+                            &callee,
+                            fields,
+                            *span,
+                            core::CallStyle::Paren,
+                            bindings,
+                        );
+                    }
                     let inferred = self
                         .source_expr_type(*span)
                         .or_else(|| self.expr_type(&args[0].value, bindings))?;

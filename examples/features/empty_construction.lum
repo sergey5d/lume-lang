@@ -12,12 +12,12 @@ def noop() {}
 
 def noop2() = {}
 
-def createCache() Cache = {}
+def createCache() Cache = new {}
 
 def accept(cache Cache) Int = cache.value
 
 def main() Unit {
-    cache Cache = {}
+    cache Cache = new {}
     marker Marker = {}
     structural {} = {}
     forced {} = new {}
@@ -29,5 +29,5 @@ def main() Unit {
     noop()
     noop2()
     println(cache.value)
-    println(accept({}))
+    println(accept(new {}))
 }

@@ -3987,8 +3987,8 @@ def main() Unit {
     x = 3
     y = 4
     punned Point = new { x, y }
-    worker Worker = { name: "Ada", age: 42 }
-    labeled LabeledWorker = { label: "Ben" }
+    worker Worker = new { name: "Ada", age: 42 }
+    labeled LabeledWorker = new { label: "Ben" }
     position Position = new(3, 4)
     anonymous = new { x, y }
     empty {} = new {}
@@ -3996,8 +3996,8 @@ def main() Unit {
     defaultedStructural {} = default {}
     positional { x Int, y Int } = new(1, 2)
     reversed { y Int, x Int } = new(3, 4)
-    emptyWorker EmptyWorker = {}
-    emptySet Set[Str] = {}
+    emptyWorker EmptyWorker = new {}
+    emptySet Set[Str] = new {}
     nothing Unit = {}
     callback fn() Unit = () => {}
     shapeCallback fn() {} = () => new {}
@@ -7957,7 +7957,7 @@ def main() Int {
         explicitRecorder.values[0], explicitRecorder.values[1])
 
     contextualRecorder = Recorder {}
-    contextual Pair = {
+    contextual Pair = new {
         second: contextualRecorder.mark(2)
         first: contextualRecorder.mark(1)
     }

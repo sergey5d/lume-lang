@@ -5134,9 +5134,7 @@ impl<'a> Checker<'a> {
                     return Ty::unit();
                 }
                 if let Ty::Named(name, _) = expected
-                    && self
-                        .lookup_any_type(name)
-                        .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Record))
+                    && let Some(sig) = self.lookup_any_type(name)
                 {
                     let span = expr.span();
                     let args = [crate::ast::CallArg {
@@ -5145,7 +5143,21 @@ impl<'a> Checker<'a> {
                         value: expr.clone(),
                         span,
                     }];
-                    return self.check_contextual_new_expr(&args, true, span, expected);
+                    if sig.kind == TypeKind::Class {
+                        self.add_error(
+                            "class_construction_requires_new",
+                            format!(
+                                "bare field braces cannot construct class '{}'; use 'new {{ ... }}' or '{} {{ ... }}'",
+                                sig.name, sig.name
+                            ),
+                            span,
+                        );
+                        self.check_contextual_new_expr(&args, true, span, expected);
+                        return materialize_type(expected);
+                    }
+                    if sig.kind == TypeKind::Record {
+                        return self.check_contextual_new_expr(&args, true, span, expected);
+                    }
                 }
                 if fields.is_empty() && values.is_empty() {
                     if matches!(expected, Ty::Record(_)) {
@@ -17691,24 +17703,24 @@ shape EmptyShape {}
 def noop() Unit = {}
 def noop2() = {}
 
-def makeEmpty() EmptyClass = {}
+def makeEmpty() EmptyClass = new {}
 
 def accept(value EmptyClass) Unit = ()
 
 def main() Unit {
-    instance EmptyClass = {}
-    defaulted DefaultedClass = {}
+    instance EmptyClass = new {}
+    defaulted DefaultedClass = new {}
     explicit = ExplicitEmpty()
     marker EmptyShape = {}
-    values Vector[Str] = {}
-    lookup Map[Str, Int] = {}
-    set Set[Str] = {}
+    values Vector[Str] = new {}
+    lookup Map[Str, Int] = new {}
+    set Set[Str] = new {}
     nothing Unit = {}
     anonymous {} = new {}
     structural {} = {}
     defaultedStructural {} = default {}
     widened Any = anonymous
-    accept({})
+    accept(new {})
     result Unit = noop2()
     methodResult Unit = defaulted.noop()
     callback fn() Unit = () => {}
@@ -17763,7 +17775,7 @@ class Required {
     value Int
 }
 
-def constructed() Required = {}
+def constructed() Required = new {}
 
 def body() Required {}
 "#,
@@ -17828,7 +17840,7 @@ def main() Unit {
 
     point Point = { x: 1, y: 2 }
     punned Point = new { x, y }
-    user User = { name: "Ada", age: 42 }
+    user User = User { name: "Ada", age: 42 }
     other User = new { name, age }
     _ Point = makePoint(6, 7)
     save(new { name: "Ben", age: 30 })
@@ -17858,7 +17870,7 @@ shape UserData {
 }
 
 def main() Unit {
-    fresh User = { name: "Ada" }
+    fresh User = new { name: "Ada" }
     data = UserData { name: "Grace" }
     explicit User = User { ...data }
     existing User = data
@@ -17917,7 +17929,7 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_optional_new_on_unambiguous_labeled_construction() {
+    fn allows_optional_new_for_shapes_and_requires_it_for_contextual_classes() {
         let program = parse_inline(
             r#"
 shape Point {
@@ -17932,13 +17944,61 @@ class User {
 def main() Unit {
     point Point = { x: 1, y: 2 }
     explicitPoint Point = new { x: 3, y: 4 }
-    user User = { name: "Ada" }
+    user User = User { name: "Ada" }
     explicitUser User = new { name: "Grace" }
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_bare_field_braces_for_class_construction() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+shape Profile {
+    name Str
+}
+
+class Team {
+    leader User
+}
+
+def makeInvalid() User = { name: "Return" }
+
+def accept(user User) Unit = ()
+
+def main() Unit {
+    profile Profile = { name: "Ada" }
+    contextual User = new { name: "Ada" }
+    explicit User = User { name: "Ada" }
+    invalid User = { name: "Ada" }
+    accept({ name: "Argument" })
+    team Team = new { leader: { name: "Nested" } }
+    users [Str: User] = []
+    users["indexed"] := { name: "Indexed" }
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 5, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().all(|diagnostic| {
+                diagnostic.code == "class_construction_requires_new"
+                    && diagnostic
+                        .message
+                        .contains("bare field braces cannot construct class 'User'")
+                    && diagnostic.message.contains("new { ... }")
+                    && diagnostic.message.contains("User { ... }")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

@@ -6873,6 +6873,7 @@ impl<'a> FunctionLowerer<'a> {
                                 ty,
                                 ir::Type::Named { name, .. }
                                     if runtime_collection_constructor_name(name)
+                                        || self.named_type_has_explicit_constructors(name)
                             )
                     })
                 {

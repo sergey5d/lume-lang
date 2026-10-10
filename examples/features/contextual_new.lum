@@ -35,7 +35,7 @@ def main() Unit {
     x = 4
     y = 5
     punned Point = new { x, y }
-    worker Worker = { name: "Ada", age: 42 }
+    worker Worker = new { name: "Ada", age: 42 }
     position Position = new(3, 4)
     printable Printable = object with Printable {
         x Int = 10

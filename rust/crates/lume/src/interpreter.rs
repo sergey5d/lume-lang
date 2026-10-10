@@ -8463,12 +8463,12 @@ mod tests {
             def noop2() = {}
 
             def main() Unit {
-                counter Counter = {}
-                defaulted Defaulted = {}
+                counter Counter = new {}
+                defaulted Defaulted = new {}
                 marker Marker = {}
-                values Vector[Str] = {}
-                lookup Map[Str, Int] = {}
-                set Set[Str] = {}
+                values Vector[Str] = new {}
+                lookup Map[Str, Int] = new {}
+                set Set[Str] = new {}
                 nothing Unit = {}
                 anonymous {} = new {}
                 structural {} = {}
@@ -9151,7 +9151,7 @@ mod tests {
                     explicitRecorder.values[0], explicitRecorder.values[1])
 
                 contextualRecorder = Recorder {}
-                contextual Pair = {
+                contextual Pair = new {
                     second: contextualRecorder.mark(2)
                     first: contextualRecorder.mark(1)
                 }

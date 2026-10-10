@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*bare field braces cannot construct class 'User'; use 'new \{ \.\.\. \}' or 'User \{ \.\.\. \}'.*
+
+class User {
+    name Str
+}
+
+def main() Unit {
+    user User = { name: "Ada" }
+}

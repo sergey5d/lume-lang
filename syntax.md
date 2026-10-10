@@ -1162,7 +1162,8 @@ construction expression. Constructor declarations later in the reference
 define which inputs a class accepts, but do not create a second expression
 model.
 
-Field braces construct values. Parsing is entirely syntactic:
+Bare field braces construct structural shape values. Parsing is entirely
+syntactic:
 
 ```txt
 { field: value }  # construction
@@ -1171,10 +1172,9 @@ Field braces construct values. Parsing is entirely syntactic:
 {}                # empty construction; requires an expected target
 ```
 
-The type checker then applies the construction fields to a unique concrete
-class or shape target supplied by context. The shape target may be named or an
-explicit anonymous schema. Without such a target, nonempty labeled fields or
-spreads infer an anonymous shape:
+The type checker applies bare construction fields to a named or anonymous shape
+target supplied by context. Without a shape target, nonempty labeled fields or
+spreads infer an anonymous shape. Bare braces never select a class constructor:
 
 ```txt
 point Point = {
@@ -1182,7 +1182,7 @@ point Point = {
     y: 20
 }
 
-user User = {
+user User = new {
     name: "Ada"
     age: 42
 }
@@ -1195,18 +1195,17 @@ anonymous = {
 copy = { ...source }
 
 nothing Unit = {}          # Unit, equivalent to ()
-user EmptyUser = {}        # zero-argument contextual construction
-names [Str] = {}           # zero-argument Vector construction
+user EmptyUser = new {}    # zero-argument contextual class construction
+names [Str] = []           # empty Vector literal
 
 empty = {}                 # error: no construction target
 empty = new {}             # error: no construction target
 ```
 
-Empty braces use the expected type when one exists. A concrete class, named
-shape, or collection target invokes its normal zero-argument construction and
-must satisfy the same constructor/default rules as any other call. Expected
-`Unit` produces `()`, and an explicit anonymous shape type supplies a structural
-target. `Any`, an interface, a union, or no expected type does not identify a
+Bare empty braces use an expected named or anonymous shape schema. Expected
+`Unit` produces `()`. A class or concrete collection requires `new {}` or an
+explicit constructor, and must satisfy its normal zero-argument construction
+rules. `Any`, an interface, a union, or no expected type does not identify a
 construction target. An empty shape must therefore state its schema explicitly:
 
 ```txt
@@ -1229,7 +1228,7 @@ An explicit return type remains an expected construction target, so these are
 different:
 
 ```txt
-def createCache() Cache = {} # construct Cache
+def createCache() Cache = new {} # construct Cache
 def createCache() Cache {}   # error: empty Unit body does not return Cache
 ```
 
@@ -1247,7 +1246,7 @@ rollups[key] := {
     total: 0
 }
 
-save({ name: "Ada", age: 42 })
+save(new { name: "Ada", age: 42 })
 ```
 
 Expected constructor-input types also flow into nested construction. The inner
@@ -1265,7 +1264,7 @@ class Team {
 }
 
 team Team = Team {
-    leader: {
+    leader: new {
         name: "Ada"
         age: 10
     }
@@ -1298,9 +1297,9 @@ value Printable = new { x, y }           # invalid
 value Success | Failure = new { message } # invalid: no alternative is chosen
 ```
 
-`new` may remain explicit even when labeled fields already make construction
-unambiguous. Both forms are valid and have the same construction semantics; a
-formatter may prefer the shorter first form:
+`new` may remain explicit when constructing a shape even if labeled fields
+already make construction unambiguous. Both forms below construct the same
+shape; a formatter may prefer the shorter first form:
 
 ```txt
 point Point = { x: 1, y: 2 }
@@ -1426,12 +1425,13 @@ def procedure() {
 }
 ```
 
-Contextual class construction applies only to the fresh brace construction
-expression. Assigning an already-created structural value remains ordinary
+Class construction must be requested explicitly with `new` or a named class
+constructor. Assigning an already-created structural value remains ordinary
 assignment and never invokes a class constructor:
 
 ```txt
-user User = { name: "Ada" } # valid: constructs User
+user User = new { name: "Ada" } # valid: context selects User
+other = User { name: "Grace" }  # valid: target is named explicitly
 
 data = { name: "Ada" }
 user User = data             # invalid: a shape does not become a class
@@ -1460,7 +1460,9 @@ unconstrained type parameter.
 
 A class constructor target must therefore be uniquely determined, but it does
 not have to be written at the construction site. `User { ... }` names it
-explicitly; `user User = { ... }` obtains it from the expected type.
+explicitly; `user User = new { ... }` obtains it from the expected type. Bare
+`{ ... }` remains structural shape construction even when the expected type is
+a class, so that spelling is rejected rather than invoking the constructor.
 
 Braces are also the field construction form for declared-union payload alternatives:
 
@@ -1663,11 +1665,11 @@ requires an existing concrete target, written as `Point(...)` or supplied by a
 unique expected type to `new(...)`.
 
 Tuples do not construct shapes or classes. Class construction follows the
-target-selection rules in [Construction](#construction): its target must be uniquely
-determined, but does not have to be written at the construction site.
+target-selection rules in [Construction](#construction): use `new { ... }` when
+context supplies the unique target, or name the target explicitly.
 
 ```txt
-user User = { name: "Ada", age: 10 }
+user User = new { name: "Ada", age: 10 }
 person Person = Person("Ben", 12, "NYC")
 profile MixedProfile = {
     name: "Liam"
@@ -1818,10 +1820,10 @@ class SecuredAccount {
 Braces carry several meanings. The parser chooses by the tokens before and inside the braces:
 
 ```txt
-{ field: value }                 # contextual construction or anonymous shape construction
-{ ...source }                    # anonymous or contextual shape/class construction
+{ field: value }                 # contextual named-shape or anonymous-shape construction
+{ ...source }                    # anonymous or contextual shape construction
 { expr }                         # block expression
-{}                               # empty contextual construction; target required
+{}                               # empty shape construction; shape target required
 Type { field: value }            # brace field construction or union payload
 Type { field }                   # brace construction with a punned field
 call { x => ... }                # trailing lambda
@@ -1836,7 +1838,10 @@ new {}                           # forced empty construction; target required
 
 Single-expression braces such as `{ value }` are block expressions, not
 anonymous shapes. Use `new { value }` when `value` is a punned field. Bare `{}`
-and `new {}` are empty construction and both require an expected target.
+and `new {}` are empty construction and both require an expected target. Bare
+field braces accept only shape or `Unit` targets; constructing a class or
+runtime-backed collection requires `new { ... }` or an explicitly named
+constructor.
 
 Braces that a declaration or control-flow construct requires remain body
 delimiters rather than expressions:
@@ -1846,7 +1851,7 @@ class Marker {}                  # empty declaration body
 def noop() Unit {}               # empty callable body
 def noop2() = {}                 # inferred empty callable body; Unit
 def noopValue() Unit = {}        # expected Unit produces ()
-def make() EmptyUser = {}        # zero-argument construction expression
+def make() EmptyUser = new {}    # zero-argument contextual class construction
 ```
 
 Brace classification uses the first syntactic entry, not punctuation found
@@ -2051,7 +2056,7 @@ class Pixel {
 point Point = Point(1, 2)              # explicit named-shape positional construction
 contextual Point = new(1, 2)           # contextual named-shape positional construction
 anon = { x: 1, y: 2 }                  # anonymous structural construction
-pixel = Pixel { x: 1, y: 2 }           # explicit structural construciton
+pixel = Pixel { x: 1, y: 2 }           # explicitly named class construction
 fromClass Point = { ...pixel }         # explicit class -> shape snapshot
 backToClass Pixel = Pixel { ...fromClass } # normal class construction
 named Point = { x: 1, y: 2 }           # contextual named-shape construction
@@ -2061,7 +2066,7 @@ point Point = (1, 2)                   # invalid: tuple -> named shape
 anon { x Int, y Int } = new(1, 2)      # x = 1, y = 2 from schema order
 reversed { y Int, x Int } = new(1, 2)  # y = 1, x = 2
 unknown = new(1, 2)                    # invalid: no concrete expected target
-user User = { name: "Ada", age: 10 }   # contextual class construction
+user User = new { name: "Ada", age: 10 } # contextual class construction
 empty = {}                             # invalid: no construction target
 explicitEmpty = new {}                 # invalid: no construction target
 emptyShape {} = {}                     # explicit empty anonymous shape
@@ -2596,7 +2601,7 @@ the class body.
 - contextual `new(...)` is not constructor delegation; use `this(...)` or `this { ... }` to delegate
 - explicitly targeted class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
 - explicitly targeted class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
-- contextual class call sites use the target-selection forms defined in [Construction](#construction)
+- contextual class call sites use `new { ... }` or `new(...)` with the target supplied by context, as defined in [Construction](#construction)
 - `this` is the instance receiver
 - instance fields on classes and named objects may be accessed bare when they are not shadowed
 - use `this.field` when a parameter/local shadows a field, for example `this.age`
@@ -3110,11 +3115,12 @@ makeService().send(makeRequest())
 # evaluates makeService(), then makeRequest(), then invokes send
 ```
 
-Named and contextual construction follow the same rule: supplied field
-expressions evaluate in written order, even though their values are placed into
-constructor inputs or shape fields in declaration order. Defaults are supplied
-after explicit arguments have been evaluated. By-name parameters remain lazy;
-their expressions evaluate only when the callee reads them.
+Named class construction, contextual `new` construction, and shape construction
+follow the same evaluation-order rule: supplied field expressions evaluate in
+written order, even though their values are placed into constructor inputs or
+shape fields in declaration order. Defaults are supplied after explicit
+arguments have been evaluated. By-name parameters remain lazy; their
+expressions evaluate only when the callee reads them.
 
 Methods are called explicitly:
 
