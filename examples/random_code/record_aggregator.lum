@@ -1,0 +1,159 @@
+# EXPECT:
+# ingest true true true false
+# all alpha(2,50), beta(1,40)
+# range alpha(2,50)
+# void true
+# after beta(1,40), alpha(1,30)
+
+module record_aggregator
+
+shape Rollup {
+    count Int
+    total Int
+}
+
+private class Record {
+    recordId Str
+    aggrKey Str
+    timestamp Int
+    amount Int
+    var void Bool
+}
+
+class RecordAggregator {
+    private rollupMap [Str: [Record]] = []
+    private recordMap [Str: Record] = []
+
+    def ingest(record Str) Bool {
+        lines [Str] = record.split(",")
+
+        if lines.size != 4 {
+            return false
+        }
+
+        trimmed = lines.map(line => line.trim())
+
+        let [recordId, timestampStr, aggrKey, amountStr] = trimmed else return false
+
+        if recordId.isEmpty || aggrKey.isEmpty {
+            return false
+        }
+
+        let {
+            timestamp <- Int.parse(timestampStr)
+            amount <- Int.parse(amountStr)
+        } else {
+            return false
+        }
+
+        if timestamp < 0 || recordMap.contains(recordId) {
+            return false
+        }
+
+        value = Record {
+            recordId,
+            aggrKey,
+            timestamp,
+            amount,
+            void: false
+        }
+
+        recordMap[recordId] := value
+
+        if rollupMap[aggrKey] is None {
+            rollupMap[aggrKey] := []
+        }
+
+        rollupMap[aggrKey]!.add(value)
+        true
+    }
+
+    private def getRollup(key Str, range IntRange?) Rollup? = {
+        def outsideRange(record Record) Bool = {
+            let selected <- range else return false
+            record.timestamp < selected.start || record.timestamp >= selected.end
+        }
+
+        maybeRollup = rollupMap[key].map { records =>
+            records.fold(Rollup(0, 0), (acc, record) => {
+                if record.void || outsideRange(record) {
+                    return acc
+                }
+                Rollup {
+                    count: acc.count + 1
+                    total: acc.total + record.amount
+                }
+            })
+        }
+
+        if let rollup <- maybeRollup && rollup.count == 0 {
+            return None
+        }
+        maybeRollup
+    }
+
+    def getRollup(key Str) Rollup? = getRollup(key, None)
+
+    private def rollups(range IntRange?) [(Str, Rollup)] =
+        rollupMap.keys().flatMap { key =>
+            rollup = getRollup(key, range)
+            if rollup.isEmpty {
+                []
+            } else {
+                [(key, rollup!)]
+            }
+        }
+
+    def allRollups(range IntRange? = None) [Str] {
+        values = rollups(range)
+        values.sort((left, right) => {
+            leftRollup = left[1]
+            rightRollup = right[1]
+            if leftRollup.total == rightRollup.total {
+                return left[0].compare(right[0])
+            }
+            rightRollup.total - leftRollup.total
+        })
+        values.map(entry => "${entry[0]}(${entry[1].count},${entry[1].total})")
+    }
+
+    def top(count Int) [Str] {
+        if count <= 0 {
+            return []
+        }
+        allRollups().take(count)
+    }
+
+    def voidRecord(recordId Str) Bool {
+        let record <- recordMap[recordId] else return false
+
+        if record.void {
+            return false
+        }
+
+        record.void := true
+        true
+    }
+
+    def topInRange(start Int, end Int, count Int) [Str] {
+        if count <= 0 || start >= end {
+            return []
+        }
+        allRollups(^Range(start, end)).take(count)
+    }
+}
+
+def main() Unit {
+    aggregator = RecordAggregator()
+
+    first = aggregator.ingest("r1,10,alpha,20")
+    second = aggregator.ingest("r2,15,alpha,30")
+    third = aggregator.ingest("r3,18,beta,40")
+    duplicate = aggregator.ingest("r1,19,beta,100")
+
+    println("ingest", first, second, third, duplicate)
+    println("all", aggregator.allRollups().makeStr(", "))
+    println("range", aggregator.topInRange(10, 18, 10).makeStr(", "))
+    println("void", aggregator.voidRecord("r1"))
+    println("after", aggregator.allRollups().makeStr(", "))
+}
