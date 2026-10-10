@@ -1,0 +1,17 @@
+# EXPECT:
+# 1 42
+
+shape Small {
+    x Int
+}
+
+shape Full {
+    x Int
+    y Int = 42
+}
+
+def main() Unit {
+    source = Small(1)
+    target Full = Full { ...source }
+    println(target.x, target.y)
+}

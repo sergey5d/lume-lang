@@ -9438,6 +9438,15 @@ mod tests {
                 items [Int]
             }
 
+            shape Small {
+                x Int
+            }
+
+            shape Full {
+                x Int
+                y Int = 42
+            }
+
             def view(point Point) Point = point
 
             def main() Unit {
@@ -9484,6 +9493,10 @@ mod tests {
                 items Items = wider
                 wider.items.add(2)
                 println(items.items.size)
+
+                source = Small(7)
+                full Full = Full { ...source }
+                println(full.x, full.y)
             }
             "#,
         );
@@ -9492,7 +9505,7 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\n"
+            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\n7 42\n"
         );
     }
 

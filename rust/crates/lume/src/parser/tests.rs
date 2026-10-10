@@ -1966,6 +1966,85 @@ main() Int {
 }
 
 #[test]
+fn control_flow_headers_do_not_consume_their_body_as_construction() {
+    let result = parse(
+        r#"
+def main() Unit {
+    new = [3]
+    for item <- new {
+        println(item)
+    }
+    match new {
+        case [only] => println(only)
+        case _ => ()
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(main) = &program.items[0] else {
+        panic!("expected main function");
+    };
+    let CallableBody::Block(body) = &main.body else {
+        panic!("expected block body");
+    };
+    assert!(matches!(body.statements[1], Stmt::For(_)));
+    assert!(matches!(body.statements[2], Stmt::Match(_)));
+}
+
+#[test]
+fn default_is_reserved_for_default_initialization() {
+    let result = parse(
+        r#"
+def main() Unit {
+    default = [1, 2]
+}
+"#,
+    );
+    assert!(result.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "expected_expression" || diagnostic.code == "unexpected_token"
+    }));
+}
+
+#[test]
+fn loop_body_local_function_is_not_misread_as_removed_construction() {
+    let result = parse(
+        r#"
+def main() Unit {
+    values = [1, 2]
+    for value <- values {
+        def twice(input Int) Int = input * 2
+        println(twice(value))
+    }
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "removed_interface_led_construction"),
+        "{:#?}",
+        result.diagnostics
+    );
+    let program = result.program.expect("program");
+    let Item::Function(main) = &program.items[0] else {
+        panic!("expected main function");
+    };
+    let CallableBody::Block(body) = &main.body else {
+        panic!("expected block body");
+    };
+    let Stmt::For(loop_stmt) = &body.statements[1] else {
+        panic!("expected for statement");
+    };
+    assert!(matches!(
+        loop_stmt.body.statements[0],
+        Stmt::LocalFunction(_)
+    ));
+}
+
+#[test]
 fn keeps_direct_trailing_lambda_calls_as_expressions() {
     let result = parse(
         r#"
@@ -3051,13 +3130,19 @@ def run(flag Bool) Unit {
             ..
         } if matches!(left.as_ref(), Expr::Match { .. })
     ));
+    let Expr::ForYield { yield_body, .. } = binding_value(4) else {
+        panic!("expected for-yield expression");
+    };
     assert!(matches!(
-        binding_value(4),
-        Expr::Binary {
-            left,
-            op: BinaryOp::Add,
+        yield_body.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::Binary {
+                left,
+                op: BinaryOp::Add,
+                ..
+            },
             ..
-        } if matches!(left.as_ref(), Expr::ForYield { .. })
+        })] if matches!(left.as_ref(), Expr::Block { .. })
     ));
 }
 
@@ -3430,6 +3515,7 @@ def calculation() = {
 
 def run() Unit {
     mapper fn() Int = () => { 40 } + 2
+    lengths [Int] = for value <- [1] yield { "abc" }.size
 }
 "#,
     );
@@ -3487,6 +3573,19 @@ def run() Unit {
             body: LambdaBody::Expr(expr),
             ..
         } if matches!(expr.as_ref(), Expr::Binary { op: BinaryOp::Add, .. })
+    ));
+    let Stmt::Binding(lengths) = &body.statements[1] else {
+        panic!("expected lengths binding");
+    };
+    let Expr::ForYield { yield_body, .. } = &lengths.values[0] else {
+        panic!("expected for-yield expression");
+    };
+    assert!(matches!(
+        yield_body.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::Member { receiver, .. },
+            ..
+        })] if matches!(receiver.as_ref(), Expr::Block { .. })
     ));
 }
 

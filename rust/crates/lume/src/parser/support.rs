@@ -677,6 +677,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Continue) => "CONTINUE",
             TokenKind::Keyword(Keyword::Annotation) => "ANNOTATION",
             TokenKind::Keyword(Keyword::Def) => "DEF",
+            TokenKind::Keyword(Keyword::Default) => "DEFAULT",
             TokenKind::Keyword(Keyword::Class) => "CLASS",
             TokenKind::Keyword(Keyword::Shape) => "SHAPE",
             TokenKind::Keyword(Keyword::Object) => "OBJECT",

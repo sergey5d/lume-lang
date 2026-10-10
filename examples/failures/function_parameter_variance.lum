@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*cannot assign value of type 'fn\(Str\) Int' to binding 'anyValue' of type 'fn\(Any\) Int'.*
+
+def textLength(value Str) Int = value.size
+
+def main() Unit {
+    onlyText fn(Str) Int = textLength
+    anyValue fn(Any) Int = onlyText
+    println(anyValue(123))
+}

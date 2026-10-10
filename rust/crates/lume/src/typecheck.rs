@@ -1435,6 +1435,7 @@ struct Checker<'a> {
     current_getter: bool,
     current_extension_target: Option<String>,
     callable_depth: usize,
+    local_functions_allowed: bool,
     loop_depth: usize,
     defer_depth: usize,
     next_capture_id: usize,
@@ -1461,6 +1462,7 @@ impl<'a> Checker<'a> {
             current_getter: false,
             current_extension_target: None,
             callable_depth: 0,
+            local_functions_allowed: false,
             loop_depth: 0,
             defer_depth: 0,
             next_capture_id: 0,
@@ -3003,7 +3005,12 @@ impl<'a> Checker<'a> {
                 actual
             }
             CallableBody::Block(block) => {
-                self.check_block_against(block, &self.current_return.clone())
+                let previous = self.local_functions_allowed;
+                self.local_functions_allowed = true;
+                let result =
+                    self.check_block_against_current_scope(block, &self.current_return.clone());
+                self.local_functions_allowed = previous;
+                result
             }
         }
     }
@@ -3186,6 +3193,14 @@ impl<'a> Checker<'a> {
     }
 
     fn check_block_against(&mut self, block: &Block, expected: &Ty) -> Ty {
+        let previous = self.local_functions_allowed;
+        self.local_functions_allowed = false;
+        let result = self.check_block_against_current_scope(block, expected);
+        self.local_functions_allowed = previous;
+        result
+    }
+
+    fn check_block_against_current_scope(&mut self, block: &Block, expected: &Ty) -> Ty {
         self.push_scope();
         let mut last = Ty::unit();
         for (index, statement) in block.statements.iter().enumerate() {
@@ -3550,6 +3565,16 @@ impl<'a> Checker<'a> {
                 ty
             }
             Stmt::LocalFunction(function) => {
+                if !self.local_functions_allowed {
+                    self.add_error(
+                        "invalid_local_function_scope",
+                        format!(
+                            "local function '{}' must be declared directly in a callable body, not inside a nested block",
+                            function.name
+                        ),
+                        function.span,
+                    );
+                }
                 let sig = function_sig_from_function(function, &[]);
                 self.define_local(
                     &function.name,
@@ -4350,6 +4375,36 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn expected_for_yield_payload(
+        &self,
+        family: Option<&ForYieldFamily>,
+        expected: &Ty,
+    ) -> Option<Ty> {
+        match (family?, expected) {
+            (ForYieldFamily::Iterable, Ty::Named(name, args))
+                if (name == "Vector" || name == "Iterable") && args.len() == 1 =>
+            {
+                Some(args[0].clone())
+            }
+            (ForYieldFamily::Option, Ty::Named(name, args))
+                if name == "Option" && args.len() == 1 =>
+            {
+                Some(args[0].clone())
+            }
+            (ForYieldFamily::Result { error }, Ty::Named(name, args))
+                if name == "Result" && args.len() == 2 && self.is_assignable(error, &args[1]) =>
+            {
+                Some(args[0].clone())
+            }
+            (ForYieldFamily::Either { left }, Ty::Named(name, args))
+                if name == "Either" && args.len() == 2 && self.is_assignable(left, &args[0]) =>
+            {
+                Some(args[1].clone())
+            }
+            _ => None,
+        }
+    }
+
     fn binding_slot_types(&mut self, binding_stmt: &BindingStmt, value_types: &[Ty]) -> Vec<Ty> {
         if let Some(kind) = binding_stmt.destructure {
             let value_ty = value_types.first().cloned().unwrap_or(Ty::Unknown);
@@ -4977,7 +5032,24 @@ impl<'a> Checker<'a> {
                 {
                     ty
                 } else {
-                    Ty::Tuple(items.iter().map(|item| self.check_expr(item)).collect())
+                    let expected_items = match expected {
+                        Ty::Tuple(expected_items) if expected_items.len() == items.len() => {
+                            Some(expected_items)
+                        }
+                        _ => None,
+                    };
+                    Ty::Tuple(
+                        items
+                            .iter()
+                            .enumerate()
+                            .map(|(index, item)| {
+                                expected_items
+                                    .and_then(|expected| expected.get(index))
+                                    .map(|expected| self.check_expr_against(item, expected))
+                                    .unwrap_or_else(|| self.check_expr(item))
+                            })
+                            .collect(),
+                    )
                 }
             }
             Expr::Call {
@@ -5526,13 +5598,18 @@ impl<'a> Checker<'a> {
                         control.span,
                     );
                 }
-                let yield_ty = self.check_block(yield_body);
+                let expected_yield = self.expected_for_yield_payload(family.as_ref(), expected);
+                let yield_ty = if let Some(expected_yield) = &expected_yield {
+                    self.check_block_against(yield_body, expected_yield)
+                } else {
+                    self.check_block(yield_body)
+                };
                 self.loop_depth -= 1;
                 self.pop_scope();
                 self.wrap_for_yield_type(family.as_ref(), yield_ty)
             }
             Expr::Lambda { params, body, .. } => self.check_lambda_expr(params, body, expected),
-            Expr::Group { inner, .. } => self.check_expr(inner),
+            Expr::Group { inner, .. } => self.check_expr_against(inner, expected),
         }
     }
 
@@ -12286,7 +12363,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .find(|(actual_name, _)| actual_name == &expected.name)
                 .map(|(_, actual_ty)| self.is_assignable(actual_ty, &expected.ty))
-                .unwrap_or(expected.has_initializer)
+                .unwrap_or(false)
         })
     }
 
@@ -12638,7 +12715,7 @@ impl<'a> Checker<'a> {
                 && actual_params
                     .iter()
                     .zip(expected_params)
-                    .all(|(actual, expected)| self.is_assignable_inner(actual, expected, seen))
+                    .all(|(actual, expected)| self.is_assignable_inner(expected, actual, seen))
                 && self.is_assignable_inner(actual_ret, expected_ret, seen);
         }
         if let Ty::Union(expected_members) = expected {
@@ -14634,7 +14711,7 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
                 && left_params
                     .iter()
                     .zip(right_params.iter())
-                    .all(|(left, right)| is_assignable(left, right))
+                    .all(|(left, right)| is_assignable(right, left))
                 && is_assignable(left_ret, right_ret)
         }
         _ => false,
@@ -14806,6 +14883,177 @@ def main() Int {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn function_parameters_are_contravariant_and_returns_are_covariant() {
+        let program = parse_inline(
+            r#"
+def ignore(value Any) Str = "ignored"
+
+def main() Unit {
+    acceptsAny fn(Any) Str = ignore
+    acceptsStr fn(Str) Any = acceptsAny
+    result Any = acceptsStr("value")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_function_assignment_with_a_narrower_actual_parameter() {
+        let program = parse_inline(
+            r#"
+def textLength(value Str) Int = value.size
+
+def main() Unit {
+    onlyText fn(Str) Int = textLength
+    anyValue fn(Any) Int = onlyText
+    println(anyValue(123))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic.message.contains("fn(Str) Int")
+                    && diagnostic.message.contains("fn(Any) Int")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_function_parameter_variance_inside_a_collection() {
+        let program = parse_inline(
+            r#"
+def textLength(value Str) Int = value.size
+
+def main() Unit {
+    onlyText [fn(Str) Int] = [textLength]
+    anyValue [fn(Any) Int] = onlyText
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic.message.contains("Vector[fn(Str) Int]")
+                    && diagnostic.message.contains("Vector[fn(Any) Int]")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn propagates_expected_types_through_groups_tuples_and_for_yield() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    grouped [Str] = ([])
+    groupedPoint Point = (new(1, 2))
+    configuration ([Str], Bool) = ([], false)
+    pair (Point, Point) = (new(1, 2), new(3, 4))
+    points [Point] = for value <- [1, 2] yield new(value, 0)
+    rows [[Int]] = for value <- [1, 2] yield []
+    optionalSource Int? = Some(1)
+    optionalPoint Point? = for value <- optionalSource yield new(value, 0)
+    resultSource Result[Int, Str] = Ok(2)
+    resultPoint Result[Point, Str] = for value <- resultSource yield new(value, 0)
+    eitherSource Either[Str, Int] = Right(3)
+    eitherPoint Either[Str, Point] = for value <- eitherSource yield new(value, 0)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn does_not_choose_for_yield_family_from_the_expected_type() {
+        let program = parse_inline(
+            r#"
+shape Point {
+    x Int
+    y Int
+}
+
+def points(source) [Point] =
+    for value <- source yield new(value, 0)
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_contextual_construction"
+                    && diagnostic
+                        .message
+                        .contains("requires an expected class or shape")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn rejects_local_functions_inside_nested_executable_blocks() {
+        let program = parse_inline(
+            r#"
+def main(flag Bool) Unit {
+    def direct(value Int) Int = value
+
+    if flag {
+        def inIf(value Int) Int = value
+        println(inIf(1))
+    }
+
+    while flag {
+        def inWhile(value Int) Int = value
+        println(inWhile(1))
+        break
+    }
+
+    for value <- [1] {
+        def inFor(input Int) Int = input
+        println(inFor(value))
+    }
+
+    match flag {
+        case true => {
+            def inMatch(value Int) Int = value
+            println(inMatch(1))
+        }
+        case false => ()
+    }
+
+    println(direct(1))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "invalid_local_function_scope")
+                .count(),
+            4,
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -17926,6 +18174,44 @@ def main() Unit {
             .count();
         assert_eq!(unknown_fields, 2, "{:#?}", result.diagnostics);
         assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn shape_assignment_does_not_apply_target_field_initializers() {
+        let program = parse_inline(
+            r#"
+shape Small {
+    x Int
+}
+
+shape Full {
+    x Int
+    y Int = 42
+}
+
+def main() Unit {
+    source = Small(1)
+    invalid Full = source
+    constructed Full = Full { ...source }
+    _ Int = constructed.y
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic
+                        .message
+                        .contains("cannot assign value of type 'Small'")
+                    && diagnostic
+                        .message
+                        .contains("to binding 'invalid' of type 'Full'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

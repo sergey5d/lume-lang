@@ -1,0 +1,16 @@
+# EXPECT:
+# 4
+# 4
+
+def main() Unit {
+    new = [4]
+
+    for item <- new {
+        println(item)
+    }
+
+    match new {
+        case [only] => println(only)
+        case _ => ()
+    }
+}

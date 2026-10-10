@@ -1,0 +1,10 @@
+# EXPECT:
+# ignored
+
+def ignore(value Any) Str = "ignored"
+
+def main() Unit {
+    acceptsAny fn(Any) Str = ignore
+    acceptsStr fn(Str) Any = acceptsAny
+    println(acceptsStr("value"))
+}

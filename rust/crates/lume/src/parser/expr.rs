@@ -356,13 +356,8 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_yield_body_block(&mut self) -> Option<Block> {
         if self.at(TokenKind::LBrace) {
-            if self.looks_like_brace_record_literal(true) {
-                self.parse_expr()
-                    .map(ExpressionBraceBody::Expression)
-                    .map(ExpressionBraceBody::into_block)
-            } else {
-                self.parse_block()
-            }
+            self.parse_expression_brace_body_with_continuation()
+                .map(ExpressionBraceBody::into_block)
         } else {
             if self.at(TokenKind::Newline) {
                 self.error_at_current(
@@ -633,7 +628,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn is_removed_interface_led_expr_start(&self) -> bool {
-        if !self.can_start_type_ref() {
+        if !self.allow_trailing_block_call || !self.can_start_type_ref() {
             return false;
         }
         let mut parser = Parser {
@@ -894,7 +889,7 @@ impl<'a> Parser<'a> {
 
     fn parse_contextual_new_expr(&mut self) -> Option<Expr> {
         let start = self.current_span();
-        let default_initialize = self.current().lexeme == "default";
+        let default_initialize = self.at_keyword(Keyword::Default);
         self.advance();
         if default_initialize && !self.at(TokenKind::LBrace) {
             self.error_at_current(
@@ -2106,11 +2101,14 @@ impl<'a> Parser<'a> {
         if self.at_keyword(Keyword::Object) {
             return self.with_trailing_block_calls_allowed(|parser| parser.parse_object_expr());
         }
-        if self.at(TokenKind::Identifier)
-            && ((self.current().lexeme == "new"
-                && (self.at_next(TokenKind::LParen) || self.at_next(TokenKind::LBrace)))
-                || (self.current().lexeme == "default" && self.at_next(TokenKind::LBrace)))
-        {
+        let contextual_new = self.at(TokenKind::Identifier)
+            && self.current().lexeme == "new"
+            && (self.at_next(TokenKind::LParen)
+                || (self.allow_trailing_block_call && self.at_next(TokenKind::LBrace)));
+        let default_initialization = self.at_keyword(Keyword::Default)
+            && self.allow_trailing_block_call
+            && self.at_next(TokenKind::LBrace);
+        if contextual_new || default_initialization {
             return self
                 .with_trailing_block_calls_allowed(|parser| parser.parse_contextual_new_expr());
         }

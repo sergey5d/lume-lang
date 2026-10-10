@@ -7162,6 +7162,15 @@ shape Items {
     items [Int]
 }
 
+shape Small {
+    x Int
+}
+
+shape Full {
+    x Int
+    y Int = 42
+}
+
 shape X {
     x Int
 }
@@ -7223,6 +7232,10 @@ def main() Unit {
     wider.items.add(2)
     println(items.items.size)
 
+    source = Small(7)
+    full Full = Full { ...source }
+    println(full.x, full.y)
+
     unique Point | Label = first3d
     exact Point | X = Position(4, 5)
     dynamic = project(first3d)
@@ -7262,7 +7275,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\nunique 1 2\nexact 5 4\ndynamic 1 2\n"
+            "true\ntrue\ntrue\ntrue\nPoint\nmissing\n1 second\n1\ntrue\ntrue\ntrue\ntrue\ntrue\n2\n7 42\nunique 1 2\nexact 5 4\ndynamic 1 2\n"
         );
 
         let _ = fs::remove_dir_all(temp);

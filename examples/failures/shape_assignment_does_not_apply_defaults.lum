@@ -1,0 +1,16 @@
+# FAIL_REGEX:
+# .*cannot assign value of type 'Small' to binding 'target' of type 'Full'.*
+
+shape Small {
+    x Int
+}
+
+shape Full {
+    x Int
+    y Int = 42
+}
+
+def main() Unit {
+    source = Small(1)
+    target Full = source
+}

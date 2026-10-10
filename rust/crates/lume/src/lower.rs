@@ -2637,12 +2637,24 @@ impl<'a> FunctionLowerer<'a> {
         bindings: &[core::ForBinding],
         yield_body: &Block,
         span: Span,
+        expected: Option<&ir::Type>,
     ) -> ir::Operand {
         if let Some(family) = self.first_lifted_for_yield_family(bindings) {
-            return self.lower_lifted_for_yield_bindings(bindings, yield_body, &family, span);
+            let expected_payload =
+                expected.and_then(|expected| lifted_for_yield_expected_payload(&family, expected));
+            return self.lower_lifted_for_yield_bindings(
+                bindings,
+                yield_body,
+                &family,
+                span,
+                expected_payload.as_ref(),
+            );
         }
 
-        let result = self.add_temp(ir::Type::list(ir::Type::Unknown));
+        let expected_payload = expected.and_then(iterable_for_yield_expected_payload);
+        let result = self.add_temp(ir::Type::list(
+            expected_payload.clone().unwrap_or(ir::Type::Unknown),
+        ));
         self.push_statement(ir::Statement {
             span: Some(span),
             kind: ir::StatementKind::Assign {
@@ -2659,7 +2671,7 @@ impl<'a> FunctionLowerer<'a> {
             self.loop_continues.push(body_block);
             self.current_block = Some(body_block);
             let yielded = self
-                .lower_block_value(yield_body)
+                .lower_block_value_with_expected(yield_body, expected_payload.as_ref())
                 .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
             self.push_statement(ir::Statement {
                 span: Some(span),
@@ -2688,7 +2700,7 @@ impl<'a> FunctionLowerer<'a> {
             bindings,
             &|this| {
                 let yielded = this
-                    .lower_block_value(yield_body)
+                    .lower_block_value_with_expected(yield_body, expected_payload.as_ref())
                     .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
                 this.push_statement(ir::Statement {
                     span: Some(span),
@@ -2728,18 +2740,22 @@ impl<'a> FunctionLowerer<'a> {
         yield_body: &Block,
         family: &LiftedIrFamily,
         span: Span,
+        expected_payload: Option<&ir::Type>,
     ) -> ir::Operand {
         let Some(generator_index) = bindings
             .iter()
             .position(|binding| binding.iterable.is_some())
         else {
             return self
-                .lower_block_value(yield_body)
+                .lower_block_value_with_expected(yield_body, expected_payload)
                 .unwrap_or(ir::Operand::Const(ir::Constant::Unit));
         };
 
         if generator_index > 0 {
-            let result = self.add_temp(wrap_lifted_ir_type(family, ir::Type::Unknown));
+            let result = self.add_temp(wrap_lifted_ir_type(
+                family,
+                expected_payload.cloned().unwrap_or(ir::Type::Unknown),
+            ));
             self.lower_for_bindings(
                 &bindings[..generator_index],
                 &|this| {
@@ -2748,6 +2764,7 @@ impl<'a> FunctionLowerer<'a> {
                         yield_body,
                         family,
                         span,
+                        expected_payload,
                     );
                     this.push_statement(ir::Statement {
                         span: Some(span),
@@ -2768,6 +2785,7 @@ impl<'a> FunctionLowerer<'a> {
             yield_body,
             family,
             span,
+            expected_payload,
         )
     }
 
@@ -2778,6 +2796,7 @@ impl<'a> FunctionLowerer<'a> {
         yield_body: &Block,
         family: &LiftedIrFamily,
         span: Span,
+        expected_payload: Option<&ir::Type>,
     ) -> ir::Operand {
         let Some(source_expr) = binding.iterable.as_ref() else {
             self.invariant(
@@ -2805,6 +2824,7 @@ impl<'a> FunctionLowerer<'a> {
             family.clone(),
             inner_ty,
             span,
+            expected_payload,
         );
         let closure_operand = self.emit_temp_from_rvalue(closure, ir::Type::Unknown, Some(span));
         self.emit_temp_from_rvalue(
@@ -2816,7 +2836,10 @@ impl<'a> FunctionLowerer<'a> {
                 args: vec![closure_operand],
                 structural: false,
             },
-            wrap_lifted_ir_type(family, ir::Type::Unknown),
+            wrap_lifted_ir_type(
+                family,
+                expected_payload.cloned().unwrap_or(ir::Type::Unknown),
+            ),
             Some(span),
         )
     }
@@ -2829,14 +2852,21 @@ impl<'a> FunctionLowerer<'a> {
         family: LiftedIrFamily,
         param_ty: ir::Type,
         span: Span,
+        expected_payload: Option<&ir::Type>,
     ) -> ir::RValue {
         let nested_name = format!(
             "foryield${}${}",
             self.function_id.0,
             self.function().blocks.len()
         );
-        let mut nested =
-            ir::Function::new(nested_name, ir::FunctionKind::Lambda, ir::Type::Unknown);
+        let rest_has_generator = rest.iter().any(|binding| binding.iterable.is_some());
+        let payload_ty = expected_payload.cloned().unwrap_or(ir::Type::Unknown);
+        let return_ty = if rest_has_generator {
+            wrap_lifted_ir_type(&family, payload_ty)
+        } else {
+            payload_ty
+        };
+        let mut nested = ir::Function::new(nested_name, ir::FunctionKind::Lambda, return_ty);
         nested.span = Some(span);
         nested.add_param("__for_item".to_string(), param_ty);
         let function_id = self.program.add_function(nested);
@@ -2857,7 +2887,13 @@ impl<'a> FunctionLowerer<'a> {
                 let item = ir::Operand::Copy(Box::new(ir::Place::Local(local_id)));
                 lowerer.bind_for_values(binding, item);
             }
-            let value = lowerer.lower_lifted_for_yield_bindings(rest, yield_body, &family, span);
+            let value = lowerer.lower_lifted_for_yield_bindings(
+                rest,
+                yield_body,
+                &family,
+                span,
+                expected_payload,
+            );
             if lowerer.current_block.is_some() {
                 lowerer.terminate(ir::Terminator::ret(Some(value)));
             }
@@ -4496,9 +4532,15 @@ impl<'a> FunctionLowerer<'a> {
                 fallback,
                 span,
             } => self.lower_extract_or_expr(value, fallback, *span, Some(expected)),
+            Expr::ForYield {
+                bindings,
+                yield_body,
+                span,
+            } => self.lower_for_yield_expr(bindings, yield_body, *span, Some(expected)),
             Expr::Call { .. }
             | Expr::ContextualNew { .. }
             | Expr::RecordLiteral { .. }
+            | Expr::TupleLiteral { .. }
             | Expr::Lambda { .. }
             | Expr::AnonymousObject { .. }
             | Expr::Unary {
@@ -4651,7 +4693,7 @@ impl<'a> FunctionLowerer<'a> {
                 bindings,
                 yield_body,
                 span,
-            } => self.lower_for_yield_expr(bindings, yield_body, *span),
+            } => self.lower_for_yield_expr(bindings, yield_body, *span, None),
             Expr::ListLiteral { items, span } if self.spread_only_literal_is_map(items, None) => {
                 self.lower_spread_map_literal(items, *span, None)
             }
@@ -6594,9 +6636,28 @@ impl<'a> FunctionLowerer<'a> {
             Expr::ListLiteral { items, .. } if !list_literal_has_spread(items) => Some(
                 ir::RValue::List(items.iter().map(|item| self.lower_expr(item)).collect()),
             ),
-            Expr::TupleLiteral { items, .. } => Some(ir::RValue::Tuple(
-                items.iter().map(|item| self.lower_expr(item)).collect(),
-            )),
+            Expr::TupleLiteral { items, .. } => {
+                let expected_items = match expected {
+                    Some(ir::Type::Tuple(expected_items))
+                        if expected_items.len() == items.len() =>
+                    {
+                        Some(expected_items)
+                    }
+                    _ => None,
+                };
+                Some(ir::RValue::Tuple(
+                    items
+                        .iter()
+                        .enumerate()
+                        .map(|(index, item)| {
+                            expected_items
+                                .and_then(|expected| expected.get(index))
+                                .map(|expected| self.lower_expr_with_expected(item, Some(expected)))
+                                .unwrap_or_else(|| self.lower_expr(item))
+                        })
+                        .collect(),
+                ))
+            }
             Expr::RecordLiteral { fields, values, .. } => {
                 if let Some(expected) = expected {
                     if fields.is_empty() && values.is_empty() && matches!(expected, ir::Type::Unit)
@@ -6792,8 +6853,13 @@ impl<'a> FunctionLowerer<'a> {
                         self.normalize_trailing_brace_call_args(callee, args, *style),
                     )
                 };
-                let expected_args =
-                    self.call_expected_arg_specs(call_callee, &normalized_args, expected);
+                let structural = call_uses_structural_record_arg(&normalized_args, *style);
+                // A record spread is one named-construction payload. Applying
+                // callable defaults here would turn it into several positional
+                // arguments before the constructor can apply field defaults.
+                let expected_args = (!structural)
+                    .then(|| self.call_expected_arg_specs(call_callee, &normalized_args, expected))
+                    .flatten();
                 // Evaluate the callee (including a method receiver) before any explicit
                 // arguments. Argument binding order is handled separately below.
                 let lowered_callee = self.lower_callee(call_callee);
@@ -6847,7 +6913,7 @@ impl<'a> FunctionLowerer<'a> {
                 Some(ir::RValue::Call {
                     callee: lowered_callee,
                     args: lowered_args,
-                    structural: call_uses_structural_record_arg(&normalized_args, *style),
+                    structural,
                 })
             }
             Expr::ContextualNew {
@@ -9705,6 +9771,41 @@ fn wrap_lifted_ir_type(family: &LiftedIrFamily, inner: ir::Type) -> ir::Type {
             name: "Either".to_string(),
             args: vec![left.clone(), inner],
         },
+    }
+}
+
+fn iterable_for_yield_expected_payload(expected: &ir::Type) -> Option<ir::Type> {
+    match expected {
+        ir::Type::Named { name, args }
+            if (name == "Vector" || name == "Iterable") && args.len() == 1 =>
+        {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+fn lifted_for_yield_expected_payload(
+    family: &LiftedIrFamily,
+    expected: &ir::Type,
+) -> Option<ir::Type> {
+    match (family, expected) {
+        (LiftedIrFamily::Option, ir::Type::Named { name, args })
+            if name == "Option" && args.len() == 1 =>
+        {
+            Some(args[0].clone())
+        }
+        (LiftedIrFamily::Result { .. }, ir::Type::Named { name, args })
+            if name == "Result" && args.len() == 2 =>
+        {
+            Some(args[0].clone())
+        }
+        (LiftedIrFamily::Either { .. }, ir::Type::Named { name, args })
+            if name == "Either" && args.len() == 2 =>
+        {
+            Some(args[1].clone())
+        }
+        _ => None,
     }
 }
 

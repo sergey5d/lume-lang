@@ -1,0 +1,40 @@
+# EXPECT:
+# 0
+# 0
+# 1
+# 4
+# 2
+# 0
+# 1
+# 2
+# 3
+
+shape Point {
+    x Int
+    y Int
+}
+
+def main() Unit {
+    grouped [Str] = ([])
+    configuration ([Str], Bool) = ([], false)
+    groupedPoint Point = (new(1, 2))
+    pair (Point, Point) = (new(1, 2), new(3, 4))
+    points [Point] = for value <- [1, 2] yield new(value, 0)
+    rows [[Int]] = for value <- [1, 2] yield []
+    optionalSource Int? = Some(1)
+    optionalPoint Point? = for value <- optionalSource yield new(value, 0)
+    resultSource Result[Int, Str] = Ok(2)
+    resultPoint Result[Point, Str] = for value <- resultSource yield new(value, 0)
+    eitherSource Either[Str, Int] = Right(3)
+    eitherPoint Either[Str, Point] = for value <- eitherSource yield new(value, 0)
+
+    println(grouped.size)
+    println(configuration[0].size)
+    println(groupedPoint.x)
+    println(pair[1].y)
+    println(points[1].x)
+    println(rows[0].size)
+    println(optionalPoint!.x)
+    println(resultPoint!.x)
+    println(eitherPoint!.x)
+}

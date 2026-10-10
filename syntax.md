@@ -406,6 +406,21 @@ The return type may itself be a function type, as in
 `fn() fn(Int) Str`. Lambda expressions remain keyword-free, for example
 `value => value + 1`.
 
+Function parameters are contravariant and return types are covariant. Assigning
+an actual function to an expected function type requires every argument accepted
+by the expected type to be accepted by the actual function, while the actual
+return value must be assignable to the expected return type:
+
+```txt
+def ignore(value Any) Str = "ignored"
+
+acceptsAny fn(Any) Str = ignore
+acceptsStr fn(Str) Any = acceptsAny # valid
+
+onlyText fn(Str) Int = textLength
+unsafe fn(Any) Int = onlyText       # invalid
+```
+
 ## Runtime Metadata
 
 Runtime metadata is exposed through the `Type[A]` hierarchy declared in
@@ -919,9 +934,12 @@ def process() Unit {
 }
 ```
 
-Anonymous shape construction, anonymous `object` expressions, lambdas, and
-local functions remain valid in callable bodies because they construct values
-or declare callables without introducing a named type declaration.
+Anonymous shape construction, anonymous `object` expressions, and lambdas
+remain valid in executable blocks because they construct values without
+introducing named declarations. Local functions are allowed only directly in a
+function, method, constructor, getter, or lambda body. A `def` inside an `if`,
+`while`, `for`, `match` arm, or another nested block is invalid; move it to the
+direct callable body.
 
 Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() Unit { ... }`.
 
@@ -1297,6 +1315,18 @@ value Printable = new { x, y }           # invalid
 value Success | Failure = new { message } # invalid: no alternative is chosen
 ```
 
+Expected types continue through parentheses and into corresponding tuple
+elements. Once a `for ... yield` source has established its collection family,
+the expected result supplies the yielded element or success type. Context does
+not choose the source family:
+
+```txt
+grouped [Str] = ([])
+pair (Point, Point) = (new(1, 2), new(3, 4))
+points [Point] = for value <- [1, 2] yield new(value, 0)
+rows [[Int]] = for value <- [1, 2] yield []
+```
+
 `new` may remain explicit when constructing a shape even if labeled fields
 already make construction unambiguous. Both forms below construct the same
 shape; a formatter may prefer the shorter first form:
@@ -1313,6 +1343,9 @@ declared field initializer is preserved. Otherwise, `Bool`, `Int`, `Float`,
 `Str`, and `Rune` receive their primitive defaults, `Option[T]` receives
 `None`, and another concrete field type is constructed only when its ordinary
 accessible constructor accepts zero supplied arguments:
+
+`default` is a reserved keyword. It cannot be used as a binding, member,
+callable, or type name.
 
 ```txt
 class RetrySettings {
@@ -1900,7 +1933,9 @@ Shape conversion rules:
 - field names and field types must match at compile time
 - extra fields are allowed when passing a value to a narrower shape
 - missing fields are rejected
-- defaults are not part of the shape syntax
+- named shape fields may declare construction defaults
+- construction defaults do not participate in structural assignment compatibility
+- explicit shape construction may use a target field's default when that field is omitted
 - shape-to-shape assignment is structural by field names and field types
 - class-to-shape assignment is not implicit; construct the target shape explicitly with `{ ...instance }`
 - shape-to-interface follows the shape's explicit `with Interface` bounds
@@ -1915,6 +1950,18 @@ Shape conversion rules:
   binding, field, parameter, or return declaration, and use a named `shape`
   declaration when the schema needs a reusable name
 - single-expression braces like `{ value }` are still block expressions, not anonymous shapes
+
+Assignment projects fields that already exist; it never creates missing data from
+the destination's construction defaults:
+
+```txt
+shape Small { x Int }
+shape Full { x Int, y Int = 42 }
+
+source = Small(1)
+target Full = source            # invalid: source does not provide y
+target = Full { ...source }     # valid: construction supplies y = 42
+```
 
 Shape equality is structural across shape declarations:
 
@@ -4232,6 +4279,19 @@ items = for {
 ```txt
 items = for item <- [1, 2, 3] yield item * 2
 ```
+
+A leading brace body is the first primary expression of the yielded value; it
+does not terminate that expression. Postfix and infix operations following the
+closing brace therefore remain inside `yield`, for both blocks and construction:
+
+```txt
+lengths = for item <- [1, 2] yield { "abc" }.size
+values = for item <- [1, 2] yield { text: "abc" }.text.size
+```
+
+Both examples produce a vector of integers. Parenthesize the complete
+comprehension when an operation should instead apply to the resulting
+collection.
 
 `for ... yield` may also pull success values from lifted containers:
 `Option[T]`, `Result[T, E]`, and `Either[L, T]`. The first generator source

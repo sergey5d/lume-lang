@@ -1,0 +1,11 @@
+# EXPECT:
+# 3 3
+# 3 3
+
+def main() Unit {
+    blockLengths = for item <- [1, 2] yield { "abc" }.size
+    shapeLengths = for item <- [1, 2] yield { text: "abc" }.text.size
+
+    println(blockLengths[0], blockLengths[1])
+    println(shapeLengths[0], shapeLengths[1])
+}
