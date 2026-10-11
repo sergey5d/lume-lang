@@ -8968,18 +8968,34 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
             }
             core::Expr::Member { receiver, name, .. }
-                if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "Array")
-                    && matches!(
-                        name.as_str(),
-                        "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" | "fill"
-                    ) =>
+                if matches!(
+                    receiver.as_ref(),
+                    core::Expr::Identifier { name: owner, .. }
+                        if (owner == "Array"
+                            && matches!(
+                                name.as_str(),
+                                "ofInt"
+                                    | "ofFloat"
+                                    | "ofBool"
+                                    | "ofStr"
+                                    | "ofRune"
+                                    | "fill"
+                                    | "generate"
+                            ))
+                            || (owner == "Vector"
+                                && matches!(name.as_str(), "fill" | "generate"))
+                ) =>
             {
                 let args = args
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
+                let runtime_type = match receiver.as_ref() {
+                    core::Expr::Identifier { name, .. } if name == "Vector" => "LumeVector",
+                    _ => "LumeArray",
+                };
                 Some(format!(
-                    "lume.core.LumeArray.{}({})",
+                    "lume.core.{runtime_type}.{}({})",
                     java_member_name(name),
                     args.join(", ")
                 ))

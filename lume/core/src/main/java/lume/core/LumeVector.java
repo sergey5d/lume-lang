@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 
 public final class LumeVector<T> implements Iterable<T> {
     private final ArrayList<T> values;
@@ -32,8 +33,33 @@ public final class LumeVector<T> implements Iterable<T> {
         return new LumeVector<>(list);
     }
 
+    public static <T> LumeVector<T> fill(long length, T value) {
+        var size = checkedFactoryLength(length, "Vector.fill");
+        var list = new ArrayList<T>(size);
+        for (var index = 0; index < size; index++) {
+            list.add(value);
+        }
+        return new LumeVector<>(list);
+    }
+
+    public static <T> LumeVector<T> generate(long length, IntFunction<T> generator) {
+        var size = checkedFactoryLength(length, "Vector.generate");
+        var list = new ArrayList<T>(size);
+        for (var index = 0; index < size; index++) {
+            list.add(generator.apply(index));
+        }
+        return new LumeVector<>(list);
+    }
+
     public long size() {
         return values.size();
+    }
+
+    private static int checkedFactoryLength(long length, String operation) {
+        if (length < 0) {
+            throw new LumePanic(operation + " length must be non-negative");
+        }
+        return Math.toIntExact(length);
     }
 
     public boolean contains(T value) {

@@ -3104,10 +3104,11 @@ impl<'a> Interpreter<'a> {
             return self.invoke_json_method(&path[1], args, span);
         }
 
-        if path[0] == "Array" && path.len() == 2 {
+        if matches!(path[0].as_str(), "Array" | "Vector") && path.len() == 2 {
+            let collection = path[0].as_str();
             let method = path[1].as_str();
             match method {
-                "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" => {
+                "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" if collection == "Array" => {
                     if args.len() != 1 {
                         return Err(self.runtime_error(
                             span,
@@ -3136,14 +3137,16 @@ impl<'a> Interpreter<'a> {
                     if args.len() != 2 {
                         return Err(self.runtime_error(
                             span,
-                            format!("Array.fill expects 2 arguments, got {}", args.len()),
+                            format!("{collection}.fill expects 2 arguments, got {}", args.len()),
                         ));
                     }
-                    let len = args[0].as_int(self, span, "Array.fill length")?;
+                    let context = format!("{collection}.fill length");
+                    let len = args[0].as_int(self, span, &context)?;
                     if len < 0 {
-                        return Err(
-                            self.runtime_error(span, "Array.fill length must be non-negative")
-                        );
+                        return Err(self.runtime_error(
+                            span,
+                            format!("{collection}.fill length must be non-negative"),
+                        ));
                     }
                     return Ok(Value::List(Rc::new(RefCell::new(vec![
                         args[1].clone();
@@ -3154,14 +3157,19 @@ impl<'a> Interpreter<'a> {
                     if args.len() != 2 {
                         return Err(self.runtime_error(
                             span,
-                            format!("Array.generate expects 2 arguments, got {}", args.len()),
+                            format!(
+                                "{collection}.generate expects 2 arguments, got {}",
+                                args.len()
+                            ),
                         ));
                     }
-                    let len = args[0].as_int(self, span, "Array.generate length")?;
+                    let context = format!("{collection}.generate length");
+                    let len = args[0].as_int(self, span, &context)?;
                     if len < 0 {
-                        return Err(
-                            self.runtime_error(span, "Array.generate length must be non-negative")
-                        );
+                        return Err(self.runtime_error(
+                            span,
+                            format!("{collection}.generate length must be non-negative"),
+                        ));
                     }
                     let callback = args[1].clone();
                     let mut values = Vec::with_capacity(len as usize);
@@ -10058,6 +10066,26 @@ $name
             run.output,
             "base 2 1\ngrown 5 5 true\nempty -1\nseen 2 false\nmore 4 true\n"
         );
+    }
+
+    #[test]
+    fn runs_vector_fill_and_generate_factories() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                filled = Vector.fill(2, 7)
+                filled.add(9)
+                generated = Vector.generate(3, index => index * 2)
+
+                println(filled.makeStr(","))
+                println(generated.makeStr(","))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "7,7,9\n0,2,4\n");
     }
 
     #[test]

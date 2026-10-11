@@ -7467,6 +7467,12 @@ def main() Unit {
     println(array.setAt(1, 7) !)
     println(array[1])
 
+    filled [Int] = Vector.fill(2, 6)
+    filled.add(8)
+    println(filled.makeStr(","))
+    generated [Int] = Vector.generate(3, index => index * 2)
+    println(generated.makeStr(","))
+
     result Result[Int, Str] = Ok(7)
     println(result !)
     nested Option[Result[Int, Str]] = Some(Ok(11))
@@ -7507,7 +7513,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Bob\nBob\nAda\n4\n1\n2\n3\ntrue\nfalse\n3\n4\n-1\n9\n2\n5\n5\n7\n7\n11\n"
+            "Bob\nBob\nAda\n4\n1\n2\n3\ntrue\nfalse\n3\n4\n-1\n9\n2\n5\n5\n7\n6,6,8\n0,2,4\n7\n11\n"
         );
 
         let _ = fs::remove_dir_all(temp);

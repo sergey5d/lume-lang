@@ -21,6 +21,8 @@
 # remove 2 3
 # size 3
 # spread 0 4 7 7
+# fill 7 7 9
+# generate 0 2 4
 
 def main() Unit {
     items = [1, 2, 3]
@@ -72,4 +74,11 @@ def main() Unit {
 
     spreaded = [0, ...items, 5, ...[6, 7]]
     println("spread " + (spreaded.at(0) ?? 0) + " " + (spreaded.at(3) ?? 0) + " " + (spreaded.at(6) ?? 0) + " " + spreaded.size)
+
+    filled = Vector.fill(2, 7)
+    filled.add(9)
+    println("fill " + filled[0] + " " + filled[1] + " " + filled[2])
+
+    generated = Vector.generate(3, index => index * 2)
+    println("generate " + generated[0] + " " + generated[1] + " " + generated[2])
 }

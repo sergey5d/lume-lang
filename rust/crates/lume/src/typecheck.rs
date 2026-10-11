@@ -6895,11 +6895,11 @@ impl<'a> Checker<'a> {
                 };
                 Some(Ty::Named("Array".to_string(), vec![item_ty]))
             }
-            ("Array", "fill") => {
+            (collection @ ("Array" | "Vector"), "fill") => {
                 if args.len() != 2 {
                     self.add_error(
                         "invalid_argument_count",
-                        format!("Array.fill expects 2 arguments, got {}", args.len()),
+                        format!("{collection}.fill expects 2 arguments, got {}", args.len()),
                         span,
                     );
                 }
@@ -6910,11 +6910,14 @@ impl<'a> Checker<'a> {
                         &Ty::int(),
                         arg.span,
                         "invalid_argument_type",
-                        format!("Array.fill expects Int length, got '{}'", ty.describe()),
+                        format!(
+                            "{collection}.fill expects Int length, got '{}'",
+                            ty.describe()
+                        ),
                     );
                 }
                 let expected_item = match expected {
-                    Ty::Named(name, type_args) if name == "Array" && type_args.len() == 1 => {
+                    Ty::Named(name, type_args) if name == collection && type_args.len() == 1 => {
                         type_args.first()
                     }
                     _ => None,
@@ -6927,13 +6930,16 @@ impl<'a> Checker<'a> {
                             .unwrap_or_else(|| self.check_expr(&arg.value))
                     })
                     .unwrap_or(Ty::Unknown);
-                Some(Ty::Named("Array".to_string(), vec![item_ty]))
+                Some(Ty::Named(collection.to_string(), vec![item_ty]))
             }
-            ("Array", "generate") => {
+            (collection @ ("Array" | "Vector"), "generate") => {
                 if args.len() != 2 {
                     self.add_error(
                         "invalid_argument_count",
-                        format!("Array.generate expects 2 arguments, got {}", args.len()),
+                        format!(
+                            "{collection}.generate expects 2 arguments, got {}",
+                            args.len()
+                        ),
                         span,
                     );
                 }
@@ -6944,11 +6950,14 @@ impl<'a> Checker<'a> {
                         &Ty::int(),
                         arg.span,
                         "invalid_argument_type",
-                        format!("Array.generate expects Int length, got '{}'", ty.describe()),
+                        format!(
+                            "{collection}.generate expects Int length, got '{}'",
+                            ty.describe()
+                        ),
                     );
                 }
                 let expected_item = match expected {
-                    Ty::Named(name, type_args) if name == "Array" && type_args.len() == 1 => {
+                    Ty::Named(name, type_args) if name == collection && type_args.len() == 1 => {
                         type_args[0].clone()
                     }
                     _ => Ty::Unknown,
@@ -6967,7 +6976,7 @@ impl<'a> Checker<'a> {
                                     self.add_error(
                                         "invalid_argument_type",
                                         format!(
-                                            "Array.generate expects fn(Int) T generator, got '{}'",
+                                            "{collection}.generate expects fn(Int) T generator, got '{}'",
                                             Ty::Function(params.clone(), ret.clone()).describe()
                                         ),
                                         arg.span,
@@ -6980,7 +6989,7 @@ impl<'a> Checker<'a> {
                                 self.add_error(
                                     "invalid_argument_type",
                                     format!(
-                                        "Array.generate expects fn(Int) T generator, got '{}'",
+                                        "{collection}.generate expects fn(Int) T generator, got '{}'",
                                         other.describe()
                                     ),
                                     arg.span,
@@ -6990,7 +6999,7 @@ impl<'a> Checker<'a> {
                         }
                     })
                     .unwrap_or(Ty::Unknown);
-                Some(Ty::Named("Array".to_string(), vec![item_ty]))
+                Some(Ty::Named(collection.to_string(), vec![item_ty]))
             }
             ("Int", "parse") => {
                 if args.len() != 1 {
@@ -17066,6 +17075,26 @@ def main() Unit {
             r#"
 def main() Unit {
     values Array[Int] = Array.generate(3, idx => idx + 1)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_vector_fill_and_generate_static_helpers() {
+        let program = parse_inline(
+            r#"
+def consume(values [[Int]]) Unit = ()
+
+def main() Unit {
+    filled [Int] = Vector.fill(3, 7)
+    generated [Int] = Vector.generate(3, idx => idx + 1)
+    nestedFill [[Int]] = Vector.fill(2, [])
+    nestedGenerate [[Int]] = Vector.generate(2, idx => [])
+    consume(Vector.fill(2, []))
+    consume(Vector.generate(2, idx => []))
 }
 "#,
         );

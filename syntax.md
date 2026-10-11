@@ -3305,12 +3305,19 @@ runes Array[Rune] = Array.ofRune(3)    # default NUL rune values
 
 filled Array[Int] = Array.fill(3, 7)
 generated Array[Int] = Array.generate(3, idx => idx * 2)
+
+filledVector [Int] = Vector.fill(3, 7)
+generatedVector [Int] = Vector.generate(3, idx => idx * 2)
 ```
 
 Arrays have fixed size and always contain initialized values. Use
 `Array.generate` when each slot should be produced independently. Arrays expose
 `at(index)` and `setAt(index, value)`, but not insertion or removal because
 their size cannot change.
+
+`Vector.fill` and `Vector.generate` follow the same evaluation rules and return
+mutable, growable vectors. `fill` evaluates its value once and repeats it;
+`generate` invokes its producer once for every index from zero up to the length.
 
 Array elements can also be constructed directly:
 
