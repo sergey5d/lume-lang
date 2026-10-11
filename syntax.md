@@ -1126,6 +1126,19 @@ Here `items` is checked using the base field's collection type and `position`
 uses the base field's concrete shape type. Fields omitted from the patch remain
 unchanged; the patch is not required to construct the complete base shape.
 
+The patch itself is either a plain shape literal or an existing shape value.
+Contextual and default construction cannot be used as the patch root because
+`with` does not provide a construction target:
+
+```txt
+updated = value with new { age: 42 }     # invalid
+updated = value with new(42)             # invalid
+updated = value with default { age: 42 } # invalid
+```
+
+Contextual construction remains valid inside a replacement field, where that
+field has a concrete expected type, as in `position: new(0, 0)` above.
+
 Anonymous-shape spread:
 
 ```txt

@@ -643,6 +643,17 @@ impl<'a> Parser<'a> {
             return false;
         };
         let has_with = parser.match_keyword(Keyword::With);
+        if has_with {
+            parser.skip_newlines();
+            let contextual_new = parser.at(TokenKind::Identifier)
+                && parser.current().lexeme == "new"
+                && (parser.at_next(TokenKind::LParen) || parser.at_next(TokenKind::LBrace));
+            let default_initialization =
+                parser.at_keyword(Keyword::Default) && parser.at_next(TokenKind::LBrace);
+            if contextual_new || default_initialization {
+                return false;
+            }
+        }
         if has_with && parser.parse_interface_ref_list_after_with().is_none() {
             return false;
         }

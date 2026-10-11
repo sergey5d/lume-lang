@@ -2176,7 +2176,7 @@ impl<'a> Checker<'a> {
                         let expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                         if !matches!(actual, Ty::Unknown) {
                             if self.arg_matches_expected(arg, actual, &expected) {
-                                score += 2;
+                                score += if actual == &expected { 3 } else { 2 };
                             } else if type_contains_type_param(&expected) {
                                 score += 1;
                             } else {
@@ -3020,6 +3020,25 @@ impl<'a> Checker<'a> {
             self.check_expr(patch);
             return;
         };
+        if let Some((default_initialize, uses_brace_syntax, patch_span)) =
+            shape_update_contextual_patch(patch)
+        {
+            let construction = if default_initialize {
+                "default { ... }"
+            } else if uses_brace_syntax {
+                "new { ... }"
+            } else {
+                "new(...)"
+            };
+            self.add_error(
+                "invalid_shape_update",
+                format!(
+                    "shape update patch cannot use {construction}; use a plain shape patch such as 'value with {{ field: replacement }}'"
+                ),
+                patch_span,
+            );
+            return;
+        }
         let patch_ty = if let Some(fields) = shape_update_literal_fields(patch) {
             let mut patch_context = base_fields.clone();
             for name in fields.iter().filter_map(|field| field.name.as_ref()) {
@@ -5007,7 +5026,9 @@ impl<'a> Checker<'a> {
                 }
                 let mut item_ty = Ty::Unknown;
                 let expected_item_ty = match expected {
-                    Ty::Named(name, args) if name == "Vector" && args.len() == 1 => {
+                    Ty::Named(name, args)
+                        if matches!(name.as_str(), "Vector" | "Iterable") && args.len() == 1 =>
+                    {
                         Some(args[0].clone())
                     }
                     _ => None,
@@ -6892,9 +6913,19 @@ impl<'a> Checker<'a> {
                         format!("Array.fill expects Int length, got '{}'", ty.describe()),
                     );
                 }
+                let expected_item = match expected {
+                    Ty::Named(name, type_args) if name == "Array" && type_args.len() == 1 => {
+                        type_args.first()
+                    }
+                    _ => None,
+                };
                 let item_ty = args
                     .get(1)
-                    .map(|arg| self.check_expr(&arg.value))
+                    .map(|arg| {
+                        expected_item
+                            .map(|expected| self.check_expr_against(&arg.value, expected))
+                            .unwrap_or_else(|| self.check_expr(&arg.value))
+                    })
                     .unwrap_or(Ty::Unknown);
                 Some(Ty::Named("Array".to_string(), vec![item_ty]))
             }
@@ -7022,9 +7053,19 @@ impl<'a> Checker<'a> {
                         ),
                     );
                 }
+                let expected_value = match expected {
+                    Ty::Named(name, type_args) if name == "Option" && type_args.len() == 1 => {
+                        type_args.first()
+                    }
+                    _ => None,
+                };
                 let value_ty = args
                     .get(1)
-                    .map(|arg| self.check_expr(&arg.value))
+                    .map(|arg| {
+                        expected_value
+                            .map(|expected| self.check_expr_against(&arg.value, expected))
+                            .unwrap_or_else(|| self.check_expr(&arg.value))
+                    })
                     .unwrap_or(Ty::Unknown);
                 Some(Ty::option(value_ty))
             }
@@ -8493,6 +8534,7 @@ impl<'a> Checker<'a> {
         for (contextual_arg, construction) in args.iter().filter_map(|arg| {
             contextual_construction_expr(&arg.value).map(|construction| (arg, construction))
         }) {
+            let actual = self.probe_expr_type(&contextual_arg.value);
             let mut targets = HashSet::new();
             for sig in overloads {
                 let arrangement = arrange_param_args(&sig.params, args);
@@ -8511,6 +8553,11 @@ impl<'a> Checker<'a> {
                     }
                     let expected =
                         call_arg_expected_ty_for_arg(param.variadic, &param.ty, contextual_arg);
+                    if !matches!(actual, Ty::Unknown)
+                        && !self.arg_matches_expected(contextual_arg, &actual, &expected)
+                    {
+                        continue;
+                    }
                     let Ty::Named(name, _) = &expected else {
                         continue;
                     };
@@ -11318,7 +11365,7 @@ impl<'a> Checker<'a> {
                         }
                         if !matches!(actual, Ty::Unknown) {
                             if self.arg_matches_expected(arg, actual, &expected) {
-                                score += 2;
+                                score += if actual == &expected { 3 } else { 2 };
                             } else if type_contains_type_param(&expected) {
                                 score += 1;
                             } else {
@@ -11423,8 +11470,67 @@ impl<'a> Checker<'a> {
                     .map(|(_, ret)| ret)
                     .unwrap_or(Ty::Unknown)
             }
+            Expr::Binary {
+                left, op, right, ..
+            } => {
+                let left = self.probe_expr_type(left);
+                let right = self.probe_expr_type(right);
+                self.probe_binary_expr_type(&left, *op, &right)
+            }
+            Expr::If {
+                then_block,
+                else_branch,
+                ..
+            } => {
+                let then_ty = self.probe_block_result_type(then_block);
+                let else_ty = match else_branch.as_ref() {
+                    ElseExprBranch::If(expr) => self.probe_expr_type(expr),
+                    ElseExprBranch::Block(block) => self.probe_block_result_type(block),
+                };
+                join_types(&then_ty, &else_ty)
+            }
+            Expr::Block { body, .. } => self.probe_block_result_type(body),
             Expr::Group { inner, .. } => self.probe_expr_type(inner),
             _ => Ty::Unknown,
+        }
+    }
+
+    fn probe_block_result_type(&self, block: &Block) -> Ty {
+        block_tail_expr(block)
+            .map(|expr| self.probe_expr_type(expr))
+            .unwrap_or_else(Ty::unit)
+    }
+
+    fn probe_binary_expr_type(&self, left: &Ty, op: BinaryOp, right: &Ty) -> Ty {
+        if matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown) {
+            return Ty::Unknown;
+        }
+        match op {
+            BinaryOp::Add if left.is_str() || right.is_str() => Ty::str(),
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
+                if left.is_numeric() && right.is_numeric() =>
+            {
+                if left.is_float_like() || right.is_float_like() {
+                    Ty::float()
+                } else {
+                    Ty::int()
+                }
+            }
+            BinaryOp::Add => self
+                .binary_operator_method_return_type(left, "+", right)
+                .unwrap_or(Ty::Unknown),
+            BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => Ty::Unknown,
+            BinaryOp::Eq
+            | BinaryOp::NotEq
+            | BinaryOp::StrictEq
+            | BinaryOp::StrictNotEq
+            | BinaryOp::Less
+            | BinaryOp::LessEq
+            | BinaryOp::Greater
+            | BinaryOp::GreaterEq
+            | BinaryOp::And
+            | BinaryOp::Or => Ty::bool(),
+            BinaryOp::Colon => Ty::Unknown,
         }
     }
 
@@ -13178,6 +13284,26 @@ fn contextual_construction_expr(expr: &Expr) -> Option<&Expr> {
     match expr {
         Expr::Group { inner, .. } => contextual_construction_expr(inner),
         Expr::RecordLiteral { .. } | Expr::ContextualNew { .. } => Some(expr),
+        Expr::If {
+            then_block,
+            else_branch,
+            ..
+        } => contextual_construction_in_block(then_block).or_else(|| match else_branch.as_ref() {
+            ElseExprBranch::If(expr) => contextual_construction_expr(expr),
+            ElseExprBranch::Block(block) => contextual_construction_in_block(block),
+        }),
+        Expr::Block { body, .. } => contextual_construction_in_block(body),
+        _ => None,
+    }
+}
+
+fn contextual_construction_in_block(block: &Block) -> Option<&Expr> {
+    block_tail_expr(block).and_then(contextual_construction_expr)
+}
+
+fn block_tail_expr(block: &Block) -> Option<&Expr> {
+    match block.statements.last() {
+        Some(Stmt::Expr(statement)) => Some(&statement.expr),
         _ => None,
     }
 }
@@ -13186,6 +13312,19 @@ fn shape_update_literal_fields(expr: &Expr) -> Option<&[crate::ast::CallArg]> {
     match expr {
         Expr::Group { inner, .. } => shape_update_literal_fields(inner),
         Expr::RecordLiteral { fields, .. } => Some(fields),
+        _ => None,
+    }
+}
+
+fn shape_update_contextual_patch(expr: &Expr) -> Option<(bool, bool, crate::source::Span)> {
+    match expr {
+        Expr::Group { inner, .. } => shape_update_contextual_patch(inner),
+        Expr::ContextualNew {
+            uses_brace_syntax,
+            default_initialize,
+            span,
+            ..
+        } => Some((*default_initialize, *uses_brace_syntax, *span)),
         _ => None,
     }
 }
@@ -16837,8 +16976,12 @@ def main() Unit {
     fn allows_option_when_static_helper() {
         let program = parse_inline(
             r#"
-def main() Option[Int] {
-    return Option.when(true, 7)
+def consume(value [Int]?) Unit = ()
+
+def main() Unit {
+    number Option[Int] = Option.when(true, 7)
+    optional [Int]? = Option.when(true, [])
+    consume(Option.when(true, []))
 }
 "#,
         );
@@ -16881,13 +17024,40 @@ def main() Unit {
     fn allows_array_fill_static_helper() {
         let program = parse_inline(
             r#"
+def consume(values Array[[Int]]) Unit = ()
+
 def main() Unit {
     values Array[Int] = Array.fill(3, 7)
+    nested Array[[Int]] = Array.fill(2, [])
+    consume(Array.fill(2, []))
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_builtin_factory_payloads_incompatible_with_expected_types() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    array Array[[Int]] = Array.fill(2, ["wrong"])
+    optional [Int]? = Option.when(true, ["wrong"])
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "invalid_binding_type")
+                .count(),
+            2,
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -17638,6 +17808,48 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_contextual_construction_as_shape_update_patch() {
+        let program = parse_inline(
+            r#"
+shape Batch {
+    items [Int]
+}
+
+def main() Unit {
+    batch = Batch([1])
+    forced = batch with new { items: [] }
+    positional = batch with new([])
+    defaulted = batch with default { items: [] }
+    grouped = batch with (new { items: [2] })
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "invalid_shape_update")
+                .count(),
+            4,
+            "{:#?}",
+            result.diagnostics
+        );
+        for construction in ["new { ... }", "new(...)", "default { ... }"] {
+            assert!(
+                result.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "invalid_shape_update"
+                        && diagnostic
+                            .message
+                            .contains(&format!("cannot use {construction}"))
+                }),
+                "{:#?}",
+                result.diagnostics
+            );
+        }
     }
 
     #[test]
@@ -18717,12 +18929,20 @@ class Saver {
     def save(admin Admin) Unit = ()
 }
 
-def main() Unit {
+def main(ready Bool) Unit {
     saver = Saver()
     saver.save(new { name: "Ada" })
     saver.save((new { name: "Grace" }))
     saver.save(new("Linus"))
     saver.save((new("Margaret")))
+    saver.save(if ready {
+        new { name: "Barbara" }
+    } else {
+        new { name: "Evelyn" }
+    })
+    saver.save({
+        new { name: "Annie" }
+    })
 }
 "#,
         );
@@ -18733,7 +18953,7 @@ def main() Unit {
                 .iter()
                 .filter(|diagnostic| diagnostic.code == "ambiguous_contextual_construction")
                 .count(),
-            4,
+            6,
             "{:#?}",
             result.diagnostics
         );
@@ -18751,10 +18971,15 @@ class Saver {
     def save(admin Admin) Unit = ()
 }
 
-def main() Unit {
+def main(ready Bool) Unit {
     saver = Saver()
     saver.save(User { name: "Ada" })
     saver.save(User("Grace"))
+    saver.save(if ready {
+        User { name: "Barbara" }
+    } else {
+        new { name: "Evelyn" }
+    })
 }
 "#,
         );
@@ -20288,18 +20513,43 @@ def main() Unit {
             r#"
 def countMap(values [Str : Int]) Int = values.size
 def countArray(values [Str]) Int = values.size
+def consume(rows Iterable[[Int]]) Unit = ()
 def emptyMap() [Str : Int] = []
 def emptyArray() [Str] = []
 
 def main() Int {
     directMap [Str : Int] = []
     directArray [Str] = []
+    emptyIterable Iterable[[Int]] = []
+    nestedVector [[Int]] = [[]]
+    nestedIterable Iterable[[Int]] = [[]]
+    consume([[]])
     return directMap.size + directArray.size + countMap([]) + countArray([]) + emptyMap().size + emptyArray().size
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_nested_vector_elements_incompatible_with_iterable_context() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    rows Iterable[[Int]] = [["wrong"]]
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "invalid_binding_type"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -21484,6 +21734,35 @@ class Formatter {
 
 def main(formatter Formatter) Unit {
     println(formatter.format(1), formatter.format("one"))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn selects_overloads_from_expression_result_types() {
+        let program = parse_inline(
+            r#"
+class Formatter {
+    def render(value Int) Str = value.toStr()
+    def render(value Str) Str = value
+
+    def classify(value Str) Str = "text"
+    def classify(value Any) Int = 1
+}
+
+def render(value Int) Str = value.toStr()
+def render(value Str) Str = value
+
+def main(formatter Formatter) Unit {
+    literal Str = formatter.render(3)
+    arithmetic Str = formatter.render(1 + 2)
+    grouped Str = formatter.render((1 + 2))
+    topLevel Str = render(1 + 2)
+    exact Str = formatter.classify("value")
+    println(literal, arithmetic, grouped, topLevel, exact)
 }
 "#,
         );

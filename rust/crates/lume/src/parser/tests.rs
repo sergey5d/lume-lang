@@ -2750,6 +2750,21 @@ fn parses_with_shape_update_fields() {
 }
 
 #[test]
+fn contextual_construction_after_with_reaches_shape_update_parser() {
+    for source in [
+        "value with new { amount: 42 }",
+        "value with new(42)",
+        "value with default { amount: 42 }",
+        "value with (new { amount: 42 })",
+    ] {
+        assert!(
+            matches!(parse_expr_only(source), Expr::RecordUpdate { .. }),
+            "{source}"
+        );
+    }
+}
+
+#[test]
 fn parses_with_at_shape_update_precedence() {
     assert!(matches!(
         parse_expr_only("a + b with p"),
