@@ -1,0 +1,24 @@
+# EXPECT:
+# 2
+# 1
+
+class Cell[T] {
+    var value T
+}
+
+def main() Unit {
+    arbitrary [Any] = [1]
+    arbitrary.add("valid")
+
+    fresh Cell[Any] = Cell(1)
+
+    integers [Int] = [1]
+    values Iterable[Any] = integers
+    var count = 0
+    for _ <- values {
+        count += 1
+    }
+
+    println(arbitrary.size)
+    println(count)
+}

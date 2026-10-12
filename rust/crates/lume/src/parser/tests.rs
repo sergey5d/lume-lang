@@ -5519,25 +5519,6 @@ def make() Unit = values.map { (left, right) => left + right }
 }
 
 #[test]
-fn rejects_removed_spaced_lifted_access_operator() {
-    let result = parse(
-        r#"
-def run(userOpt Option[User]) Unit {
-    name = userOpt. ->profileOpt()
-}
-"#,
-    );
-    assert!(
-        result
-            .diagnostics
-            .iter()
-            .any(|diag| diag.code == "removed_lifted_access_operator"),
-        "{:#?}",
-        result.diagnostics
-    );
-}
-
-#[test]
 fn rejects_removed_lift_shape_expression() {
     let file = SourceFile::new("test.lum", "lift { id: maybeId() }");
     let lexed = lex(&file);
@@ -6005,23 +5986,6 @@ def apply(f fn (Int) Int, empty fn () Unit) Unit {}
             if params.is_empty()
                 && matches!(ret.as_ref(), TypeRef::Named { name, .. } if name == "Unit")
     ));
-}
-
-#[test]
-fn rejects_arrow_in_fn_function_type() {
-    let result = parse(
-        r#"
-def apply(f fn(Int) -> Int) Unit {}
-"#,
-    );
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "invalid_function_type"
-                && diag.message.contains("function types do not use an arrow")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
 }
 
 #[test]

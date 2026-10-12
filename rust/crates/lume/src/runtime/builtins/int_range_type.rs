@@ -34,7 +34,7 @@ fn field(slot: usize, name: &str) -> RuntimeField {
         name: name.to_string(),
         ty: ir::Type::Int,
         mutable: false,
-        hidden: false,
+        visibility: crate::ast::Visibility::Default,
         has_initializer: false,
         initializer: None,
     }

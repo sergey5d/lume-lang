@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*assert condition has type 'Int' but expects 'Bool'.*
+# .*argument has type 'Int' but parameter expects 'Bool'.*
 
 def main() Unit {
     assert(1)

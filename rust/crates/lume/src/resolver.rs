@@ -3861,7 +3861,7 @@ class Namespace {
             r#"
 module support
 
-private class Hidden {
+private class PrivateContainer {
     class Public {}
     type Alias = Str
 }
@@ -3875,7 +3875,7 @@ private class Hidden {
 module app
 use support
 
-def expose(value support.Hidden.Public) support.Hidden.Alias = "hidden"
+def expose(value support.PrivateContainer.Public) support.PrivateContainer.Alias = "value"
 "#,
         )
         .expect("write consumer module");

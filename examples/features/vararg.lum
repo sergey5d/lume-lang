@@ -1,5 +1,6 @@
 # EXPECT:
 # vararg 6
+# spread 6
 
 def sum(values [Int] vararg) Int {
     var total Int = 0
@@ -13,4 +14,6 @@ def sum(values [Int] vararg) Int {
 
 def main() Unit {
     println("vararg", sum(1, 2, 3))
+    values = [1, 2, 3]
+    println("spread", sum(...values))
 }

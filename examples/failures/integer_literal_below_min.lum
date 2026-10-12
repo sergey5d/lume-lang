@@ -1,0 +1,5 @@
+# FAIL_REGEX:
+# .*integer literal '-9223372036854775809' is outside the signed 64-bit Int range.*
+
+def main() Int =
+    -9223372036854775809

@@ -73,7 +73,6 @@ pub enum TokenKind {
     Bang,
     Less,
     Greater,
-    Arrow,
     FatArrow,
     LeftArrow,
     Question,
@@ -99,6 +98,8 @@ pub enum TokenKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
+    /// Exact source text consumed for this token, including delimiters and
+    /// escapes. For example, a string token retains its quotes; EOF is empty.
     pub lexeme: String,
     pub span: Span,
 }
@@ -232,6 +233,7 @@ impl<'a> Lexer<'a> {
     fn lex_single_line_string(&mut self, start: Mark) {
         self.bump();
 
+        // if next char is escaped (after \\)
         let mut escaped = false;
         let mut crossed_newline = false;
         while let Some(ch) = self.peek() {
@@ -297,6 +299,7 @@ impl<'a> Lexer<'a> {
                 self.bump_ascii_digits();
                 TokenKind::Float
             } else {
+                // in case of method call e.g. 111.toStr()
                 TokenKind::Integer
             }
         } else {
@@ -315,14 +318,6 @@ impl<'a> Lexer<'a> {
             self.lex_string_from(start);
             return;
         }
-        if lexeme == "hidden" {
-            self.error(
-                "removed_hidden_keyword",
-                "visibility keyword 'hidden' was removed; use 'private'",
-                start,
-                self.mark(),
-            );
-        }
         let kind = match lexeme.as_str() {
             "annotation" => TokenKind::Keyword(Keyword::Annotation),
             "as" => TokenKind::Keyword(Keyword::As),
@@ -339,7 +334,7 @@ impl<'a> Lexer<'a> {
             "fn" => TokenKind::Keyword(Keyword::Fn),
             "for" => TokenKind::Keyword(Keyword::For),
             "internal" => TokenKind::Keyword(Keyword::Internal),
-            "hidden" | "private" => TokenKind::Keyword(Keyword::Private),
+            "private" => TokenKind::Keyword(Keyword::Private),
             "if" => TokenKind::Keyword(Keyword::If),
             "use" => TokenKind::Keyword(Keyword::Use),
             "interface" => TokenKind::Keyword(Keyword::Interface),
@@ -383,17 +378,6 @@ impl<'a> Lexer<'a> {
             '[' => Some(TokenKind::LBracket),
             ']' => Some(TokenKind::RBracket),
             ',' => Some(TokenKind::Comma),
-            '.' if self.peek() == Some('-') && self.peek_n(1) == Some('>') => {
-                self.bump();
-                self.bump();
-                self.error(
-                    "removed_lifted_access_operator",
-                    "lifted access operator '.->' was removed; use map or flatMap explicitly",
-                    start,
-                    self.mark(),
-                );
-                return;
-            }
             '.' if self.peek() == Some('.') && self.peek_n(1) == Some('.') => {
                 self.bump();
                 self.bump();
@@ -419,7 +403,6 @@ impl<'a> Lexer<'a> {
             '+' if self.take('=') => Some(TokenKind::PlusEq),
             '+' => Some(TokenKind::Plus),
             '-' if self.take('-') => return self.unsupported_operator(start, "--"),
-            '-' if self.take('>') => Some(TokenKind::Arrow),
             '-' if self.take('=') => Some(TokenKind::MinusEq),
             '-' => Some(TokenKind::Minus),
             '*' if self.take('=') => Some(TokenKind::StarEq),
@@ -608,7 +591,9 @@ mod tests {
 
     #[test]
     fn treats_removed_keywords_as_identifiers() {
-        let result = lex(&source("enum Int = 1\npartial Int = 2\n"));
+        let result = lex(&source(
+            "enum Int = 1\npartial Int = 2\nhidden Str = \"value\"\n",
+        ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(result.tokens[0].kind, TokenKind::Identifier);
         assert_eq!(result.tokens[0].lexeme, "enum");
@@ -617,6 +602,12 @@ mod tests {
                 .tokens
                 .iter()
                 .any(|token| token.kind == TokenKind::Identifier && token.lexeme == "partial")
+        );
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Identifier && token.lexeme == "hidden")
         );
     }
 
@@ -713,15 +704,6 @@ mod tests {
     }
 
     #[test]
-    fn rejects_removed_hidden_visibility_keyword() {
-        let result = lex(&source("hidden value Str = \"old\"\n"));
-        assert!(result.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "removed_hidden_keyword"
-                && diagnostic.message.contains("use 'private'")
-        }));
-    }
-
-    #[test]
     fn keeps_two_dots_distinct_without_affecting_ellipsis() {
         let result = lex(&source("user..name\n...items\n"));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -740,15 +722,6 @@ mod tests {
                 (TokenKind::Ellipsis, "...")
             ]
         );
-    }
-
-    #[test]
-    fn rejects_removed_lifted_access_operator() {
-        let result = lex(&source("user.->name()"));
-        assert!(result.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "removed_lifted_access_operator"
-                && diagnostic.message.contains("use map or flatMap explicitly")
-        }));
     }
 
     #[test]

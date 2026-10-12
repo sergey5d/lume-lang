@@ -641,6 +641,16 @@ assert(ready)
 assert(ready, "not ready")
 ```
 
+`assert` has one ordinary callable signature:
+
+```txt
+def assert(condition Bool, message Str = "assert condition was false") Unit
+```
+
+The message is optional but not variadic. Normal positional and named-argument
+rules apply, so `assert(message = "not ready", condition = ready)` is valid,
+while unknown argument names and multiple message values are rejected.
+
 ## Use
 
 Supported use forms:
@@ -1420,7 +1430,10 @@ source order. Remaining automatic values are created once in declaration order.
 schema from context; it does not select an interface implementation or a union
 alternative.
 
-Contextual construction never selects between overloaded concrete targets:
+Overload resolution first uses argument count, argument names, and the ordinary
+types of independently typed argument expressions. Contextual construction may
+then use a parameter type only when one best overload remains. It never breaks a
+remaining tie between concrete targets:
 
 ```txt
 class Saver {
@@ -1430,6 +1443,17 @@ class Saver {
 
 saver.save(new { name: "Ada" }) # invalid: ambiguous target
 saver.save(User { name: "Ada" }) # explicit and valid
+```
+
+Other arguments can make the target unique before construction is checked:
+
+```txt
+class Saver {
+    def save(tag Int, user User) Unit = ()
+    def save(tag Str, admin Admin) Unit = ()
+}
+
+saver.save(1, new { name: "Ada" }) # valid: the Int argument selects User
 ```
 
 The target can always be named explicitly. `Type { ... }` is named-field
@@ -2467,6 +2491,38 @@ contextualBox Box[Str] = new("hello")  # new infers the complete target type
 contextualSet Set[Str] = new()
 ```
 
+Generic type arguments are invariant by default. An existing `Container[A]`
+value cannot be assigned to `Container[B]` merely because `A` is assignable to
+`B`; the wider alias could otherwise write a `B` into storage that still has an
+`A` view:
+
+```txt
+integers [Int] = [1]
+arbitrary [Any] = integers # invalid: both names would share mutable storage
+```
+
+Fresh construction is different because the expected type determines the new
+storage contract:
+
+```txt
+arbitrary [Any] = [1] # valid: constructs a new Vector[Any]
+arbitrary.add("text")
+```
+
+User-defined generic types are also invariant unless the language gives them a
+separate variance contract. The core read-only producer interfaces `Iterable`
+and `Iterator`, and the immutable containers `Option`, `Result`, and `Either`,
+are covariant. This permits read-only widening without widening a writable
+collection:
+
+```txt
+integers [Int] = [1]
+values Iterable[Any] = integers # valid: Iterable cannot insert values
+```
+
+An existential `_` remains a safe erasure target, such as `Vector[_]`, because
+its captured element type cannot be used to write a concrete value.
+
 Construction requires all generic arguments or none. Partial application and
 existential placeholders are not constructor inference syntax:
 
@@ -2867,6 +2923,12 @@ class Amount {
 Ordinary methods may still overload one another. Getters cannot be overloaded
 and cannot share a name with an ordinary method. A function-valued field remains
 an ordinary field value and can be called normally.
+
+Calls resolve overloads from the semantic types of their complete argument
+expressions, including unary expressions, indexing, `if`, `match`, and block
+expressions with local bindings. A temporary binding does not change which
+overload is selected. If multiple best candidates remain, the call is ambiguous;
+declaration order never selects one silently.
 
 An overloaded callable reference is resolved from its expected function type.
 An exact signature match is preferred; otherwise exactly one assignable overload
@@ -5037,6 +5099,10 @@ silently change representation:
 - integer division or remainder by zero is a runtime error
 - the overflowing `Int.MIN / -1` case wraps to `Int.MIN`; `Int.MIN % -1` is zero
 - integer literals outside the signed 64-bit range are rejected
+
+Literal range checking accounts for a directly applied unary minus. Therefore
+`9223372036854775807` and `-9223372036854775808` are valid boundaries, while
+`9223372036854775808` and `-9223372036854775809` are rejected.
 
 `Float` is an IEEE-754 binary64 value. Float arithmetic, division, remainder,
 and ordering follow IEEE-754 behavior. Division by zero may produce positive or

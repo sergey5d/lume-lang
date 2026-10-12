@@ -5163,7 +5163,7 @@ def main() Unit {
 
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
 
-        assert!(result.diagnostics.is_empty());
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let module =
             fs::read_to_string(out.join("demo/builder/BuilderModule.java")).expect("read module");
         assert!(module.contains("builder.append(text());"));

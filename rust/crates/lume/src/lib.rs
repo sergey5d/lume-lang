@@ -10,12 +10,15 @@ pub mod ir;
 pub mod java_backend;
 pub mod lexer;
 pub mod lower;
+mod numeric;
 pub mod parser;
 pub mod resolver;
 pub mod runtime;
 pub mod source;
 pub mod typecheck;
 pub(crate) mod typecheck_diagnostics;
+
+pub(crate) const DEFAULT_ASSERT_MESSAGE: &str = "assert condition was false";
 
 pub use backend::{BackendBundle, BackendBundleResult, BackendDescriptors, build_backend_bundle};
 pub use desugar::{desugar_block, desugar_callable_body, desugar_expr, desugar_function_decl};

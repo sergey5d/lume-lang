@@ -1512,13 +1512,6 @@ impl<'a> Parser<'a> {
             }
             if self.match_token(TokenKind::Dot) {
                 self.skip_newlines();
-                if self.at(TokenKind::Arrow) {
-                    self.error_at_current(
-                        "removed_lifted_access_operator",
-                        "lifted access operator '.->' was removed; use map or flatMap explicitly",
-                    );
-                    return None;
-                }
                 let (name, end) = self.parse_member_name("expected member name after '.'")?;
                 let start = expr.span();
                 expr = Expr::Member {
@@ -1996,18 +1989,7 @@ impl<'a> Parser<'a> {
     }
 
     fn match_lambda_arrow(&mut self) -> bool {
-        if self.match_token(TokenKind::FatArrow) {
-            return true;
-        }
-        if self.match_token(TokenKind::Arrow) {
-            self.diagnostics.push(Diagnostic::error(
-                "old_lambda_arrow",
-                "lambda syntax uses '=>'; replace '->' with '=>'",
-                self.previous_span(),
-            ));
-            return true;
-        }
-        false
+        self.match_token(TokenKind::FatArrow)
     }
 
     fn at_removed_lift_operator(&self) -> bool {

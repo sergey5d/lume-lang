@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::{ast::TypeKind, ir};
+use crate::{
+    ast::{TypeKind, Visibility},
+    ir,
+};
 
 type BuiltinMethodFn = for<'a> fn(
     &mut crate::interpreter::Interpreter<'a>,
@@ -32,7 +35,7 @@ pub struct RuntimeField {
     pub name: String,
     pub ty: ir::Type,
     pub mutable: bool,
-    pub hidden: bool,
+    pub visibility: Visibility,
     pub has_initializer: bool,
     pub initializer: Option<ir::Constant>,
 }
@@ -223,7 +226,7 @@ impl RuntimeProgram {
                 name: field.name.clone(),
                 ty: field.ty.clone(),
                 mutable: field.mutable,
-                hidden: field.visibility != crate::ast::Visibility::Default,
+                visibility: field.visibility,
                 has_initializer: field.has_initializer,
                 initializer: field.initializer.clone(),
             })

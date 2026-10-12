@@ -12,8 +12,12 @@ pub struct Diagnostic {
     pub code: &'static str,
     pub message: String,
     pub span: Span,
+    /// Optional annotation rendered beside the source-span caret. When absent,
+    /// the diagnostic message is used as the caret annotation.
     pub label: Option<String>,
+    /// Supporting context rendered as `note:` lines after the source snippet.
     pub notes: Vec<String>,
+    /// Actionable suggestions rendered as `help:` lines after any notes.
     pub helps: Vec<String>,
 }
 

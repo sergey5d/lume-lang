@@ -1,0 +1,43 @@
+# EXPECT:
+# int
+# int
+# int
+# int
+# user Ada
+
+class Renderer {
+    def render(value Int) Str = "int"
+    def render(value Str) Str = "str"
+}
+
+class User {
+    name Str
+}
+
+class Admin {
+    name Str
+}
+
+class Saver {
+    def save(tag Int, value User) Str = "user ${value.name}"
+    def save(tag Str, value Admin) Str = "admin ${value.name}"
+}
+
+def main() Unit {
+    renderer = Renderer()
+    numbers = [1]
+
+    println(renderer.render(-1))
+    println(renderer.render(numbers[0]))
+    println(renderer.render(match true {
+        case true => 1
+        case false => 2
+    }))
+    println(renderer.render({
+        value = numbers[0]
+        value
+    }))
+
+    saver = Saver()
+    println(saver.save(1, new { name: "Ada" }))
+}

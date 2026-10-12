@@ -9498,7 +9498,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 let message = emitted
                     .get(1)
                     .cloned()
-                    .unwrap_or_else(|| java_string_literal("assertion failed"));
+                    .unwrap_or_else(|| java_string_literal(crate::DEFAULT_ASSERT_MESSAGE));
                 Some(format!(
                     "lume.core.LumeRuntime.assertTrue({condition}, {message})"
                 ))

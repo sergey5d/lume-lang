@@ -1,6 +1,6 @@
 use crate::{Diagnostic, source::Span};
 
-pub(crate) fn hidden_field_constructor(
+pub(crate) fn private_field_constructor(
     span: Span,
     class_name: &str,
     help: Option<String>,

@@ -13,6 +13,7 @@ use crate::{
         MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt, TypeDecl,
         TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
+    numeric::parse_integer_literal,
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
         collect_module_order, find_stdlib_dir, load_module_graph_with_options,
@@ -470,7 +471,6 @@ struct FieldSig {
     ty: Ty,
     mutable: bool,
     visibility: Visibility,
-    hidden: bool,
     has_initializer: bool,
     variadic: bool,
 }
@@ -4475,7 +4475,7 @@ impl<'a> Checker<'a> {
         };
         let field_map = fields
             .into_iter()
-            .map(|(name, ty, hidden)| (name, (ty, hidden)))
+            .map(|(name, ty, inaccessible_visibility)| (name, (ty, inaccessible_visibility)))
             .collect::<HashMap<_, _>>();
         let mut seen = HashSet::new();
         bindings
@@ -4786,8 +4786,8 @@ impl<'a> Checker<'a> {
                     return Ty::Unknown;
                 }
                 if let Some(field) = self.field_sig_for_member(&receiver_ty, name) {
-                    if self.extension_this_hidden_field(receiver, &receiver_ty, name) {
-                        self.add_extension_hidden_access_error("field", name, *span);
+                    if self.extension_this_private_field(receiver, &receiver_ty, name) {
+                        self.add_extension_private_access_error("field", name, *span);
                         return Ty::Unknown;
                     }
                     let can_initialize =
@@ -4978,7 +4978,10 @@ impl<'a> Checker<'a> {
                 let _ = expected;
                 Ty::Unknown
             }
-            Expr::Integer { .. } => Ty::int(),
+            Expr::Integer { raw, span } => {
+                self.check_integer_literal(raw, false, *span);
+                Ty::int()
+            }
             Expr::Float { .. } => Ty::float(),
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),
@@ -5033,6 +5036,7 @@ impl<'a> Checker<'a> {
                     }
                     _ => None,
                 };
+                let mut items_fit_expected = true;
                 for item in items {
                     let current = if let Expr::Spread { value, span, .. } = item {
                         let spread_ty = self.check_expr(value);
@@ -5064,7 +5068,15 @@ impl<'a> Checker<'a> {
                             .map(|expected| self.check_expr_against(item, expected))
                             .unwrap_or_else(|| self.check_expr(item))
                     };
+                    if let Some(expected_item) = &expected_item_ty
+                        && !self.is_assignable(&current, expected_item)
+                    {
+                        items_fit_expected = false;
+                    }
                     item_ty = join_types(&item_ty, &current);
+                }
+                if items_fit_expected && let Some(expected_item) = expected_item_ty {
+                    return Ty::list(materialize_type(&expected_item));
                 }
                 Ty::list(item_ty)
             }
@@ -5147,12 +5159,12 @@ impl<'a> Checker<'a> {
                 if name == "referenceId" {
                     return self.check_reference_id_access(&receiver_ty, *span);
                 }
-                if self.extension_this_hidden_field(receiver, &receiver_ty, name) {
-                    self.add_extension_hidden_access_error("field", name, *span);
+                if self.extension_this_private_field(receiver, &receiver_ty, name) {
+                    self.add_extension_private_access_error("field", name, *span);
                     return Ty::Unknown;
                 }
-                if self.extension_this_hidden_method(receiver, &receiver_ty, name) {
-                    self.add_extension_hidden_access_error("method", name, *span);
+                if self.extension_this_private_method(receiver, &receiver_ty, name) {
+                    self.add_extension_private_access_error("method", name, *span);
                     return Ty::Unknown;
                 }
                 if self.reject_inaccessible_member(&receiver_ty, name, *span) {
@@ -5507,6 +5519,17 @@ impl<'a> Checker<'a> {
                 expr,
                 ..
             } => self.check_option_wrap_expr(expr, expected),
+            Expr::Unary {
+                op: crate::ast::UnaryOp::Neg,
+                expr,
+                span,
+            } if matches!(expr.as_ref(), Expr::Integer { .. }) => {
+                let Expr::Integer { raw, .. } = expr.as_ref() else {
+                    unreachable!();
+                };
+                self.check_integer_literal(raw, true, *span);
+                Ty::int()
+            }
             Expr::Unary { op, expr, span } => {
                 let inner = self.check_expr(expr);
                 match op {
@@ -5900,9 +5923,6 @@ impl<'a> Checker<'a> {
             }
             return Ty::unit();
         }
-        if self.is_builtin_assert_call(callee) {
-            return self.check_builtin_assert_call(&normalized_args, span);
-        }
         if let Some(ty) =
             self.check_builtin_static_method_call(callee, &normalized_args, span, expected)
         {
@@ -5911,7 +5931,7 @@ impl<'a> Checker<'a> {
         if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
             return ty;
         }
-        if self.check_extension_hidden_method_call(callee, &normalized_args) {
+        if self.check_extension_private_method_call(callee, &normalized_args) {
             return Ty::Unknown;
         }
         if let Expr::Member {
@@ -6154,7 +6174,6 @@ impl<'a> Checker<'a> {
                 ty: ty.clone(),
                 mutable: false,
                 visibility: field.visibility,
-                hidden: field.visibility == Visibility::Private,
                 has_initializer: true,
                 variadic: false,
             });
@@ -6450,7 +6469,6 @@ impl<'a> Checker<'a> {
                         ty: ty.clone(),
                         mutable: false,
                         visibility: Visibility::Default,
-                        hidden: false,
                         has_initializer: false,
                         variadic: false,
                     })
@@ -7374,6 +7392,23 @@ impl<'a> Checker<'a> {
         callee_name: Option<&str>,
     ) -> (Ty, HashMap<String, Ty>, bool) {
         let arrangement = arrange_param_args(params, args);
+        let unknown_named_args = args
+            .iter()
+            .filter(|arg| {
+                arg.name
+                    .as_ref()
+                    .is_some_and(|name| params.iter().all(|param| param.name != *name))
+            })
+            .collect::<Vec<_>>();
+        for arg in &unknown_named_args {
+            let name = arg.name.as_deref().unwrap_or("<unknown>");
+            self.add_error(
+                "unknown_argument_name",
+                format!("callable has no parameter named '{name}'"),
+                arg.span,
+            );
+            self.check_expr(call_arg_value_expr(arg));
+        }
         let min_required = params
             .iter()
             .filter(|param| !param.variadic && !param.has_initializer)
@@ -7387,7 +7422,7 @@ impl<'a> Checker<'a> {
             && arrangement.missing_required == 0
             && args.len() >= min_required
             && args.len() <= max_allowed;
-        if !argument_shape_valid {
+        if !argument_shape_valid && unknown_named_args.is_empty() {
             let prefix_message = args
                 .iter()
                 .all(|arg| arg.name.is_none())
@@ -8103,8 +8138,14 @@ impl<'a> Checker<'a> {
                 .filter(|ctor| self.can_access_constructor(sig, ctor.visibility))
                 .cloned()
                 .collect::<Vec<_>>();
-            self.diagnose_ambiguous_contextual_construction_call(&visible, args, span);
-            if let Some(ctor) = self.choose_overload(&visible, args) {
+            let candidates = self
+                .best_overload_candidates(&visible, args)
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if !candidates.is_empty() {
+                self.diagnose_best_overload_candidates(&candidates, args, span);
+                let ctor = &candidates[0];
                 let params = constructor_field_sigs_from_params(&ctor.params);
                 let constructed = self.check_constructor_signature(&params, &ret, args, span);
                 self.check_constructed_type_conditions(sig, &constructed, span);
@@ -8121,7 +8162,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            let hidden = overloads
+            let private = overloads
                 .iter()
                 .filter(|ctor| {
                     ctor.visibility == Visibility::Private
@@ -8129,10 +8170,10 @@ impl<'a> Checker<'a> {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            if self.choose_overload(&hidden, args).is_some() {
-                let help = self.hidden_constructor_factory_help(&sig.name, args);
+            if !self.best_overload_candidates(&private, args).is_empty() {
+                let help = self.private_constructor_factory_help(&sig.name, args);
                 self.diagnostics
-                    .push(typecheck_diagnostics::hidden_field_constructor(
+                    .push(typecheck_diagnostics::private_field_constructor(
                         span, &sig.name, help,
                     ));
                 return ret;
@@ -8145,7 +8186,7 @@ impl<'a> Checker<'a> {
                 })
                 .cloned()
                 .collect::<Vec<_>>();
-            if self.choose_overload(&internal, args).is_some() {
+            if !self.best_overload_candidates(&internal, args).is_empty() {
                 self.add_error(
                     "inaccessible_constructor",
                     format!(
@@ -8441,7 +8482,6 @@ impl<'a> Checker<'a> {
                 ty: substitute_type(&param.ty, &subst),
                 mutable: param.mutable,
                 visibility: param.visibility,
-                hidden: param.hidden,
                 has_initializer: param.has_initializer,
                 variadic: param.variadic,
             })
@@ -8464,22 +8504,14 @@ impl<'a> Checker<'a> {
         match callee {
             Expr::Identifier { name, .. } => {
                 if let Some(functions) = self.lookup_functions(name) {
-                    self.diagnose_ambiguous_contextual_construction_call(&functions, args, span);
-                    let sig = self
-                        .choose_overload(&functions, args)
-                        .or_else(|| self.closest_overload(&functions, args))?
-                        .clone();
+                    let sig = self.select_overload_for_call(&functions, args, span)?;
                     return Some(CallableSelection {
                         sig,
                         explicit_type_args,
                     });
                 }
                 if let Some(methods) = self.lookup_implicit_method_functions(name) {
-                    self.diagnose_ambiguous_contextual_construction_call(&methods, args, span);
-                    let sig = self
-                        .choose_overload(&methods, args)
-                        .or_else(|| self.closest_overload(&methods, args))?
-                        .clone();
+                    let sig = self.select_overload_for_call(&methods, args, span)?;
                     return Some(CallableSelection {
                         sig,
                         explicit_type_args,
@@ -8496,11 +8528,7 @@ impl<'a> Checker<'a> {
                     })
                 {
                     if let Some(functions) = module.functions.get(&member) {
-                        self.diagnose_ambiguous_contextual_construction_call(functions, args, span);
-                        let sig = self
-                            .choose_overload(functions, args)
-                            .or_else(|| self.closest_overload(functions, args))?
-                            .clone();
+                        let sig = self.select_overload_for_call(functions, args, span)?;
                         return Some(CallableSelection {
                             sig,
                             explicit_type_args,
@@ -8508,11 +8536,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
-                    self.diagnose_ambiguous_contextual_construction_call(&sigs, args, span);
-                    let sig = self
-                        .choose_overload(&sigs, args)
-                        .or_else(|| self.closest_overload(&sigs, args))?
-                        .clone();
+                    let sig = self.select_overload_for_call(&sigs, args, span)?;
                     return Some(CallableSelection {
                         sig,
                         explicit_type_args,
@@ -8520,17 +8544,58 @@ impl<'a> Checker<'a> {
                 }
                 let receiver_ty = self.check_expr(receiver);
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
-                self.diagnose_ambiguous_contextual_construction_call(&methods, args, span);
-                let method = self
-                    .choose_overload(&methods, args)
-                    .or_else(|| self.closest_overload(&methods, args))?
-                    .clone();
+                let method = self.select_overload_for_call(&methods, args, span)?;
                 Some(CallableSelection {
                     sig: method,
                     explicit_type_args,
                 })
             }
             _ => None,
+        }
+    }
+
+    fn select_overload_for_call(
+        &mut self,
+        overloads: &[FunctionSig],
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) -> Option<FunctionSig> {
+        let candidates = self.best_overload_candidates(overloads, args);
+        if candidates.is_empty() {
+            return self.closest_overload(overloads, args).cloned();
+        }
+
+        let candidates = candidates.into_iter().cloned().collect::<Vec<_>>();
+        self.diagnose_best_overload_candidates(&candidates, args, span);
+
+        // Keep checking after an ambiguity so the compiler can report errors in
+        // nested argument expressions. The ambiguity diagnostic prevents this
+        // recovery choice from becoming observable program behavior.
+        candidates.into_iter().next()
+    }
+
+    fn diagnose_best_overload_candidates(
+        &mut self,
+        candidates: &[FunctionSig],
+        args: &[crate::ast::CallArg],
+        span: crate::source::Span,
+    ) {
+        let diagnostics_before = self.diagnostics.len();
+        self.diagnose_ambiguous_contextual_construction_call(&candidates, args, span);
+        if candidates.len() > 1 && self.diagnostics.len() == diagnostics_before {
+            let signatures = candidates
+                .iter()
+                .map(function_sig_type)
+                .map(|ty| ty.describe())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.add_error(
+                "ambiguous_overload",
+                format!(
+                    "call matches multiple overloads: {signatures}; add type information or select the intended overload explicitly"
+                ),
+                span,
+            );
         }
     }
 
@@ -8658,22 +8723,35 @@ impl<'a> Checker<'a> {
         &self,
         callee: &Expr,
         args: &[crate::ast::CallArg],
+        uses_brace_syntax: bool,
+    ) -> Option<(Vec<ParamSig>, Ty)> {
+        self.callable_signature_for_args_probe_with_locals(
+            callee,
+            args,
+            uses_brace_syntax,
+            &HashMap::new(),
+        )
+    }
+
+    fn callable_signature_for_args_probe_with_locals(
+        &self,
+        callee: &Expr,
+        args: &[crate::ast::CallArg],
         _uses_brace_syntax: bool,
+        locals: &HashMap<String, Ty>,
     ) -> Option<(Vec<ParamSig>, Ty)> {
         let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
         match callee {
             Expr::Identifier { name, .. } => {
                 if let Some(functions) = self.lookup_functions(name) {
                     let sig = self
-                        .choose_overload(&functions, args)
-                        .or_else(|| self.closest_overload(&functions, args))?
+                        .choose_overload_with_locals(&functions, args, locals)?
                         .clone();
                     return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                 }
                 let methods = self.lookup_implicit_method_functions(name)?;
                 let sig = self
-                    .choose_overload(&methods, args)
-                    .or_else(|| self.closest_overload(&methods, args))?
+                    .choose_overload_with_locals(&methods, args, locals)?
                     .clone();
                 Some(function_sig_parts_for_probe(sig, &explicit_type_args))
             }
@@ -8687,24 +8765,21 @@ impl<'a> Checker<'a> {
                 {
                     if let Some(functions) = module.functions.get(&member) {
                         let sig = self
-                            .choose_overload(functions, args)
-                            .or_else(|| self.closest_overload(functions, args))?
+                            .choose_overload_with_locals(functions, args, locals)?
                             .clone();
                         return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                     }
                 }
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
                     let sig = self
-                        .choose_overload(&sigs, args)
-                        .or_else(|| self.closest_overload(&sigs, args))?
+                        .choose_overload_with_locals(&sigs, args, locals)?
                         .clone();
                     return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
                 }
-                let receiver_ty = self.probe_expr_type(receiver);
+                let receiver_ty = self.probe_expr_type_with_locals(receiver, locals);
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
                 let method = self
-                    .choose_overload(&methods, args)
-                    .or_else(|| self.closest_overload(&methods, args))?
+                    .choose_overload_with_locals(&methods, args, locals)?
                     .clone();
                 Some(function_sig_parts_for_probe(method, &explicit_type_args))
             }
@@ -8985,7 +9060,7 @@ impl<'a> Checker<'a> {
         self.method_sigs_for_type(&sig, name)
     }
 
-    fn hidden_constructor_factory_help(
+    fn private_constructor_factory_help(
         &self,
         class_name: &str,
         args: &[crate::ast::CallArg],
@@ -9912,7 +9987,9 @@ impl<'a> Checker<'a> {
         };
         case.params
             .iter()
-            .filter(|field| !field.hidden && !shared_fields.contains(&field.name))
+            .filter(|field| {
+                field.visibility != Visibility::Private && !shared_fields.contains(&field.name)
+            })
             .cloned()
             .collect()
     }
@@ -9981,7 +10058,7 @@ impl<'a> Checker<'a> {
             let fields = case
                 .params
                 .iter()
-                .filter(|field| !field.hidden)
+                .filter(|field| field.visibility != Visibility::Private)
                 .map(|field| {
                     (
                         field.name.clone(),
@@ -10578,7 +10655,7 @@ impl<'a> Checker<'a> {
         self.reject_inaccessible_member(&Ty::Named(sig.name, Vec::new()), name, span)
     }
 
-    fn extension_this_hidden_field(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> bool {
+    fn extension_this_private_field(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> bool {
         if !matches!(receiver, Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
         {
             return false;
@@ -10593,10 +10670,10 @@ impl<'a> Checker<'a> {
             return false;
         }
         self.field_sig_for_member(receiver_ty, name)
-            .is_some_and(|field| field.hidden)
+            .is_some_and(|field| field.visibility == Visibility::Private)
     }
 
-    fn extension_this_hidden_method(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> bool {
+    fn extension_this_private_method(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> bool {
         if !matches!(receiver, Expr::Identifier { name: receiver_name, .. } if receiver_name == "this")
         {
             return false;
@@ -10619,7 +10696,7 @@ impl<'a> Checker<'a> {
         })
     }
 
-    fn check_extension_hidden_method_call(
+    fn check_extension_private_method_call(
         &mut self,
         callee: &Expr,
         args: &[crate::ast::CallArg],
@@ -10636,17 +10713,17 @@ impl<'a> Checker<'a> {
             return false;
         }
         let receiver_ty = self.check_expr(receiver);
-        if !self.extension_this_hidden_method(receiver, &receiver_ty, name) {
+        if !self.extension_this_private_method(receiver, &receiver_ty, name) {
             return false;
         }
-        self.add_extension_hidden_access_error("method", name, *span);
+        self.add_extension_private_access_error("method", name, *span);
         for arg in args {
             self.check_expr(&arg.value);
         }
         true
     }
 
-    fn add_extension_hidden_access_error(
+    fn add_extension_private_access_error(
         &mut self,
         member_kind: &str,
         member_name: &str,
@@ -11258,59 +11335,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn is_builtin_assert_call(&self, callee: &Expr) -> bool {
-        match callee {
-            Expr::Identifier { name, .. } => name == "assert",
-            _ => false,
-        }
-    }
-
-    fn check_builtin_assert_call(
-        &mut self,
-        args: &[crate::ast::CallArg],
-        span: crate::source::Span,
-    ) -> Ty {
-        if !matches!(args.len(), 1 | 2) {
-            self.add_error(
-                "invalid_argument_count",
-                format!("assert expects 1 or 2 arguments, got {}", args.len()),
-                span,
-            );
-        }
-
-        if let Some(condition) = args.first() {
-            let actual = self.check_expr(&condition.value);
-            self.require_assignable(
-                &actual,
-                &Ty::bool(),
-                condition.span,
-                "invalid_argument_type",
-                format!(
-                    "assert condition has type '{}' but expects 'Bool'",
-                    actual.describe()
-                ),
-            );
-        }
-        if let Some(message) = args.get(1) {
-            let actual = self.check_expr(&message.value);
-            self.require_assignable(
-                &actual,
-                &Ty::str(),
-                message.span,
-                "invalid_argument_type",
-                format!(
-                    "assert message has type '{}' but expects 'Str'",
-                    actual.describe()
-                ),
-            );
-        }
-        for extra in args.iter().skip(2) {
-            self.check_expr(&extra.value);
-        }
-
-        Ty::unit()
-    }
-
     fn check_typeof_type_ref(&mut self, ty_ref: &TypeRef, represented: &Ty) {
         match represented {
             Ty::TypeParam(name) if self.is_reified_type_param(name) => {}
@@ -11335,16 +11359,35 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn choose_overload<'b>(
+    fn choose_overload_with_locals<'b>(
         &self,
         overloads: &'b [FunctionSig],
         args: &[crate::ast::CallArg],
+        locals: &HashMap<String, Ty>,
     ) -> Option<&'b FunctionSig> {
+        let candidates = self.best_overload_candidates_with_locals(overloads, args, locals);
+        (candidates.len() == 1).then(|| candidates[0])
+    }
+
+    fn best_overload_candidates<'b>(
+        &self,
+        overloads: &'b [FunctionSig],
+        args: &[crate::ast::CallArg],
+    ) -> Vec<&'b FunctionSig> {
+        self.best_overload_candidates_with_locals(overloads, args, &HashMap::new())
+    }
+
+    fn best_overload_candidates_with_locals<'b>(
+        &self,
+        overloads: &'b [FunctionSig],
+        args: &[crate::ast::CallArg],
+        locals: &HashMap<String, Ty>,
+    ) -> Vec<&'b FunctionSig> {
         let arg_types = args
             .iter()
-            .map(|arg| self.probe_expr_type(call_arg_value_expr(arg)))
+            .map(|arg| self.probe_expr_type_with_locals(call_arg_value_expr(arg), locals))
             .collect::<Vec<_>>();
-        overloads
+        let ranked = overloads
             .iter()
             .filter_map(|sig| {
                 let arrangement = arrange_param_args(&sig.params, args);
@@ -11391,8 +11434,49 @@ impl<'a> Checker<'a> {
                 }
                 Some((score, sig))
             })
-            .max_by_key(|(score, _)| *score)
-            .map(|(_, sig)| sig)
+            .collect::<Vec<_>>();
+        let Some(best_score) = ranked.iter().map(|(score, _)| *score).max() else {
+            return Vec::new();
+        };
+        let best = ranked
+            .into_iter()
+            .filter_map(|(score, sig)| (score == best_score).then_some(sig))
+            .collect::<Vec<_>>();
+        self.collapse_external_signature_duplicates(best)
+    }
+
+    fn collapse_external_signature_duplicates<'b>(
+        &self,
+        candidates: Vec<&'b FunctionSig>,
+    ) -> Vec<&'b FunctionSig> {
+        let mut collapsed: Vec<&'b FunctionSig> = Vec::new();
+        for candidate in candidates {
+            let Some(index) = collapsed.iter().position(|existing| {
+                !existing.has_body
+                    && !candidate.has_body
+                    && existing.type_params == candidate.type_params
+                    && existing.generic_conditions.is_empty()
+                    && candidate.generic_conditions.is_empty()
+                    && overload_inputs_are_equivalent(existing, candidate)
+            }) else {
+                collapsed.push(candidate);
+                continue;
+            };
+
+            let existing = collapsed[index];
+            if candidate.ret == existing.ret {
+                continue;
+            }
+            let candidate_is_narrower = self.is_assignable(&candidate.ret, &existing.ret);
+            let existing_is_narrower = self.is_assignable(&existing.ret, &candidate.ret);
+            if candidate_is_narrower && !existing_is_narrower {
+                collapsed[index] = candidate;
+            } else if !existing_is_narrower {
+                // Equal inputs with unrelated returns are genuinely ambiguous.
+                collapsed.push(candidate);
+            }
+        }
+        collapsed
     }
 
     fn closest_overload<'b>(
@@ -11412,10 +11496,14 @@ impl<'a> Checker<'a> {
     }
 
     fn probe_expr_type(&self, expr: &Expr) -> Ty {
+        self.probe_expr_type_with_locals(expr, &HashMap::new())
+    }
+
+    fn probe_expr_type_with_locals(&self, expr: &Expr, locals: &HashMap<String, Ty>) -> Ty {
         match expr {
             Expr::Identifier { name, .. } => self
-                .lookup_scoped_value(name)
-                .map(|value| value.ty)
+                .probe_local_type(locals, name)
+                .or_else(|| self.lookup_scoped_value(name).map(|value| value.ty))
                 .or_else(|| self.lookup_implicit_field(name).map(|field| field.ty))
                 .or_else(|| self.lookup_implicit_getter(name).map(|getter| getter.ret))
                 .or_else(|| self.lookup_global_value(name).map(|value| value.ty))
@@ -11427,6 +11515,64 @@ impl<'a> Checker<'a> {
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),
             Expr::Unit { .. } => Ty::unit(),
+            Expr::Spread { value, .. } => self.probe_expr_type_with_locals(value, locals),
+            Expr::ListLiteral { items, .. } => {
+                if items.is_empty() {
+                    return Ty::Unknown;
+                }
+                if items.iter().all(|item| {
+                    matches!(
+                        item,
+                        Expr::Binary {
+                            op: BinaryOp::Colon,
+                            ..
+                        }
+                    )
+                }) {
+                    let mut keys = Vec::new();
+                    let mut values = Vec::new();
+                    for item in items {
+                        let Expr::Binary { left, right, .. } = item else {
+                            unreachable!();
+                        };
+                        keys.push(self.probe_expr_type_with_locals(left, locals));
+                        values.push(self.probe_expr_type_with_locals(right, locals));
+                    }
+                    return Ty::Named(
+                        "Map".to_string(),
+                        vec![join_many_types(&keys), join_many_types(&values)],
+                    );
+                }
+                if items.iter().any(|item| {
+                    matches!(
+                        item,
+                        Expr::Binary {
+                            op: BinaryOp::Colon,
+                            ..
+                        }
+                    )
+                }) {
+                    return Ty::Unknown;
+                }
+                let item_types = items
+                    .iter()
+                    .map(|item| match item {
+                        Expr::Spread { value, .. } => {
+                            let spread = self.probe_expr_type_with_locals(value, locals);
+                            self.known_iterable_item_type(&spread)
+                                .unwrap_or(Ty::Unknown)
+                        }
+                        _ => self.probe_expr_type_with_locals(item, locals),
+                    })
+                    .collect::<Vec<_>>();
+                Ty::list(join_many_types(&item_types))
+            }
+            Expr::TupleLiteral { items, .. } => Ty::Tuple(
+                items
+                    .iter()
+                    .map(|item| self.probe_expr_type_with_locals(item, locals))
+                    .collect(),
+            ),
             Expr::RecordLiteral { fields, .. } => {
                 let mut out = Vec::new();
                 for field in fields {
@@ -11435,9 +11581,13 @@ impl<'a> Checker<'a> {
                             .ty
                             .as_ref()
                             .map(|ty| self.ty_from_type_ref(ty))
-                            .unwrap_or_else(|| self.probe_expr_type(&field.value));
+                            .unwrap_or_else(|| {
+                                self.probe_expr_type_with_locals(&field.value, locals)
+                            });
                         upsert_shape_field(&mut out, name.clone(), ty);
-                    } else if let Ty::Record(spread_fields) = self.probe_expr_type(&field.value) {
+                    } else if let Ty::Record(spread_fields) =
+                        self.probe_expr_type_with_locals(&field.value, locals)
+                    {
                         for (name, ty) in spread_fields {
                             upsert_shape_field(&mut out, name, ty);
                         }
@@ -11452,7 +11602,7 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.static_member_value_type(receiver, name, &Ty::Unknown) {
                     return ty;
                 }
-                let receiver_ty = self.probe_expr_type(receiver);
+                let receiver_ty = self.probe_expr_type_with_locals(receiver, locals);
                 if name == "runtimeType" {
                     return Ty::value_runtime_type(receiver_ty);
                 }
@@ -11463,6 +11613,18 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Ty::Unknown);
                 }
                 self.member_type(&receiver_ty, name).unwrap_or(Ty::Unknown)
+            }
+            Expr::Index {
+                receiver, index, ..
+            } => {
+                let receiver_ty = self.probe_expr_type_with_locals(receiver, locals);
+                if let Ty::Tuple(items) = &receiver_ty
+                    && let Some(index) = static_integer_literal(index)
+                    && let Ok(index) = usize::try_from(index)
+                {
+                    return items.get(index).cloned().unwrap_or(Ty::Unknown);
+                }
+                self.index_result_type(&receiver_ty)
             }
             Expr::Call {
                 callee,
@@ -11475,39 +11637,343 @@ impl<'a> Checker<'a> {
                 }
                 let normalized_args =
                     self.normalize_trailing_brace_call_args(callee, args, *uses_brace_syntax);
-                self.callable_signature_for_args_probe(callee, &normalized_args, *uses_brace_syntax)
-                    .map(|(_, ret)| ret)
-                    .unwrap_or(Ty::Unknown)
+                self.callable_signature_for_args_probe_with_locals(
+                    callee,
+                    &normalized_args,
+                    *uses_brace_syntax,
+                    locals,
+                )
+                .map(|(_, ret)| ret)
+                .unwrap_or(Ty::Unknown)
+            }
+            Expr::ContextualNew { .. } | Expr::AnonymousObject { .. } => Ty::Unknown,
+            Expr::RecordUpdate { receiver, .. } => {
+                self.probe_expr_type_with_locals(receiver, locals)
+            }
+            Expr::Try { value, .. } => {
+                self.unwrap_inner_type(&self.probe_expr_type_with_locals(value, locals))
+            }
+            Expr::ExtractOr {
+                value, fallback, ..
+            } => {
+                let value =
+                    self.unwrap_inner_type(&self.probe_expr_type_with_locals(value, locals));
+                let fallback = self.probe_expr_type_with_locals(fallback, locals);
+                join_types(&value, &fallback)
+            }
+            Expr::Unary { op, expr, .. } => {
+                let inner = self.probe_expr_type_with_locals(expr, locals);
+                match op {
+                    crate::ast::UnaryOp::Neg if inner.is_numeric() => inner,
+                    crate::ast::UnaryOp::Not => Ty::bool(),
+                    crate::ast::UnaryOp::OptionWrap => Ty::option(inner),
+                    crate::ast::UnaryOp::UnsafeExtract => self.unwrap_inner_type(&inner),
+                    crate::ast::UnaryOp::Neg => Ty::Unknown,
+                }
             }
             Expr::Binary {
                 left, op, right, ..
             } => {
-                let left = self.probe_expr_type(left);
-                let right = self.probe_expr_type(right);
+                let left = self.probe_expr_type_with_locals(left, locals);
+                let right = self.probe_expr_type_with_locals(right, locals);
                 self.probe_binary_expr_type(&left, *op, &right)
             }
+            Expr::Is { .. } => Ty::bool(),
+            Expr::TypeOf { ty, .. } => Ty::exact_runtime_type(self.ty_from_type_ref(ty)),
             Expr::If {
+                condition_clauses,
                 then_block,
                 else_branch,
                 ..
             } => {
-                let then_ty = self.probe_block_result_type(then_block);
+                let mut then_locals = locals.clone();
+                for clause in condition_clauses {
+                    if let IfConditionClause::Let(clause) = clause {
+                        let value_ty =
+                            self.probe_expr_type_with_locals(&clause.value, &then_locals);
+                        self.probe_pattern_bindings(&clause.pattern, &value_ty, &mut then_locals);
+                    }
+                }
+                let then_ty = self.probe_block_result_type_with_locals(then_block, &then_locals);
                 let else_ty = match else_branch.as_ref() {
-                    ElseExprBranch::If(expr) => self.probe_expr_type(expr),
-                    ElseExprBranch::Block(block) => self.probe_block_result_type(block),
+                    ElseExprBranch::If(expr) => self.probe_expr_type_with_locals(expr, locals),
+                    ElseExprBranch::Block(block) => {
+                        self.probe_block_result_type_with_locals(block, locals)
+                    }
                 };
                 join_types(&then_ty, &else_ty)
             }
-            Expr::Block { body, .. } => self.probe_block_result_type(body),
-            Expr::Group { inner, .. } => self.probe_expr_type(inner),
-            _ => Ty::Unknown,
+            Expr::Block { body, .. } => self.probe_block_result_type_with_locals(body, locals),
+            Expr::Match { value, cases, .. } => {
+                let value_ty = self.probe_expr_type_with_locals(value, locals);
+                self.probe_match_result_type(cases, &value_ty, locals)
+            }
+            Expr::Lambda { params, body, .. } => {
+                let mut body_locals = locals.clone();
+                let param_types = params
+                    .iter()
+                    .map(|param| {
+                        let ty = param
+                            .ty
+                            .as_ref()
+                            .map(|ty| self.ty_from_type_ref(ty))
+                            .unwrap_or(Ty::Unknown);
+                        body_locals.insert(param.name.clone(), ty.clone());
+                        ty
+                    })
+                    .collect::<Vec<_>>();
+                let ret = match body {
+                    LambdaBody::Expr(expr) => self.probe_expr_type_with_locals(expr, &body_locals),
+                    LambdaBody::Block(block) => {
+                        self.probe_block_result_type_with_locals(block, &body_locals)
+                    }
+                };
+                Ty::Function(param_types, Box::new(ret))
+            }
+            Expr::Group { inner, .. } => self.probe_expr_type_with_locals(inner, locals),
+            Expr::Placeholder { .. }
+            | Expr::Return { .. }
+            | Expr::Break { .. }
+            | Expr::Continue { .. }
+            | Expr::ForYield { .. } => Ty::Unknown,
         }
     }
 
-    fn probe_block_result_type(&self, block: &Block) -> Ty {
-        block_tail_expr(block)
-            .map(|expr| self.probe_expr_type(expr))
-            .unwrap_or_else(Ty::unit)
+    fn probe_block_result_type_with_locals(
+        &self,
+        block: &Block,
+        outer_locals: &HashMap<String, Ty>,
+    ) -> Ty {
+        let mut locals = outer_locals.clone();
+        let mut result = Ty::unit();
+        for statement in &block.statements {
+            result = match statement {
+                Stmt::Binding(binding) => {
+                    self.probe_binding_stmt(binding, &mut locals);
+                    Ty::unit()
+                }
+                Stmt::PatternBinding(binding) => {
+                    if binding.clauses.is_empty() {
+                        let value_ty = self.probe_expr_type_with_locals(&binding.value, &locals);
+                        self.probe_pattern_bindings(&binding.pattern, &value_ty, &mut locals);
+                    } else {
+                        for clause in &binding.clauses {
+                            let value_ty = self.probe_expr_type_with_locals(&clause.value, &locals);
+                            self.probe_pattern_bindings(&clause.pattern, &value_ty, &mut locals);
+                        }
+                    }
+                    Ty::unit()
+                }
+                Stmt::LetElse(binding) => {
+                    if binding.clauses.is_empty() {
+                        let value_ty = self.probe_expr_type_with_locals(&binding.value, &locals);
+                        self.probe_pattern_bindings(&binding.pattern, &value_ty, &mut locals);
+                    } else {
+                        for clause in &binding.clauses {
+                            let value_ty = self.probe_expr_type_with_locals(&clause.value, &locals);
+                            self.probe_pattern_bindings(&clause.pattern, &value_ty, &mut locals);
+                        }
+                    }
+                    Ty::unit()
+                }
+                Stmt::Expr(statement) => self.probe_expr_type_with_locals(&statement.expr, &locals),
+                Stmt::If(statement) => self.probe_if_stmt_type(statement, &locals),
+                Stmt::Match(statement) => {
+                    let value_ty = self.probe_expr_type_with_locals(&statement.value, &locals);
+                    self.probe_match_result_type(&statement.cases, &value_ty, &locals)
+                }
+                Stmt::LocalFunction(function) => {
+                    let sig = function_sig_from_function(function, &[]);
+                    locals.insert(function.name.clone(), function_sig_type(&sig));
+                    Ty::unit()
+                }
+                _ => Ty::unit(),
+            };
+        }
+        result
+    }
+
+    fn probe_local_type(&self, locals: &HashMap<String, Ty>, name: &str) -> Option<Ty> {
+        locals.get(name).cloned()
+    }
+
+    fn probe_binding_stmt(&self, binding: &BindingStmt, locals: &mut HashMap<String, Ty>) {
+        let value_types = binding
+            .values
+            .iter()
+            .map(|value| self.probe_expr_type_with_locals(value, locals))
+            .collect::<Vec<_>>();
+        let inferred = match binding.destructure {
+            Some(DestructureKind::Tuple) => self.destructure_slots(
+                value_types.first().unwrap_or(&Ty::Unknown),
+                binding.bindings.len(),
+                DestructureKind::Tuple,
+            ),
+            Some(DestructureKind::Record) => {
+                let fields = value_types
+                    .first()
+                    .and_then(|ty| self.destructure_record_fields(ty))
+                    .unwrap_or_default();
+                binding
+                    .bindings
+                    .iter()
+                    .map(|binding| {
+                        let field_name = binding
+                            .field_name
+                            .as_deref()
+                            .unwrap_or(binding.name.as_str());
+                        fields
+                            .iter()
+                            .find(|(name, _, _)| name == field_name)
+                            .map(|(_, ty, _)| ty.clone())
+                            .unwrap_or(Ty::Unknown)
+                    })
+                    .collect()
+            }
+            None => (0..binding.bindings.len())
+                .map(|index| value_types.get(index).cloned().unwrap_or(Ty::Unknown))
+                .collect(),
+        };
+        for (index, binding) in binding.bindings.iter().enumerate() {
+            let ty = binding
+                .ty
+                .as_ref()
+                .map(|ty| self.ty_from_type_ref(ty))
+                .unwrap_or_else(|| inferred.get(index).cloned().unwrap_or(Ty::Unknown));
+            if binding.name != "_" {
+                locals.insert(binding.name.clone(), ty);
+            }
+        }
+    }
+
+    fn probe_if_stmt_type(&self, statement: &IfStmt, locals: &HashMap<String, Ty>) -> Ty {
+        let mut then_locals = locals.clone();
+        for clause in &statement.condition_clauses {
+            if let IfConditionClause::Let(clause) = clause {
+                let value_ty = self.probe_expr_type_with_locals(&clause.value, &then_locals);
+                self.probe_pattern_bindings(&clause.pattern, &value_ty, &mut then_locals);
+            }
+        }
+        let then_ty = self.probe_block_result_type_with_locals(&statement.then_block, &then_locals);
+        let else_ty = match statement.else_branch.as_ref() {
+            Some(ElseBranch::If(branch)) => self.probe_if_stmt_type(branch, locals),
+            Some(ElseBranch::Block(block)) => {
+                self.probe_block_result_type_with_locals(block, locals)
+            }
+            None => Ty::unit(),
+        };
+        join_types(&then_ty, &else_ty)
+    }
+
+    fn probe_match_result_type(
+        &self,
+        cases: &[MatchCase],
+        value_ty: &Ty,
+        locals: &HashMap<String, Ty>,
+    ) -> Ty {
+        let results = cases
+            .iter()
+            .map(|case| {
+                let mut case_locals = locals.clone();
+                self.probe_pattern_bindings(&case.pattern, value_ty, &mut case_locals);
+                match &case.body {
+                    MatchCaseBody::Block(block) => {
+                        self.probe_block_result_type_with_locals(block, &case_locals)
+                    }
+                    MatchCaseBody::Expr(expr) => {
+                        self.probe_expr_type_with_locals(expr, &case_locals)
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+        join_many_types(&results)
+    }
+
+    fn probe_pattern_bindings(
+        &self,
+        pattern: &Pattern,
+        scrutinee: &Ty,
+        locals: &mut HashMap<String, Ty>,
+    ) {
+        match pattern {
+            Pattern::Wildcard { .. } | Pattern::Literal { .. } => {}
+            Pattern::Extract { inner, .. } => {
+                let inner_ty = self.unwrap_inner_type(scrutinee);
+                self.probe_pattern_bindings(inner, &inner_ty, locals);
+            }
+            Pattern::Alias { inner, name, .. } => {
+                self.probe_pattern_bindings(inner, scrutinee, locals);
+                if name != "_" {
+                    locals.insert(
+                        name.clone(),
+                        self.whole_pattern_binding_type(inner, scrutinee),
+                    );
+                }
+            }
+            Pattern::Binding { name, .. } => {
+                if name != "_" {
+                    locals.insert(name.clone(), scrutinee.clone());
+                }
+            }
+            Pattern::Type { name, target, .. } => {
+                if let Some(name) = name
+                    && name != "_"
+                {
+                    locals.insert(name.clone(), self.ty_from_type_ref(target));
+                }
+            }
+            Pattern::Tuple { elements, .. } => {
+                let items = match scrutinee {
+                    Ty::Tuple(items) => items.clone(),
+                    _ => vec![Ty::Unknown; elements.len()],
+                };
+                for (pattern, item) in elements.iter().zip(items.iter()) {
+                    self.probe_pattern_bindings(pattern, item, locals);
+                }
+            }
+            Pattern::List { elements, rest, .. } => {
+                let item = self.list_element_type(scrutinee).unwrap_or(Ty::Unknown);
+                for pattern in elements {
+                    self.probe_pattern_bindings(pattern, &item, locals);
+                }
+                if let Some(rest) = rest
+                    && rest.name != "_"
+                {
+                    locals.insert(rest.name.clone(), Ty::list(item));
+                }
+            }
+            Pattern::Record { path, fields, .. } => {
+                let target_fields = self
+                    .lookup_record_pattern_target(path, scrutinee)
+                    .map(|(_, _, fields)| fields)
+                    .unwrap_or_default();
+                for field in fields {
+                    let field_ty = target_fields
+                        .iter()
+                        .find(|(name, _)| name == &field.name)
+                        .map(|(_, ty)| ty.clone())
+                        .unwrap_or(Ty::Unknown);
+                    self.probe_pattern_bindings(&field.pattern, &field_ty, locals);
+                }
+            }
+            Pattern::Constructor { path, args, .. } => {
+                let fields = if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
+                    let mut subst = HashMap::new();
+                    infer_type_subst(&case.result, scrutinee, &mut subst);
+                    self.enum_case_extractable_params(&case)
+                        .into_iter()
+                        .map(|field| materialize_type(&substitute_type(&field.ty, &subst)))
+                        .collect::<Vec<_>>()
+                } else {
+                    self.lookup_record_pattern_target(path, scrutinee)
+                        .map(|(_, _, fields)| fields.into_iter().map(|(_, ty)| ty).collect())
+                        .unwrap_or_default()
+                };
+                for (pattern, field_ty) in args.iter().zip(fields.iter()) {
+                    self.probe_pattern_bindings(pattern, field_ty, locals);
+                }
+            }
+        }
     }
 
     fn probe_binary_expr_type(&self, left: &Ty, op: BinaryOp, right: &Ty) -> Ty {
@@ -12574,6 +13040,22 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn check_integer_literal(&mut self, raw: &str, negative: bool, span: crate::source::Span) {
+        if parse_integer_literal(raw, negative).is_some() {
+            return;
+        }
+        let spelling = if negative {
+            format!("-{raw}")
+        } else {
+            raw.to_string()
+        };
+        self.add_error(
+            "integer_literal_out_of_range",
+            format!("integer literal '{spelling}' is outside the signed 64-bit Int range"),
+            span,
+        );
+    }
+
     fn add_error(
         &mut self,
         code: &'static str,
@@ -12625,7 +13107,6 @@ impl<'a> Checker<'a> {
                         ty: ty.clone(),
                         mutable: false,
                         visibility: Visibility::Default,
-                        hidden: false,
                         has_initializer: false,
                         variadic: false,
                     })
@@ -12651,7 +13132,6 @@ impl<'a> Checker<'a> {
                             ty: substitute_type(&field.ty, &subst),
                             mutable: field.mutable,
                             visibility: field.visibility,
-                            hidden: field.hidden,
                             has_initializer: field.has_initializer,
                             variadic: field.variadic,
                         })
@@ -13170,7 +13650,6 @@ fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
             ty: param.ty.clone(),
             mutable: false,
             visibility: Visibility::Default,
-            hidden: false,
             has_initializer: param.has_initializer,
             variadic: param.variadic,
         })
@@ -13182,6 +13661,16 @@ fn function_sig_type(sig: &FunctionSig) -> Ty {
         sig.params.iter().map(|param| param.ty.clone()).collect(),
         Box::new(sig.ret.clone()),
     )
+}
+
+fn overload_inputs_are_equivalent(left: &FunctionSig, right: &FunctionSig) -> bool {
+    left.params.len() == right.params.len()
+        && left.params.iter().zip(&right.params).all(|(left, right)| {
+            left.ty == right.ty
+                && left.variadic == right.variadic
+                && left.lazy == right.lazy
+                && left.has_initializer == right.has_initializer
+        })
 }
 
 fn constructor_target_name(ret: &Ty) -> Option<&str> {
@@ -14172,7 +14661,6 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                     .unwrap_or(Ty::Unknown),
                 mutable: field.mutable,
                 visibility: field.visibility,
-                hidden: field.visibility == Visibility::Private,
                 has_initializer: field.initializer.is_some(),
                 variadic: false,
             }),
@@ -14198,7 +14686,6 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                         ty: enum_case_field_sig_ty(field, &fields, &owner_params),
                         mutable: field.mutable,
                         visibility: field.visibility,
-                        hidden: field.visibility == Visibility::Private,
                         has_initializer: field.initializer.is_some(),
                         variadic: false,
                     })
@@ -15150,10 +15637,30 @@ fn type_args_assignable(type_name: &str, actual_args: &[Ty], expected_args: &[Ty
             .all(|(actual, expected)| matches!(expected, Ty::Wildcard) || actual == expected);
     }
 
+    if generic_type_is_covariant(type_name) {
+        return actual_args
+            .iter()
+            .zip(expected_args.iter())
+            .all(|(actual, expected)| is_assignable(actual, expected));
+    }
+
+    // A generic value may expose mutation through its own API. Keep type
+    // arguments invariant unless the type has an explicitly audited read-only
+    // contract, so aliases cannot widen the type of writable storage.
     actual_args
         .iter()
         .zip(expected_args.iter())
-        .all(|(actual, expected)| is_assignable(actual, expected))
+        .all(|(actual, expected)| {
+            matches!(expected, Ty::Wildcard)
+                || (is_assignable(actual, expected) && is_assignable(expected, actual))
+        })
+}
+
+fn generic_type_is_covariant(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "Iterable" | "Iterator" | "Option" | "Result" | "Either"
+    )
 }
 
 fn upsert_shape_field(fields: &mut Vec<(String, Ty)>, name: String, ty: Ty) {
@@ -15310,6 +15817,50 @@ def broken() Int = missing + false
     }
 
     #[test]
+    fn checks_complete_signed_integer_literal_boundary() {
+        let valid = parse_inline(
+            r#"
+def maximum() Int = 9223372036854775807
+def minimum() Int = -9223372036854775808
+"#,
+        );
+        let valid_result = check_program(&valid);
+        assert!(
+            valid_result.diagnostics.is_empty(),
+            "{:#?}",
+            valid_result.diagnostics
+        );
+
+        let invalid = parse_inline(
+            r#"
+def tooHigh() Int = 9223372036854775808
+def tooLow() Int = -9223372036854775809
+"#,
+        );
+        let invalid_result = check_program(&invalid);
+        let range_errors = invalid_result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "integer_literal_out_of_range")
+            .collect::<Vec<_>>();
+        assert_eq!(range_errors.len(), 2, "{:#?}", invalid_result.diagnostics);
+        assert!(
+            range_errors
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("9223372036854775808")),
+            "{:#?}",
+            invalid_result.diagnostics
+        );
+        assert!(
+            range_errors
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("-9223372036854775809")),
+            "{:#?}",
+            invalid_result.diagnostics
+        );
+    }
+
+    #[test]
     fn preserves_compatible_user_defined_addition() {
         let program = parse_inline(
             r#"
@@ -15393,6 +15944,69 @@ def main() Unit {
             "{:#?}",
             result.diagnostics
         );
+    }
+
+    #[test]
+    fn rejects_widening_existing_mutable_generic_aliases() {
+        let program = parse_inline(
+            r#"
+class Cell[T] {
+    var value T
+}
+
+def main() Unit {
+    integers [Int] = [1]
+    arbitrary [Any] = integers
+
+    original Cell[Int] = Cell(1)
+    widened Cell[Any] = original
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic.message.contains("Vector[Int]")
+                    && diagnostic.message.contains("Vector[Any]")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_binding_type"
+                    && diagnostic.message.contains("Cell[Int]")
+                    && diagnostic.message.contains("Cell[Any]")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn allows_fresh_wider_generic_values_and_read_only_views() {
+        let program = parse_inline(
+            r#"
+class Cell[T] {
+    var value T
+}
+
+def main() Unit {
+    arbitrary [Any] = [1]
+    arbitrary.add("valid")
+
+    fresh Cell[Any] = Cell(1)
+
+    integers [Int] = [1]
+    exact Iterable[Int] = integers
+    wider Iterable[Any] = integers
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
@@ -16411,7 +17025,7 @@ ext Route {
     }
 
     #[test]
-    fn rejects_extension_methods_reading_hidden_fields() {
+    fn rejects_extension_methods_reading_private_fields() {
         let program = parse_inline(
             r#"
 class User {
@@ -16436,7 +17050,7 @@ ext User {
     }
 
     #[test]
-    fn rejects_extension_methods_calling_hidden_methods() {
+    fn rejects_extension_methods_calling_private_methods() {
         let program = parse_inline(
             r#"
 class User {
@@ -16543,7 +17157,7 @@ class SecretUser {
     }
 
     #[test]
-    fn allows_explicit_constructor_when_hidden_field_lacks_initializer() {
+    fn allows_explicit_constructor_when_private_field_lacks_initializer() {
         let program = parse_inline(
             r#"
 class SecretUser {
@@ -17109,11 +17723,43 @@ def main() Unit {
 def main() Unit {
     assert(1 + 2 == 3)
     assert(true, "still true")
+    assert(condition = true)
+    assert(message = "still true", condition = true)
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn validates_assert_with_the_ordinary_callable_contract() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    assert(misspelled = true)
+    assert(true, "first", "second")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "unknown_argument_name"
+                    && diag.message.contains("no parameter named 'misspelled'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "invalid_argument_count"
+                    && diag.message.contains("expects 1..2 arguments, got 3")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -17134,7 +17780,7 @@ def health() Str = "ok"
     }
 
     #[test]
-    fn rejects_annotation_mutable_and_hidden_fields() {
+    fn rejects_annotation_mutable_and_private_fields() {
         let program = parse_inline(
             r#"
 annotation Route {
@@ -17211,7 +17857,7 @@ def main() Unit {
                 diag.code == "invalid_argument_type"
                     && diag
                         .message
-                        .contains("assert condition has type 'Int' but expects 'Bool'")
+                        .contains("argument has type 'Int' but parameter expects 'Bool'")
             }),
             "{:#?}",
             result.diagnostics
@@ -17561,7 +18207,7 @@ def main() Unit {
     }
 
     #[test]
-    fn reports_hidden_field_constructor_with_factory_help() {
+    fn reports_private_field_constructor_with_factory_help() {
         let program = parse_inline(
             r#"
 class User {
@@ -18212,7 +18858,7 @@ def main() Str {
     }
 
     #[test]
-    fn named_class_destructuring_skips_hidden_fields() {
+    fn named_class_destructuring_skips_private_fields() {
         let program = parse_inline(
             r#"
 class SecretUser {
@@ -21786,12 +22432,67 @@ def render(value Int) Str = value.toStr()
 def render(value Str) Str = value
 
 def main(formatter Formatter) Unit {
+    numbers = [1]
     literal Str = formatter.render(3)
     arithmetic Str = formatter.render(1 + 2)
     grouped Str = formatter.render((1 + 2))
+    negative Str = formatter.render(-1)
+    indexed Str = formatter.render(numbers[0])
+    matched Str = formatter.render(match true {
+        case true => 1
+        case false => 2
+    })
+    blockLocal Str = formatter.render({
+        value = numbers[0]
+        value
+    })
     topLevel Str = render(1 + 2)
     exact Str = formatter.classify("value")
-    println(literal, arithmetic, grouped, topLevel, exact)
+    println(
+        literal,
+        arithmetic,
+        grouped,
+        negative,
+        indexed,
+        matched,
+        blockLocal,
+        topLevel,
+        exact
+    )
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn filters_contextual_construction_targets_using_other_arguments() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+}
+
+class Admin {
+    name Str
+}
+
+class Saver {
+    def save(tag Int, value User) Str = "user"
+    def save(tag Str, value Admin) Str = "admin"
+}
+
+class Wrapper {
+    new(tag Int, value User) {}
+    new(tag Str, value Admin) {}
+}
+
+def main() Unit {
+    saver = Saver()
+    result Str = saver.save(1, new { name: "Ada" })
+    wrapped = Wrapper(1, new { name: "Grace" })
+    println(result)
 }
 "#,
         );

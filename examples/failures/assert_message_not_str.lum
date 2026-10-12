@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*assert message has type 'Int' but expects 'Str'.*
+# .*argument has type 'Int' but parameter expects 'Str'.*
 
 def main() Unit {
     assert(false, 5)

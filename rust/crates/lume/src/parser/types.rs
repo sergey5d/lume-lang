@@ -230,7 +230,7 @@ impl<'a> Parser<'a> {
             self.parse_primary_type_ref()?
         };
         let left = self.parse_optional_type_suffix(left);
-        if self.at(TokenKind::FatArrow) || self.at(TokenKind::Arrow) {
+        if self.at(TokenKind::FatArrow) {
             self.error_at_current(
                 "invalid_function_type",
                 "function types use 'fn(...) T'; write 'fn(T) U'",
@@ -323,7 +323,7 @@ impl<'a> Parser<'a> {
         )?;
         self.skip_newlines();
 
-        if self.match_token(TokenKind::FatArrow) || self.match_token(TokenKind::Arrow) {
+        if self.match_token(TokenKind::FatArrow) {
             self.diagnostics.push(Diagnostic::error(
                 "invalid_function_type",
                 "function types do not use an arrow; write 'fn(...) T'",
@@ -357,7 +357,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.consume(TokenKind::RParen, "expected ')' after tuple type")?;
 
-        if self.match_token(TokenKind::FatArrow) || self.match_token(TokenKind::Arrow) {
+        if self.match_token(TokenKind::FatArrow) {
             self.diagnostics.push(Diagnostic::error(
                 "removed_function_type_syntax",
                 "function types use 'fn(...) T'; replace the parenthesized parameter-type form",

@@ -1,7 +1,0 @@
-# FAIL_REGEX:
-# .*function types do not use an arrow; write 'fn\(\.\.\.\) T'.*
-
-def main() Unit {
-    mapper fn(Int) -> Int = value => value + 1
-    println(mapper(4))
-}

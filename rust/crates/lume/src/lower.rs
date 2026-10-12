@@ -9,6 +9,7 @@ use crate::{
     desugar,
     diagnostic::Diagnostic,
     ir,
+    numeric::parse_integer_literal,
     source::Span,
 };
 
@@ -2172,7 +2173,7 @@ impl<'a> FunctionLowerer<'a> {
         bindings: &[AppliedBinding],
         continue_block: ir::BlockId,
     ) {
-        let hidden = bindings
+        let suspended_bindings = bindings
             .iter()
             .filter_map(|binding| {
                 self.current_scope()
@@ -2210,7 +2211,7 @@ impl<'a> FunctionLowerer<'a> {
         };
         let value = self.lower_block_value_with_expected(block, expected.as_ref());
 
-        for (name, local) in hidden {
+        for (name, local) in suspended_bindings {
             self.current_scope().insert(name, local);
         }
 
@@ -4656,11 +4657,17 @@ impl<'a> FunctionLowerer<'a> {
                     ir::Operand::Const(ir::Constant::Unit)
                 }
             }
-            Expr::Integer { raw, .. } => raw
-                .parse::<i64>()
-                .map(ir::Constant::Int)
-                .map(ir::Operand::Const)
-                .unwrap_or(ir::Operand::Const(ir::Constant::Int(0))),
+            Expr::Integer { raw, span } => self.lower_integer_literal(raw, false, *span),
+            Expr::Unary {
+                op: ast::UnaryOp::Neg,
+                expr,
+                span,
+            } if matches!(expr.as_ref(), Expr::Integer { .. }) => {
+                let Expr::Integer { raw, .. } = expr.as_ref() else {
+                    unreachable!();
+                };
+                self.lower_integer_literal(raw, true, *span)
+            }
             Expr::Float { raw, .. } => raw
                 .parse::<f64>()
                 .map(ir::Constant::Float)
@@ -4733,6 +4740,23 @@ impl<'a> FunctionLowerer<'a> {
                 ir::Operand::Const(ir::Constant::Unit)
             }
         }
+    }
+
+    fn lower_integer_literal(&mut self, raw: &str, negative: bool, span: Span) -> ir::Operand {
+        if let Some(value) = parse_integer_literal(raw, negative) {
+            return ir::Operand::Const(ir::Constant::Int(value));
+        }
+        let spelling = if negative {
+            format!("-{raw}")
+        } else {
+            raw.to_string()
+        };
+        self.add_error(
+            "integer_literal_out_of_range",
+            format!("integer literal '{spelling}' is outside the signed 64-bit Int range"),
+            span,
+        );
+        ir::Operand::Const(ir::Constant::Unit)
     }
 
     fn retain_source_expr(&mut self, expr: &Expr, expected: Option<&ir::Type>) {
@@ -7511,6 +7535,26 @@ impl<'a> FunctionLowerer<'a> {
 
         match callee {
             Expr::Identifier { name, .. } => {
+                if name == "assert" {
+                    return Some(vec![
+                        Some(ExpectedArgSpec {
+                            name: Some("condition".to_string()),
+                            ty: ir::Type::Bool,
+                            lazy: false,
+                            variadic: false,
+                            default: None,
+                        }),
+                        Some(ExpectedArgSpec {
+                            name: Some("message".to_string()),
+                            ty: ir::Type::Str,
+                            lazy: false,
+                            variadic: false,
+                            default: Some(ir::Constant::String(
+                                crate::DEFAULT_ASSERT_MESSAGE.to_string(),
+                            )),
+                        }),
+                    ]);
+                }
                 if name == "ensure" && ordered_args.len() == 2 {
                     let error_ty = match expected {
                         Some(ir::Type::Named { name, args })
@@ -9649,9 +9693,10 @@ fn lower_annotation_value(expr: &ast::Expr) -> ir::AnnotationValue {
     match expr {
         ast::Expr::Group { inner, .. } => lower_annotation_value(inner),
         ast::Expr::Bool { value, .. } => ir::AnnotationValue::Bool(*value),
-        ast::Expr::Integer { raw, .. } => {
-            ir::AnnotationValue::Int(raw.parse::<i64>().unwrap_or_default())
-        }
+        ast::Expr::Integer { raw, .. } => ir::AnnotationValue::Int(
+            parse_integer_literal(raw, false)
+                .expect("integer annotation literals are validated before lowering"),
+        ),
         ast::Expr::Float { raw, .. } => {
             ir::AnnotationValue::Float(raw.parse::<f64>().unwrap_or_default())
         }
@@ -11291,7 +11336,7 @@ fn generic_call_type_ref_from_expr(expr: &Expr) -> Option<TypeRef> {
 fn lower_field_initializer_constant(initializer: Option<&ast::Expr>) -> Option<ir::Constant> {
     match initializer? {
         ast::Expr::Group { inner, .. } => lower_field_initializer_constant(Some(inner)),
-        ast::Expr::Integer { raw, .. } => Some(ir::Constant::Int(raw.parse::<i64>().unwrap_or(0))),
+        ast::Expr::Integer { raw, .. } => parse_integer_literal(raw, false).map(ir::Constant::Int),
         ast::Expr::Float { raw, .. } => {
             Some(ir::Constant::Float(raw.parse::<f64>().unwrap_or(0.0)))
         }
@@ -11758,6 +11803,25 @@ mod tests {
         let main = ir.function(ir::FunctionId(1)).expect("main function");
         assert_eq!(main.params.len(), 0);
         assert!(!main.blocks.is_empty());
+    }
+
+    #[test]
+    fn reports_out_of_range_integer_if_lowering_receives_unchecked_source() {
+        let program = parse_inline(
+            r#"
+            def main() Int = 9223372036854775808
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(
+            lowered
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "integer_literal_out_of_range"),
+            "{:#?}",
+            lowered.diagnostics
+        );
     }
 
     #[test]

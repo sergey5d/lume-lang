@@ -2441,7 +2441,7 @@ impl<'a> Interpreter<'a> {
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::Bool(
                     self.runtime_field_metadata(owner, case_id, slot)
-                        .map(|field| field.hidden)
+                        .map(|field| field.visibility == ast::Visibility::Private)
                         .unwrap_or(false),
                 ))
             }
@@ -3620,7 +3620,7 @@ impl<'a> Interpreter<'a> {
         if let Some(field) = ty
             .fields
             .iter()
-            .find(|field| field.hidden && !field.has_initializer)
+            .find(|field| field.visibility != ast::Visibility::Default && !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
@@ -3634,7 +3634,7 @@ impl<'a> Interpreter<'a> {
         let public_fields = ty
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| field.visibility == ast::Visibility::Default)
             .collect::<Vec<_>>();
         let mut aggregate = match instance {
             Value::Aggregate(value) => value.borrow_mut(),
@@ -3672,7 +3672,7 @@ impl<'a> Interpreter<'a> {
         if let Some(field) = ty
             .fields
             .iter()
-            .find(|field| field.hidden && !field.has_initializer)
+            .find(|field| field.visibility != ast::Visibility::Default && !field.has_initializer)
         {
             return Err(self.runtime_error(
                 span,
@@ -3686,7 +3686,7 @@ impl<'a> Interpreter<'a> {
         let public_fields = ty
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| field.visibility == ast::Visibility::Default)
             .collect::<Vec<_>>();
         if values.len() > public_fields.len()
             || public_fields[values.len()..]
@@ -3910,7 +3910,7 @@ impl<'a> Interpreter<'a> {
                         return Ok(runtime_ty
                             .fields
                             .iter()
-                            .filter(|field| !field.hidden)
+                            .filter(|field| field.visibility == ast::Visibility::Default)
                             .filter_map(|field| {
                                 instance
                                     .fields
@@ -4846,7 +4846,7 @@ impl<'a> Interpreter<'a> {
             .enumerate()
             .filter_map(|(index, (name, value))| {
                 let runtime_field = runtime_fields.as_ref().and_then(|fields| fields.get(index));
-                if runtime_field.is_some_and(|field| field.hidden) {
+                if runtime_field.is_some_and(|field| field.visibility != ast::Visibility::Default) {
                     return None;
                 }
                 if aggregate.runtime_type_id.is_some_and(|owner| {
@@ -5177,7 +5177,11 @@ impl<'a> Interpreter<'a> {
         };
         let substitutions = self.json_type_substitutions(runtime_type, type_args);
         let mut args = Vec::new();
-        for field in runtime_type.fields.iter().filter(|field| !field.hidden) {
+        for field in runtime_type
+            .fields
+            .iter()
+            .filter(|field| field.visibility == ast::Visibility::Default)
+        {
             let field_ty = substitute_runtime_type(&field.ty, &substitutions);
             let json_name = self
                 .json_declared_field_name(runtime_type.id, None, field.slot)
@@ -5428,7 +5432,7 @@ impl<'a> Interpreter<'a> {
         let panic_args = if args.len() == 2 {
             vec![args.remove(1)]
         } else {
-            vec![Value::String("assert condition was false".to_string())]
+            vec![Value::String(crate::DEFAULT_ASSERT_MESSAGE.to_string())]
         };
         let message = self.render_panic_message(&panic_args, span)?;
         Err(self.runtime_error(span, message))
@@ -6468,14 +6472,14 @@ impl<'a> Interpreter<'a> {
                 .get(case_id.0)?
                 .fields
                 .iter()
-                .filter(|field| !field.hidden)
+                .filter(|field| field.visibility == ast::Visibility::Default)
                 .nth(visible_index)
                 .map(|field| field.slot.0);
         }
         runtime_type
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| field.visibility == ast::Visibility::Default)
             .nth(visible_index)
             .map(|field| field.slot.0)
     }
@@ -6850,7 +6854,7 @@ impl<'a> Interpreter<'a> {
         let visible_fields = ty
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| field.visibility == ast::Visibility::Default)
             .collect::<Vec<_>>();
         match value {
             Value::Aggregate(aggregate) => {
@@ -6896,7 +6900,7 @@ impl<'a> Interpreter<'a> {
         };
         let field = fields
             .iter()
-            .find(|field| !field.hidden && field.name == name)?;
+            .find(|field| field.visibility == ast::Visibility::Default && field.name == name)?;
         aggregate.fields.get(field.slot.0).cloned()
     }
 
@@ -6904,7 +6908,7 @@ impl<'a> Interpreter<'a> {
         let visible_fields = ty
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| field.visibility == ast::Visibility::Default)
             .collect::<Vec<_>>();
         let mut fields = self.allocate_runtime_fields(&ty.fields);
         for (value, field) in values.into_iter().zip(visible_fields) {
@@ -6929,7 +6933,7 @@ impl<'a> Interpreter<'a> {
         let visible_fields = ty
             .fields
             .iter()
-            .filter(|field| !field.hidden)
+            .filter(|field| field.visibility == ast::Visibility::Default)
             .collect::<Vec<_>>();
         match value {
             Value::Aggregate(aggregate) => {
@@ -7129,7 +7133,12 @@ impl<'a> Interpreter<'a> {
             ir::Type::Named { name, .. } => self
                 .runtime
                 .type_by_name_kind(name, crate::ast::TypeKind::Record)
-                .map(|ty| ty.fields.iter().filter(|field| !field.hidden).count()),
+                .map(|ty| {
+                    ty.fields
+                        .iter()
+                        .filter(|field| field.visibility == ast::Visibility::Default)
+                        .count()
+                }),
             _ => None,
         }
     }
@@ -7142,7 +7151,12 @@ impl<'a> Interpreter<'a> {
                 aggregate
                     .runtime_type_id
                     .and_then(|id| self.runtime.type_by_id(id))
-                    .map(|ty| ty.fields.iter().filter(|field| !field.hidden).count())
+                    .map(|ty| {
+                        ty.fields
+                            .iter()
+                            .filter(|field| field.visibility == ast::Visibility::Default)
+                            .count()
+                    })
                     .or_else(|| Some(aggregate.field_names.len()))
             }
             _ => None,
@@ -9649,6 +9663,7 @@ mod tests {
                 maximum Int = 9223372036854775807
                 minimum = maximum + 1
                 println(minimum)
+                println(-9223372036854775808)
                 println(minimum / -1)
                 println(minimum % -1)
 
@@ -9666,7 +9681,7 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "true\ntrue\nfalse\n-9223372036854775808\n-9223372036854775808\n0\ntrue\nfalse\n1.5\nfalse\n"
+            "true\ntrue\nfalse\n-9223372036854775808\n-9223372036854775808\n-9223372036854775808\n0\ntrue\nfalse\n1.5\nfalse\n"
         );
     }
 
@@ -11007,6 +11022,7 @@ $name
                 split = "BTC-USD-5.0".split("-")
                 assert(split.size == 3)
                 assert(split.size == 3, "split should have 3 parts")
+                assert(message = "named arguments", condition = true)
                 OS.println("ok")
             }
             "#,
@@ -11032,6 +11048,26 @@ $name
             run.diagnostics
                 .iter()
                 .any(|diag| diag.message.contains("panic: split must have 3 parts")),
+            "{:#?}",
+            run.diagnostics
+        );
+    }
+
+    #[test]
+    fn fails_assert_runtime_call_with_default_message() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                assert(false)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(
+            run.diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("panic: assert condition was false")),
             "{:#?}",
             run.diagnostics
         );
