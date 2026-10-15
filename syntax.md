@@ -3188,10 +3188,14 @@ Another class example:
 ```txt
 class Amount with Named {
     value Int
-    label Str
-    def label() Str = this.label
+    labelText Str
+
+    def label() Str = this.labelText
 }
 ```
+
+The stored field uses a distinct name because fields and methods share the
+member-name namespace described in [Functions and Methods](#functions-and-methods).
 
 Interfaces:
 
