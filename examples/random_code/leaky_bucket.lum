@@ -65,7 +65,7 @@ def main() Unit {
         (0, 1),
         (2, 2),
         (3, 3),
-        (7, 5),
+        (7, 5)
     ]
 
     for request <- requests {

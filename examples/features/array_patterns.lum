@@ -1,0 +1,41 @@
+# EXPECT:
+# pair 7
+# pair fallback
+# head 1 rest 3 source 2
+# all 4 source 3
+# empty
+# single 9
+# many 3 rest 2
+
+def pairSum(values Array[Int]) Str {
+    let [left, right] = values else return "pair fallback"
+    "pair " + (left + right)
+}
+
+def headTail(values Array[Int]) Str {
+    let [head, ...tail] = values else return "empty head"
+    tail.add(99)
+    "head " + head + " rest " + tail.size + " source " + values[1]
+}
+
+def copyAll(values Array[Int]) Str {
+    let [...all] = values
+    all.add(99)
+    "all " + all.size + " source " + values.size
+}
+
+def describe(values Array[Int]) Str = match values {
+    case [] => "empty"
+    case [only] => "single " + only
+    case [first, second, ...rest] => "many " + (first + second) + " rest " + rest.size
+}
+
+def main() Unit {
+    println(pairSum(Array(3, 4)))
+    println(pairSum(Array(3, 4, 5)))
+    println(headTail(Array(1, 2, 3)))
+    println(copyAll(Array(1, 2, 3)))
+    println(describe(Array[Int]()))
+    println(describe(Array(9)))
+    println(describe(Array(1, 2, 3, 4)))
+}

@@ -3416,15 +3416,35 @@ first = values.first ?? fallback
 last = values.last ?? fallback
 ```
 
-`take(count)` returns a new vector containing at most the first `count` values;
-a non-positive count produces an empty vector. `sort` mutates the vector.
-Values implementing `Ordered[T]` can use the parameterless form; an explicit
-comparator function provides an ad hoc ordering:
+`add(value)` mutates the receiver and returns that same collection. `map`,
+`filter`, and `take` return new vectors without changing the source;
+`take(count)` returns at most the first `count` values, and a non-positive count
+produces an empty vector.
+
+`fold(initial, combine)` always uses the caller-supplied initial accumulator.
+`reduce(combine)` instead uses the first element as its accumulator and returns
+`Option[T]`, because an empty collection has no value to reduce:
+
+```txt
+total = values.fold(0, (sum, value) => sum + value)
+nonEmptyTotal = values.reduce((left, right) => left + right)
+```
+
+`sort` mutates the vector and returns that same vector. Values implementing
+`Ordered[T]` can use the parameterless form; an explicit comparator function
+provides an ad hoc ordering:
 
 ```txt
 values.sort()
 values.sort((left, right) => left.score - right.score)
 firstTen = values.take(10)
+```
+
+To preserve the original order, copy first and sort the copy:
+
+```txt
+ordered = [...values]
+ordered.sort((left, right) => left.score - right.score)
 ```
 
 `Vector`, `LinkedList`, and `Set` provide `makeStr`. The one-argument form uses
@@ -3505,19 +3525,13 @@ Collection literals are distinguished by their contents and spread sources:
 [...map]              # map copy
 ```
 
-Trailing commas are permitted only in bracket collection literals and brace
-construction literals:
+Trailing commas are not supported. This applies uniformly to collection
+literals, brace construction, declarations, calls, types, tuples, and patterns:
 
 ```txt
-values = [1, 2,]
-lookup = ["left": 1, "right": 2,]
-point = { x: 10, y: 20, }
-```
-
-They are rejected in every other comma-separated form, including declarations,
-generic clauses, calls, function types, tuples, and patterns:
-
-```txt
+values = [1, 2,]                           # invalid
+lookup = ["left": 1, "right": 2,]         # invalid
+point = { x: 10, y: 20, }                  # invalid
 def process(name Str, amount Int,) Unit {}  # invalid
 fn(Int,) Int                                # invalid
 Box[Int,]                                  # invalid
@@ -3903,7 +3917,8 @@ let _ Worker = value else {
 }
 ```
 
-Vector-pattern binding is supported for `Vector[T]` / `[T]` values:
+Sequence-pattern binding is supported for `Vector[T]` / `[T]` and `Array[T]`
+values:
 
 ```txt
 let [left, right] = values else {
@@ -3925,15 +3940,26 @@ let [left, right, ...] = values else {
 let [...all] = values
 ```
 
-Vector pattern rules:
+Sequence pattern rules:
 
 - `[a, b]` matches exactly two elements.
-- `[]` matches an empty vector.
-- `[a, ...rest]` matches one or more elements and binds `rest` as `[T]`.
-- `[...rest]` matches any vector and binds a shallow vector tail copy as `[T]`.
+- `[]` matches an empty vector or array.
+- `[a, ...rest]` matches one or more elements and binds `rest` as a fresh `[T]`.
+- `[...rest]` matches any vector or array and binds a shallow vector copy as `[T]`.
 - Only one `...rest` is allowed, and it must be last.
 - Bare `...` ignores the remaining elements; `..._` is the equivalent explicit spelling.
-- Vector patterns are for `Vector[T]` / `[T]`; `Array[T]` is not part of this pattern surface.
+- Sequence patterns are limited to `Vector[T]` / `[T]` and `Array[T]`. They do
+  not consume arbitrary `Iterable[T]` values.
+
+An array rest is still a vector, so the tail has the same contract regardless
+of the source storage:
+
+```txt
+values Array[Int] = Array(1, 2, 3)
+let [first, ...rest] = values else return
+
+rest.add(4) # rest is Vector[Int]; values remains an Array[Int]
+```
 
 Grouped refutable bindings share one fallback:
 
@@ -4689,7 +4715,8 @@ result = match pair {
 For `(0, 0)`, `allowed()` is called once even though both alternatives could
 match.
 
-Vector patterns can be used in `match` cases:
+Sequence patterns can be used with both `Vector[T]` and `Array[T]` values in
+`match` cases:
 
 ```txt
 result = match values {
@@ -5118,6 +5145,19 @@ silently change representation:
 - the overflowing `Int.MIN / -1` case wraps to `Int.MIN`; `Int.MIN % -1` is zero
 - integer literals outside the signed 64-bit range are rejected
 
+Decimal numeric literals may use `_` separators between digits. Separators do
+not change the value and may appear independently in the integer, fractional,
+and exponent digit sequences:
+
+```txt
+1_000_000
+12.345_678
+1.2e1_0
+```
+
+A separator must have a decimal digit on both sides. Forms such as `1__000`,
+`1_`, and `1_.0` are invalid.
+
 Literal range checking accounts for a directly applied unary minus. Therefore
 `9223372036854775807` and `-9223372036854775808` are valid boundaries, while
 `9223372036854775808` and `-9223372036854775809` are rejected.
@@ -5127,6 +5167,17 @@ and ordering follow IEEE-754 behavior. Division by zero may produce positive or
 negative infinity, `0.0 / 0.0` produces NaN, and NaN is unordered: every
 ordering comparison with NaN is false. Float equality with NaN is false and
 float inequality with NaN is true.
+
+Scientific notation uses `e` or `E`, an optional exponent sign, and at least
+one exponent digit. An exponent makes the literal a `Float`, even when the
+mantissa has no decimal point:
+
+```txt
+1e3
+1.0e3
+1e-9
+2.5E+6
+```
 
 Mixed `Int`/`Float` arithmetic and ordering widen the `Int` operand to `Float`;
 the result of mixed arithmetic is `Float`. That conversion can lose integer

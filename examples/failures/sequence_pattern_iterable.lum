@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# .*sequence pattern requires a Vector or Array value, got 'Iterable\[Int\]'.*
+
+def main() Unit {
+    values Iterable[Int] = [1, 2]
+    let [first, second] = values else return ()
+
+    println(first + second)
+}

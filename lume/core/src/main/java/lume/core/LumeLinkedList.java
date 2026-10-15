@@ -30,11 +30,6 @@ public final class LumeLinkedList<T> {
         return new LumeLinkedList<>(list);
     }
 
-    public LumeLinkedList<T> append(T value) {
-        values.addLast(value);
-        return this;
-    }
-
     public LumeLinkedList<T> add(T value) {
         values.addLast(value);
         return this;
@@ -81,10 +76,6 @@ public final class LumeLinkedList<T> {
             result = reducer.apply(result, value);
         }
         return result;
-    }
-
-    public <X> X reduce(X initial, BiFunction<X, T, X> reducer) {
-        return fold(initial, reducer);
     }
 
     public Option<T> reduce(BiFunction<T, T, T> reducer) {
@@ -164,10 +155,6 @@ public final class LumeLinkedList<T> {
             return new Result.Err<>(new InvalidIndex(index, values.size()));
         }
         return new Result.Ok<>(values.remove(Math.toIntExact(index)));
-    }
-
-    public Option<T> head() {
-        return first();
     }
 
     public Option<T> first() {

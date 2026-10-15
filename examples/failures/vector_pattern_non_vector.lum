@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*vector pattern requires a Vector value, got '\(Int, Int\)'.*
+# .*sequence pattern requires a Vector or Array value, got '\(Int, Int\)'.*
 
 def main() Unit {
     pair = (1, 2)

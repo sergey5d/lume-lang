@@ -669,7 +669,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let end = self.consume(TokenKind::RBracket, "expected ']' after vector pattern")?;
+        let end = self.consume(TokenKind::RBracket, "expected ']' after sequence pattern")?;
         Some(Pattern::List {
             elements,
             rest,

@@ -9,7 +9,7 @@ use crate::{
     desugar,
     diagnostic::Diagnostic,
     ir,
-    numeric::parse_integer_literal,
+    numeric::{parse_float_literal, parse_integer_literal},
     source::Span,
 };
 
@@ -4085,7 +4085,9 @@ impl<'a> FunctionLowerer<'a> {
 
     fn list_element_type(&self, scrutinee: &ir::Operand) -> ir::Type {
         match self.operand_type(scrutinee) {
-            Some(ir::Type::Named { name, args }) if name == "Vector" && args.len() == 1 => {
+            Some(ir::Type::Named { name, args })
+                if matches!(name.as_str(), "Vector" | "Array") && args.len() == 1 =>
+            {
                 args.into_iter().next().unwrap_or(ir::Type::Unknown)
             }
             _ => ir::Type::Unknown,
@@ -4668,11 +4670,17 @@ impl<'a> FunctionLowerer<'a> {
                 };
                 self.lower_integer_literal(raw, true, *span)
             }
-            Expr::Float { raw, .. } => raw
-                .parse::<f64>()
-                .map(ir::Constant::Float)
-                .map(ir::Operand::Const)
-                .unwrap_or(ir::Operand::Const(ir::Constant::Float(0.0))),
+            Expr::Float { raw, span } => match parse_float_literal(raw) {
+                Some(value) => ir::Operand::Const(ir::Constant::Float(value)),
+                None => {
+                    self.add_error(
+                        "lower_invariant",
+                        format!("float literal '{raw}' should be validated before lowering"),
+                        *span,
+                    );
+                    ir::Operand::Const(ir::Constant::Unit)
+                }
+            },
             Expr::String { raw, .. } => ir::Operand::Const(ir::Constant::String(raw.clone())),
             Expr::Bool { value, .. } => ir::Operand::Const(ir::Constant::Bool(*value)),
             Expr::Unit { .. } => ir::Operand::Const(ir::Constant::Unit),
@@ -6288,7 +6296,7 @@ impl<'a> FunctionLowerer<'a> {
         ) {
             match (name.as_str(), args) {
                 ("filter" | "sort" | "take", [_]) => return Some(receiver_ty),
-                ("fold" | "reduce", [initial, _]) => {
+                ("fold", [initial, _]) => {
                     return Some(self.infer_expr_type_with_overrides(&initial.value, overrides));
                 }
                 ("map", [mapper]) => {
@@ -7615,7 +7623,7 @@ impl<'a> FunctionLowerer<'a> {
                     })]);
                 }
                 let receiver_ty = self.infer_expr_type(receiver);
-                if matches!(name.as_str(), "fold" | "reduce") && ordered_args.len() == 2 {
+                if name == "fold" && ordered_args.len() == 2 {
                     if let ir::Type::Named { name, args } = &receiver_ty {
                         if matches!(name.as_str(), "Vector" | "LinkedList") && args.len() == 1 {
                             let accumulator = self.infer_expr_type(&ordered_args[0].value);
@@ -9697,9 +9705,10 @@ fn lower_annotation_value(expr: &ast::Expr) -> ir::AnnotationValue {
             parse_integer_literal(raw, false)
                 .expect("integer annotation literals are validated before lowering"),
         ),
-        ast::Expr::Float { raw, .. } => {
-            ir::AnnotationValue::Float(raw.parse::<f64>().unwrap_or_default())
-        }
+        ast::Expr::Float { raw, .. } => ir::AnnotationValue::Float(
+            parse_float_literal(raw)
+                .expect("float annotation literals are validated before lowering"),
+        ),
         ast::Expr::String { raw, .. } => ir::AnnotationValue::String(annotation_string_value(raw)),
         ast::Expr::ListLiteral { items, .. } => {
             ir::AnnotationValue::List(items.iter().map(lower_annotation_value).collect())
@@ -9931,7 +9940,7 @@ fn index_result_ir_type(ty: &ir::Type) -> ir::Type {
 
 fn static_tuple_index(expr: &Expr) -> Option<usize> {
     match expr {
-        Expr::Integer { raw, .. } => raw.parse().ok(),
+        Expr::Integer { raw, .. } => usize::try_from(parse_integer_literal(raw, false)?).ok(),
         _ => None,
     }
 }
@@ -10514,13 +10523,12 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
             }),
         }),
-        (
-            "Vector" | "LinkedList" | "Array",
-            "head" | "first" | "last" | "removeFirst" | "removeLast",
-        ) => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(item)),
-        }),
+        ("Vector" | "LinkedList" | "Array", "first" | "last" | "removeFirst" | "removeLast") => {
+            Some(ir::Type::Function {
+                params: Vec::new(),
+                ret: Box::new(ir::Type::option(item)),
+            })
+        }
         ("Vector" | "LinkedList" | "Array", "at") => Some(ir::Type::Function {
             params: vec![ir::Type::Int],
             ret: Box::new(ir::Type::option(item)),
@@ -10566,7 +10574,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 ret: Box::new(ir::Type::Bool),
             })
         }
-        ("LinkedList", "add" | "append") => Some(ir::Type::Function {
+        ("LinkedList", "add") => Some(ir::Type::Function {
             params: vec![item],
             ret: Box::new(receiver.clone()),
         }),
@@ -10579,6 +10587,13 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 },
             ],
             ret: Box::new(ir::Type::Unknown),
+        }),
+        ("Vector" | "LinkedList" | "Set", "reduce") => Some(ir::Type::Function {
+            params: vec![ir::Type::Function {
+                params: vec![item.clone(), item.clone()],
+                ret: Box::new(item.clone()),
+            }],
+            ret: Box::new(ir::Type::option(item)),
         }),
         ("Map", "entries") if args.len() == 2 => Some(ir::Type::Function {
             params: Vec::new(),
@@ -10664,9 +10679,7 @@ fn builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")
         | ("Result", "isOk" | "isSuccess" | "isErr")
         | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
-        ("Vector" | "LinkedList" | "Array", "head" | "first" | "last") => {
-            Some(ir::Type::option(item))
-        }
+        ("Vector" | "LinkedList" | "Array", "first" | "last") => Some(ir::Type::option(item)),
         ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
         ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Type", "name" | "qualifiedName")
@@ -11337,9 +11350,7 @@ fn lower_field_initializer_constant(initializer: Option<&ast::Expr>) -> Option<i
     match initializer? {
         ast::Expr::Group { inner, .. } => lower_field_initializer_constant(Some(inner)),
         ast::Expr::Integer { raw, .. } => parse_integer_literal(raw, false).map(ir::Constant::Int),
-        ast::Expr::Float { raw, .. } => {
-            Some(ir::Constant::Float(raw.parse::<f64>().unwrap_or(0.0)))
-        }
+        ast::Expr::Float { raw, .. } => parse_float_literal(raw).map(ir::Constant::Float),
         ast::Expr::String { raw, .. } => Some(ir::Constant::String(raw.clone())),
         ast::Expr::Bool { value, .. } => Some(ir::Constant::Bool(*value)),
         ast::Expr::Unit { .. } => Some(ir::Constant::Unit),

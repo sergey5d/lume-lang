@@ -70,7 +70,7 @@ def main() Int {
 
     users = [
         SecretUser("Sergey", "secret-1", "Tampa"),
-        SecretUser("Ada", "secret-2", "London"),
+        SecretUser("Ada", "secret-2", "London")
     ]
     for user <- users {
         let { name as userName, location as userLocation } = user

@@ -3257,6 +3257,74 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_runs_numeric_separators_and_scientific_notation() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping numeric-literal Java test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-numeric-literals");
+        let source = temp.join("numeric_literals.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/numericliterals
+
+def main() Unit {
+    integer = 5_000_000_000
+    fraction = 12.345_678
+    tolerance = 1e-9
+    scale = 2.5e6
+    println(
+        integer == 5000000000,
+        fraction == 12.345678,
+        tolerance == 0.000000001,
+        scale == 2500000.0
+    )
+}
+"#,
+        )
+        .expect("write source");
+
+        let interpreted = run_path(&source, None).expect("run interpreter");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:#?}",
+            interpreted.diagnostics
+        );
+        let expected = interpreter_stdout(interpreted);
+        assert_eq!(expected, "true true true true\n");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.numericliterals.NumericliteralsMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            expected
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_runs_option_wrap_operator() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping option wrap Java test because a JDK tool is unavailable");
@@ -5802,9 +5870,26 @@ def describeList(values [Int]) Str = match values {
     case _ => "short"
 }
 
+def describeArray(values Array[Int]) Str = match values {
+    case [first, second, ...rest] =>
+        "array " + first + " " + second + " " + rest.size + " " + values[2]
+    case _ => "short"
+}
+
 def leadingPair(values [Int]) Int {
     let [first, second, ...] = values else return -1
     first + second
+}
+
+def leadingArrayPair(values Array[Int]) Int {
+    let [first, second, ...] = values else return -1
+    first + second
+}
+
+def arrayTail(values Array[Int]) [Int] {
+    let [_, ...rest] = values else return []
+    rest.add(99)
+    rest
 }
 
 def main() Unit {
@@ -5817,8 +5902,13 @@ def main() Unit {
     println(describeNoneAlias(None))
     println(describePayload(Payload.Item(7)))
     println(describeList([10, 20, 30, 40]))
+    println(describeArray(Array.fill(4, 10)))
     println(leadingPair([10, 20, 30]))
     println(leadingPair([10]))
+    println(leadingArrayPair(Array.fill(3, 10)))
+    println(leadingArrayPair(Array.fill(1, 10)))
+    tail = arrayTail(Array.fill(3, 10))
+    println(tail.size, tail[0], tail[2])
 }
 "#,
         )
@@ -5873,7 +5963,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Ada Tampa Ada\nother\nother\napproved\nready\n5 5\nNone\n7 7\n10 20 2 4\n30\n-1\n"
+            "Ada Tampa Ada\nother\nother\napproved\nready\n5 5\nNone\n7 7\n10 20 2 4\narray 10 10 2 10\n30\n-1\n20\n-1\n3 10 99\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7282,21 +7372,21 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_compiles_generic_list_appends() {
+    fn generated_java_compiles_generic_list_adds() {
         if !command_available("javac") {
-            eprintln!("skipping Java generic list append test because javac is not available");
+            eprintln!("skipping Java generic list add test because javac is not available");
             return;
         }
 
-        let temp = temp_path("lume-java-generic-list-append");
-        let source = temp.join("generic_list_append.lum");
+        let temp = temp_path("lume-java-generic-list-add");
+        let source = temp.join("generic_list_add.lum");
         let out = temp.join("out");
         let classes = temp.join("classes");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
             r#"
-module demo/genericappend
+module demo/genericadd
 
 def mapItems[T](items [T], mapper fn(T) T) [T] {
     out [T] = []
@@ -7318,7 +7408,7 @@ def main() Unit {
             generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
         assert!(generated.diagnostics.is_empty());
 
-        let module = fs::read_to_string(out.join("demo/genericappend/GenericappendModule.java"))
+        let module = fs::read_to_string(out.join("demo/genericadd/GenericaddModule.java"))
             .expect("read module");
         assert!(module.contains("LumeVector<T> out"));
         assert!(module.contains(".add(mapper.apply(item"));
@@ -7330,6 +7420,62 @@ def main() Unit {
         run_checked(
             Command::new("javac").arg("-d").arg(&classes).args(&sources),
             "javac",
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_runs_canonical_vector_operations() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java vector vocabulary test because javac/java is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-vector-vocabulary");
+        let source = temp.join("vector_vocabulary.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/vectorvocabulary
+
+def main() Unit {
+    values = Vector(3, 1, 2)
+    mapped = values.map(value => value * 10)
+    filtered = values.filter(value => value > 1)
+    folded = values.fold(0, (sum, value) => sum + value)
+    reduced = values.reduce((left, right) => left + right)
+    returned = values.sort((left, right) => left - right)
+
+    println(values.first!, returned.first!, mapped.first!, filtered.first!, folded, reduced!)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.vectorvocabulary.VectorvocabularyMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "1 1 30 3 6 6\n"
         );
 
         let _ = fs::remove_dir_all(temp);

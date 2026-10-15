@@ -150,7 +150,7 @@
       "patterns": [
         {
           "name": "constant.numeric.lume",
-          "match": "\\b\\d+(?:\\.\\d+)?\\b"
+          "match": "(?<![A-Za-z0-9_])\\d(?:_?\\d)*(?:\\.\\d(?:_?\\d)*)?(?:[eE][+-]?\\d(?:_?\\d)*)?(?![A-Za-z0-9_])"
         }
       ]
     },

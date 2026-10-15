@@ -1,0 +1,18 @@
+# EXPECT:
+# true true true true true
+
+def main() Unit {
+    maximumEntries = 1_000_000
+    timeoutNanos = 5_000_000_000
+    tolerance = 1e-9
+    scale = 2.5e6
+    fraction = 12.345_678
+
+    println(
+        maximumEntries == 1000000,
+        timeoutNanos == 5000000000,
+        tolerance == 0.000000001,
+        scale == 2500000.0,
+        fraction == 12.345678
+    )
+}

@@ -75,7 +75,7 @@ def main() Unit {
         WindowRequest { time: 2, cost: 2 },
         WindowRequest { time: 5, cost: 2 },
         WindowRequest { time: 6, cost: 4 },
-        WindowRequest { time: 7, cost: 3 },
+        WindowRequest { time: 7, cost: 3 }
     ]
 
     for request <- requests {

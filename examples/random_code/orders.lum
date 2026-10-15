@@ -75,7 +75,7 @@ class OrderManager {
             case "FILL" => {
                 order.fills.add(parsedOrder.quantity)
                 if order.quantity != 0 {
-                    totalFills = order.fills.reduce(0, (f1, f2) => f1 + f2)
+                    totalFills = order.fills.fold(0, (f1, f2) => f1 + f2)
                     if (totalFills == order.quantity) {
                         order.status := "FILLED"
                     } else {
@@ -105,7 +105,7 @@ class OrderManager {
             "1234, BUY, BTC, 5, FILL",
             "1254, SELL, ETH, 20, NEW",
             "1254, SELL, ETH, 20, FILL",
-            "1254, SELL, ETH, 20, CANCEL",
+            "1254, SELL, ETH, 20, CANCEL"
         ]
         orders
     }

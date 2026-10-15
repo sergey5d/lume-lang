@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*expected '\]' after vector pattern.*
+# .*expected '\]' after sequence pattern.*
 
 def main() Unit {
     values [Int] = [1, 2, 3]

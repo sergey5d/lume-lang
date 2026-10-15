@@ -19,8 +19,7 @@ pub(super) fn define() -> RuntimeType {
         fields: Vec::new(),
         field_init: None,
         methods: vec![
-            builtin_method(2, "append", vec![ir::Type::Unknown], list_append_mut),
-            builtin_method(29, "add", vec![ir::Type::Unknown], list_append_mut),
+            builtin_method(29, "add", vec![ir::Type::Unknown], list_add),
             builtin_method(30, "addAll", vec![ir::Type::Unknown], list_add_all),
             builtin_method(3, "map", vec![function_unknown()], list_map),
             builtin_method(4, "flatMap", vec![function_unknown()], list_flat_map),
@@ -31,12 +30,6 @@ pub(super) fn define() -> RuntimeType {
                 "fold",
                 vec![ir::Type::Unknown, function_unknown()],
                 list_fold,
-            ),
-            builtin_method(
-                33,
-                "reduce",
-                vec![ir::Type::Unknown, function_unknown()],
-                list_reduce_with_initial,
             ),
             builtin_method(7, "reduce", vec![function_unknown()], list_reduce),
             builtin_method(8, "exists", vec![function_unknown()], list_exists),
@@ -76,7 +69,6 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(36, "removeAt", vec![ir::Type::Int], list_remove_at),
             builtin_method(34, "removeFirst", Vec::new(), list_remove_first),
             builtin_method(18, "removeLast", Vec::new(), list_remove_last),
-            builtin_method(19, "head", Vec::new(), list_head),
             builtin_method(20, "tail", Vec::new(), list_tail),
             builtin_method(21, "first", Vec::new(), list_first),
             builtin_method(22, "last", Vec::new(), list_last),
@@ -129,14 +121,14 @@ fn values_match(
     interpreter.values_equal(left, right, span)
 }
 
-fn list_append_mut(
+fn list_add(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     if args.len() != 1 {
-        return Err(interpreter.runtime_error(span, "Vector.append expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Vector.add expects 1 argument"));
     }
     list_items(&receiver).borrow_mut().push(args[0].clone());
     Ok(receiver)
@@ -266,18 +258,6 @@ fn list_reduce(
         acc = interpreter.invoke_value(callback.clone(), vec![acc, value.clone()], span)?;
     }
     Ok(interpreter.option_some(acc))
-}
-
-fn list_reduce_with_initial(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    if args.len() != 2 {
-        return Err(interpreter.runtime_error(span, "Vector.reduce expects 2 arguments"));
-    }
-    list_fold(interpreter, receiver, args, span)
 }
 
 fn list_exists(
@@ -682,24 +662,6 @@ fn list_remove_last(
         return Err(interpreter.runtime_error(span, "Vector.removeLast expects 0 arguments"));
     }
     let value = list_items(&receiver).borrow_mut().pop();
-    Ok(match value {
-        Some(value) => interpreter.option_some(value),
-        None => interpreter.option_none(),
-    })
-}
-
-fn list_head(
-    interpreter: &mut Interpreter<'_>,
-    receiver: Value,
-    args: Vec<Value>,
-    span: Option<Span>,
-) -> Result<Value, Diagnostic> {
-    if !args.is_empty() {
-        return Err(interpreter.runtime_error(span, "Vector.head expects 0 arguments"));
-    }
-    let items = list_items(&receiver);
-    let items = items.borrow();
-    let value = items.first().map(|value| interpreter.clone_value(value));
     Ok(match value {
         Some(value) => interpreter.option_some(value),
         None => interpreter.option_none(),

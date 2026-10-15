@@ -19,7 +19,7 @@ class IntRange with Iterable[Int] {
             if !right.hasNext {
                 return out
             }
-            out.append((left, right.next()))
+            out.add((left, right.next()))
         }
         return out
     }
@@ -28,7 +28,7 @@ class IntRange with Iterable[Int] {
         out [(Int, Int)] = []
         var index = 0
         for item <- this {
-            out.append((item, index))
+            out.add((item, index))
             index += 1
         }
         return out

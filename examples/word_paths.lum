@@ -48,7 +48,7 @@ def renderPath(path [Str]) Str {
         return ""
     }
 
-    first = path.head ?? ""
+    first = path.first ?? ""
     rest = path.tail()
     rest.fold(first, (acc, word) => acc + " -> " + word)
 }

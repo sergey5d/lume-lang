@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*trailing commas are not supported; remove the trailing comma from vector literal.*
+
+def main() Unit {
+    values = [1, 2, 3,]
+    println(values)
+}

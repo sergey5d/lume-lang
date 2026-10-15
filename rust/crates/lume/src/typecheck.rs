@@ -13,7 +13,7 @@ use crate::{
         MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt, TypeDecl,
         TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
-    numeric::parse_integer_literal,
+    numeric::{parse_float_literal, parse_integer_literal},
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
         collect_module_order, find_stdlib_dir, load_module_graph_with_options,
@@ -4163,9 +4163,11 @@ impl<'a> Checker<'a> {
             (Expr::Unit { .. }, Expr::Unit { .. }) => true,
             (Expr::Bool { value: left, .. }, Expr::Bool { value: right, .. }) => left == right,
             (Expr::Integer { raw: left, .. }, Expr::Integer { raw: right, .. }) => {
-                left.parse::<i64>().ok() == right.parse::<i64>().ok()
+                parse_integer_literal(left, false) == parse_integer_literal(right, false)
             }
-            (Expr::Float { raw: left, .. }, Expr::Float { raw: right, .. }) => left == right,
+            (Expr::Float { raw: left, .. }, Expr::Float { raw: right, .. }) => {
+                parse_float_literal(left) == parse_float_literal(right)
+            }
             (Expr::String { raw: left, .. }, Expr::String { raw: right, .. }) => left == right,
             _ => false,
         }
@@ -9558,7 +9560,7 @@ impl<'a> Checker<'a> {
                         self.add_error(
                             "invalid_destructure",
                             format!(
-                                "vector pattern requires a Vector value, got '{}'",
+                                "sequence pattern requires a Vector or Array value, got '{}'",
                                 scrutinee.describe()
                             ),
                             pattern.span(),
@@ -10160,7 +10162,11 @@ impl<'a> Checker<'a> {
 
     fn list_element_type(&self, ty: &Ty) -> Option<Ty> {
         match ty {
-            Ty::Named(name, args) if name == "Vector" && args.len() == 1 => args.first().cloned(),
+            Ty::Named(name, args)
+                if matches!(name.as_str(), "Vector" | "Array") && args.len() == 1 =>
+            {
+                args.first().cloned()
+            }
             _ => None,
         }
     }
@@ -15152,7 +15158,7 @@ fn format_help_expr(expr: &Expr) -> String {
 
 fn static_integer_literal(expr: &Expr) -> Option<i64> {
     match expr {
-        Expr::Integer { raw, .. } => raw.parse().ok(),
+        Expr::Integer { raw, .. } => parse_integer_literal(raw, false),
         Expr::Unary {
             op: crate::ast::UnaryOp::Neg,
             expr,
@@ -17828,18 +17834,55 @@ def main(flag Bool) Unit {
     }
 
     #[test]
-    fn allows_list_remove_first_and_seeded_reduce() {
+    fn allows_list_remove_first_and_seeded_fold() {
         let program = parse_inline(
             r#"
 def main() Unit {
     values = Vector(1, 2, 3)
     removed Option[Int] = values.removeFirst()
-    total Int = values.reduce(0, (acc, value) => acc + value)
+    total Int = values.fold(0, (acc, value) => acc + value)
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_removed_collection_aliases() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    values = Vector(1, 2, 3)
+    values.append(4)
+    println(values.head)
+    println(values.reduce(0, (acc, value) => acc + value))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "unknown_member" && diagnostic.message.contains("append")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "unknown_member" && diagnostic.message.contains("head")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "invalid_argument_count"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -18356,7 +18399,7 @@ def main() Unit {
     named Point = Point { x, y }
     instance ClassPoint = ClassPoint { x, y }
     anonymous { x Int, y Int } = new { x, y }
-    explicit Point = Point { x, y, }
+    explicit Point = Point { x, y }
     OS.println(named.x + instance.y + anonymous.x + explicit.y)
 }
 "#,

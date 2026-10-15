@@ -2587,7 +2587,7 @@ fn rejects_singleton_tuples_as_trailing_commas() {
 }
 
 #[test]
-fn rejects_trailing_commas_outside_construction_literals() {
+fn rejects_trailing_commas_in_non_literal_forms() {
     let cases = [
         "class Box[T,] { value T }",
         "class Box[T when T with Eq[T],] { value T }",
@@ -2623,17 +2623,22 @@ fn rejects_trailing_commas_outside_construction_literals() {
 }
 
 #[test]
-fn allows_trailing_commas_in_collection_and_brace_construction_literals() {
-    let result = parse(
-        r#"
-def main() Unit {
-    values = [1, 2,]
-    lookup = ["left": 1, "right": 2,]
-    point = { x: 10, y: 20, }
-}
-"#,
-    );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+fn rejects_trailing_commas_in_collection_and_brace_construction_literals() {
+    for source in [
+        "def main() Unit { values = [1, 2,] }",
+        "def main() Unit { lookup = [\"left\": 1, \"right\": 2,] }",
+        "def main() Unit { point = { x: 10, y: 20, } }",
+    ] {
+        let result = parse(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "trailing_comma"),
+            "expected trailing comma diagnostic for {source:?}, got {:#?}",
+            result.diagnostics
+        );
+    }
 }
 
 #[test]
@@ -4364,7 +4369,7 @@ def run(values [Any]) Unit {
                     ));
                     assert_eq!(rest.name, "rest");
                 }
-                other => panic!("expected vector pattern, got {other:#?}"),
+                other => panic!("expected sequence pattern, got {other:#?}"),
             },
             other => panic!("expected let else statement, got {other:#?}"),
         },

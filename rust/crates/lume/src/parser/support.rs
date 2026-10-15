@@ -52,9 +52,7 @@ impl<'a> Parser<'a> {
     pub(super) fn report_trailing_comma(&mut self, comma: Span, context: &'static str) {
         self.diagnostics.push(Diagnostic::error(
             "trailing_comma",
-            format!(
-                "trailing commas are allowed only in bracket collection and brace construction literals; remove the trailing comma from {context}"
-            ),
+            format!("trailing commas are not supported; remove the trailing comma from {context}"),
             comma,
         ));
     }

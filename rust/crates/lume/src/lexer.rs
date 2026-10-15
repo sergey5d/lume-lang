@@ -278,34 +278,80 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    #[inline]
-    fn bump_ascii_digits(&mut self) {
-        while matches!(self.peek(), Some('0'..='9')) {
-            self.bump();
+    fn bump_decimal_digits(&mut self) -> (bool, bool) {
+        let mut saw_digit = false;
+        let mut previous_was_digit = false;
+        let mut separators_valid = true;
+
+        while let Some(ch) = self.peek() {
+            match ch {
+                '0'..='9' => {
+                    self.bump();
+                    saw_digit = true;
+                    previous_was_digit = true;
+                }
+                '_' => {
+                    if !previous_was_digit || !matches!(self.peek_n(1), Some('0'..='9')) {
+                        separators_valid = false;
+                    }
+                    self.bump();
+                    previous_was_digit = false;
+                }
+                _ => break,
+            }
         }
+
+        (saw_digit, separators_valid)
     }
 
     fn lex_number(&mut self) {
         let start = self.mark();
-        self.bump_ascii_digits();
+        let (_, mut separators_valid) = self.bump_decimal_digits();
+        let mut kind = TokenKind::Integer;
 
-        let kind = if self.peek() == Some('.') {
+        if self.peek() == Some('.') {
             let next = self.peek_n(1);
 
             if matches!(next, Some('0'..='9'))
                 || (next != Some('.') && !matches!(next, Some('A'..='Z' | 'a'..='z' | '_')))
             {
                 self.bump();
-                self.bump_ascii_digits();
-                TokenKind::Float
-            } else {
-                // in case of method call e.g. 111.toStr()
-                TokenKind::Integer
+                let (_, fraction_separators_valid) = self.bump_decimal_digits();
+                separators_valid &= fraction_separators_valid;
+                kind = TokenKind::Float;
             }
-        } else {
-            TokenKind::Integer
-        };
+            // Otherwise leave the dot for member access, as in 111.toStr().
+        }
+
+        let mut exponent_has_digits = true;
+        if matches!(self.peek(), Some('e' | 'E')) {
+            kind = TokenKind::Float;
+            self.bump();
+            if matches!(self.peek(), Some('+' | '-')) {
+                self.bump();
+            }
+            let (saw_digit, exponent_separators_valid) = self.bump_decimal_digits();
+            exponent_has_digits = saw_digit;
+            separators_valid &= exponent_separators_valid;
+        }
+
+        let end = self.mark();
         self.push_token(kind, start, self.mark());
+        if !separators_valid {
+            self.error(
+                "invalid_numeric_separator",
+                "numeric separators must appear between decimal digits",
+                start,
+                end,
+            );
+        } else if !exponent_has_digits {
+            self.error(
+                "invalid_numeric_literal",
+                "scientific-notation exponents must contain decimal digits",
+                start,
+                end,
+            );
+        }
     }
 
     fn lex_identifier_or_keyword(&mut self) {
@@ -701,6 +747,54 @@ mod tests {
                 .iter()
                 .any(|token| token.kind == TokenKind::String && token.lexeme == "raw\"$name\\n\"")
         );
+    }
+
+    #[test]
+    fn lexes_digit_separators_and_scientific_notation() {
+        let result = lex(&source(
+            "1_000_000 12.345_678 1e3 1.0e3 1e-3 2.5E+6 1.2e1_0",
+        ));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let numbers = result
+            .tokens
+            .iter()
+            .filter(|token| matches!(token.kind, TokenKind::Integer | TokenKind::Float))
+            .map(|token| (token.kind, token.lexeme.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            numbers,
+            vec![
+                (TokenKind::Integer, "1_000_000"),
+                (TokenKind::Float, "12.345_678"),
+                (TokenKind::Float, "1e3"),
+                (TokenKind::Float, "1.0e3"),
+                (TokenKind::Float, "1e-3"),
+                (TokenKind::Float, "2.5E+6"),
+                (TokenKind::Float, "1.2e1_0"),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_misplaced_numeric_separators_and_incomplete_exponents() {
+        for source_text in ["1__000", "1_", "1_.0", "1e_3", "1e-3_"] {
+            let result = lex(&source(source_text));
+            assert_eq!(result.diagnostics.len(), 1, "{source_text}: {result:#?}");
+            assert_eq!(
+                result.diagnostics[0].code, "invalid_numeric_separator",
+                "{source_text}"
+            );
+        }
+
+        for source_text in ["1e", "1e+", "1e-"] {
+            let result = lex(&source(source_text));
+            assert_eq!(result.diagnostics.len(), 1, "{source_text}: {result:#?}");
+            assert_eq!(
+                result.diagnostics[0].code, "invalid_numeric_literal",
+                "{source_text}"
+            );
+        }
     }
 
     #[test]

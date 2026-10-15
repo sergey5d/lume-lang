@@ -11,7 +11,7 @@ def canVisitAllRooms(rooms [[Int]]) Bool {
     keys [Int] = []
 
     for key <- startKeys {
-        keys.append(key)
+        keys.add(key)
     }
 
     while keys.size != 0 {
@@ -22,7 +22,7 @@ def canVisitAllRooms(rooms [[Int]]) Bool {
             let Some(roomKeys) = rooms.at(key) else return false
 
             for roomKey <- roomKeys {
-                keys.append(roomKey)
+                keys.add(roomKey)
             }
 
             seen.add(key)

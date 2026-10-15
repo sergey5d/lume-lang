@@ -2981,9 +2981,7 @@ impl<'a> Interpreter<'a> {
         };
 
         match (name.as_str(), method) {
-            ("Vector" | "Array" | "LinkedList", "append" | "add" | "contains")
-                if types.len() == 1 =>
-            {
+            ("Vector" | "Array" | "LinkedList", "add" | "contains") if types.len() == 1 => {
                 coerce(0, &types[0]);
             }
             ("Vector" | "Array" | "LinkedList", "setAt" | "insertAt") if types.len() == 1 => {
@@ -4128,33 +4126,33 @@ impl<'a> Interpreter<'a> {
                 }
                 match &args[0] {
                     Value::List(items) => Ok(Value::Int(items.borrow().len() as i64)),
-                    _ => Err(self.runtime_error(span, "ListLen expects an Vector receiver")),
+                    _ => Err(self.runtime_error(span, "ListLen expects a sequence receiver")),
                 }
             }
             ir::Intrinsic::ListGet => {
                 if args.len() != 2 {
                     return Err(self.runtime_error(span, "ListGet expects 2 arguments"));
                 }
-                let index = args[1].as_int(self, span, "vector pattern index")?;
+                let index = args[1].as_int(self, span, "sequence pattern index")?;
                 match &args[0] {
                     Value::List(items) => {
                         let items = items.borrow();
                         let Some(value) = items.get(index as usize) else {
                             return Err(self.runtime_error(
                                 span,
-                                format!("vector pattern index {} out of bounds", index),
+                                format!("sequence pattern index {} out of bounds", index),
                             ));
                         };
                         Ok(self.clone_value(value))
                     }
-                    _ => Err(self.runtime_error(span, "ListGet expects an Vector receiver")),
+                    _ => Err(self.runtime_error(span, "ListGet expects a sequence receiver")),
                 }
             }
             ir::Intrinsic::ListSlice => {
                 if args.len() != 2 {
                     return Err(self.runtime_error(span, "ListSlice expects 2 arguments"));
                 }
-                let start = args[1].as_int(self, span, "vector pattern slice start")?;
+                let start = args[1].as_int(self, span, "sequence pattern slice start")?;
                 match &args[0] {
                     Value::List(items) => {
                         let items = items.borrow();
@@ -4166,7 +4164,7 @@ impl<'a> Interpreter<'a> {
                             .collect();
                         Ok(Value::list(slice))
                     }
-                    _ => Err(self.runtime_error(span, "ListSlice expects an Vector receiver")),
+                    _ => Err(self.runtime_error(span, "ListSlice expects a sequence receiver")),
                 }
             }
             ir::Intrinsic::ExtractSuccessIsSet => {
@@ -9711,13 +9709,13 @@ mod tests {
     }
 
     #[test]
-    fn runs_list_remove_first_and_seeded_reduce() {
+    fn runs_list_remove_first_and_seeded_fold() {
         let program = lower_inline(
             r#"
             def main() Int {
                 values = Vector(1, 2, 3)
                 values.removeFirst()
-                return values.reduce(0, (acc, value) => acc + value)
+                return values.fold(0, (acc, value) => acc + value)
             }
             "#,
         );

@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*trailing commas are allowed only in bracket collection and brace construction literals.*
+# .*trailing commas are not supported.*
 
 def main() Unit {
     value (Int,) = 1

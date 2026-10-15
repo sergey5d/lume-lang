@@ -1,0 +1,5 @@
+# FAIL_REGEX:
+# .*numeric separators must appear between decimal digits.*
+
+def main() Float =
+    1_.0

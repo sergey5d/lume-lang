@@ -153,7 +153,7 @@ def toBeOrNotToBe() Unit {
             }
 
             if valid && balance == 0 {
-                result.append(docId)
+                result.add(docId)
             }
         }
     }

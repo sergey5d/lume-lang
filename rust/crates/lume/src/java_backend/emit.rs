@@ -11,6 +11,7 @@ use crate::{
     core,
     ir::{self, FunctionKind},
     java_backend::{JavaExternalClass, JavaPrimitiveCoercion},
+    numeric::parse_integer_literal,
 };
 
 pub(crate) struct JavaSource {
@@ -5598,7 +5599,7 @@ impl<'a> SourceBodyEmitter<'a> {
         let ir::Type::Named { name, args } = value_ty else {
             return None;
         };
-        if name != "Vector" || args.len() != 1 {
+        if !matches!(name.as_str(), "Vector" | "Array") || args.len() != 1 {
             return None;
         }
         let element_ty = &args[0];
@@ -5639,7 +5640,13 @@ impl<'a> SourceBodyEmitter<'a> {
                     elements.len()
                 ),
             );
-            binding_types.insert(rest.name.clone(), value_ty.clone());
+            binding_types.insert(
+                rest.name.clone(),
+                ir::Type::Named {
+                    name: "Vector".to_string(),
+                    args: vec![element_ty.clone()],
+                },
+            );
         }
         Some(MatchedCase {
             condition: conditions.join(" && "),
@@ -12442,6 +12449,10 @@ fn builtin_method_param_types(
                         ret: Box::new(ir::Type::Unknown),
                     },
                 ]),
+                ("reduce", 1) => Some(vec![ir::Type::Function {
+                    params: vec![args[0].clone(), args[0].clone()],
+                    ret: Box::new(args[0].clone()),
+                }]),
                 ("sort", 1) => Some(vec![ir::Type::Function {
                     params: vec![args[0].clone(), args[0].clone()],
                     ret: Box::new(ir::Type::Int),
@@ -12535,16 +12546,17 @@ fn builtin_method_return_type(
         }
         ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
             match (method, arg_len) {
-                ("append" | "add" | "filter" | "sort" | "take", 1) => Some(receiver.clone()),
+                ("add" | "filter" | "sort" | "take", 1) => Some(receiver.clone()),
                 ("map" | "flatMap", 1) => Some(ir::Type::list(ir::Type::Unknown)),
                 ("flatten", 0) => Some(ir::Type::list(
                     iterable_item_type(&args[0]).unwrap_or(ir::Type::Unknown),
                 )),
-                ("fold" | "reduce", 2) => Some(ir::Type::Unknown),
+                ("fold", 2) => Some(ir::Type::Unknown),
+                ("reduce", 1) => Some(ir::Type::option(args[0].clone())),
                 ("size", 0) => Some(ir::Type::Int),
                 ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
                 ("contains", 1) => Some(ir::Type::Bool),
-                ("at" | "head" | "removeFirst" | "removeLast", 0 | 1) => {
+                ("at" | "removeFirst" | "removeLast", 0 | 1) => {
                     Some(ir::Type::option(args[0].clone()))
                 }
                 _ => None,
@@ -12721,7 +12733,7 @@ fn tuple_accessor_name(name: &str) -> Option<&'static str> {
 
 fn static_tuple_index(expr: &core::Expr) -> Option<usize> {
     match expr {
-        core::Expr::Integer { raw, .. } => raw.parse().ok(),
+        core::Expr::Integer { raw, .. } => usize::try_from(parse_integer_literal(raw, false)?).ok(),
         _ => None,
     }
 }
@@ -13302,9 +13314,7 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
         ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")
         | ("Result", "isOk" | "isSuccess" | "isErr")
         | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
-        ("Vector" | "LinkedList" | "Array", "head" | "first" | "last") => {
-            Some(ir::Type::option(item))
-        }
+        ("Vector" | "LinkedList" | "Array", "first" | "last") => Some(ir::Type::option(item)),
         ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
         ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Type", "name" | "qualifiedName")

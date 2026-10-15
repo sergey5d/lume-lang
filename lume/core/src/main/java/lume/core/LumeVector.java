@@ -178,6 +178,18 @@ public final class LumeVector<T> implements Iterable<T> {
         return result;
     }
 
+    public Option<T> reduce(BiFunction<T, T, T> reducer) {
+        if (values.isEmpty()) {
+            return LumeRuntime.optionNone();
+        }
+        var iterator = values.iterator();
+        var result = iterator.next();
+        while (iterator.hasNext()) {
+            result = reducer.apply(result, iterator.next());
+        }
+        return LumeRuntime.optionSome(result);
+    }
+
     public LumeVector<T> sort(BiFunction<T, T, Long> compare) {
         values.sort((left, right) -> Long.compare(compare.apply(left, right), 0));
         return this;

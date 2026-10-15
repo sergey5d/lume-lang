@@ -38,7 +38,7 @@ object Solution {
         while j < nums.size {
             complement = -nums[idx] - nums[j]
             if seen.contains(complement) {
-                res.append([nums[idx], complement, nums[j]])
+                res.add([nums[idx], complement, nums[j]])
                 j += 1
                 while j < nums.size && nums[j - 1] == nums[j] {
                     j += 1
@@ -58,7 +58,7 @@ object Solution {
             sum = nums[low] + nums[high] + nums[idx]
 
             if sum == 0 {
-                res.append([nums[idx], nums[low], nums[high]])
+                res.add([nums[idx], nums[low], nums[high]])
                 low += 1
                 high -= 1
 
