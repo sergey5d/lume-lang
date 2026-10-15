@@ -2486,10 +2486,28 @@ box Box[Str] = Box("hello")            # Str agrees with the argument and contex
 
 explicitSet = Set[Str]()
 explicitMap = Map[Str, User]()
+explicitNames = [Str]()                  # equivalent to Vector[Str]()
+explicitCounts = [Str: Int]()           # equivalent to Map[Str, Int]()
 inferredBox = Box("hello")
 contextualBox Box[Str] = new("hello")  # new infers the complete target type
 contextualSet Set[Str] = new()
 ```
+
+Vector and map type shorthand can be used directly as an explicit constructor
+target when followed by a call:
+
+```txt
+[Str]()          # empty Vector[Str]
+[Str: Int]()     # empty Map[Str, Int]
+[[Str]]()        # empty Vector[Vector[Str]]
+[Str: [Int]]()   # empty Map[Str, Vector[Int]]
+```
+
+The parentheses are required. In expression position, bare `[Str]` is not an
+empty constructor; bracket expressions without `()` retain their ordinary
+literal and type-context meanings. This keeps nested forms unambiguous:
+`[[Str]]()` is an empty nested vector, while `[[Str]()]` is a one-element vector
+containing an empty `Vector[Str]`.
 
 Generic type arguments are invariant by default. An existing `Container[A]`
 value cannot be assigned to `Container[B]` merely because `A` is assignable to

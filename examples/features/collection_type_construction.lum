@@ -1,0 +1,22 @@
+# EXPECT:
+# 0 0 0 1 0
+
+def main() Unit {
+    options = {
+        verbose: false
+        help: false
+        files: [Str]()
+        counts: [Str: Int]()
+    }
+    emptyRows = [[Str]]()
+    oneEmptyRow = [[Str]()]
+    grouped = [Str: [Int]]()
+
+    println(
+        options.files.size,
+        options.counts.size,
+        emptyRows.size,
+        oneEmptyRow.size,
+        grouped.size
+    )
+}

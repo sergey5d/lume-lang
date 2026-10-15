@@ -2224,9 +2224,9 @@ impl<'a> Parser<'a> {
                 let start = self.consume_keyword(Keyword::For, "expected 'for'")?;
                 self.parse_for_yield_expr_after_start(start)
             }
-            TokenKind::LBracket => {
+            TokenKind::LBracket => self.parse_collection_type_constructor_target().or_else(|| {
                 self.with_trailing_block_calls_allowed(|parser| parser.parse_list_literal())
-            }
+            }),
             TokenKind::LParen => {
                 self.with_trailing_block_calls_allowed(|parser| parser.parse_group_or_tuple_expr())
             }
@@ -2240,6 +2240,44 @@ impl<'a> Parser<'a> {
                 None
             }
         }
+    }
+
+    fn parse_collection_type_constructor_target(&mut self) -> Option<Expr> {
+        let checkpoint = self.checkpoint();
+        let Some(ty) = self.parse_type_ref() else {
+            self.restore(checkpoint);
+            return None;
+        };
+        let TypeRef::Named { name, args, span } = ty else {
+            self.restore(checkpoint);
+            return None;
+        };
+        let expected_arity = match name.as_str() {
+            "Vector" => 1,
+            "Map" => 2,
+            _ => {
+                self.restore(checkpoint);
+                return None;
+            }
+        };
+        if args.len() != expected_arity || !self.at(TokenKind::LParen) {
+            self.restore(checkpoint);
+            return None;
+        }
+
+        let argument_span = args
+            .first()
+            .map(TypeRef::span)
+            .unwrap_or(span)
+            .cover(args.last().map(TypeRef::span).unwrap_or(span));
+        Some(Expr::Index {
+            receiver: Box::new(Expr::Identifier { name, span }),
+            index: Box::new(Expr::Unit {
+                span: argument_span,
+            }),
+            explicit_type_args: Some(args),
+            span,
+        })
     }
 
     pub(super) fn parse_expression_brace_body(&mut self) -> Option<ExpressionBraceBody> {

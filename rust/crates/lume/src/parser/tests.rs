@@ -2671,6 +2671,47 @@ fn parses_empty_bracket_collection_literal() {
 }
 
 #[test]
+fn parses_collection_type_shorthand_constructor_targets() {
+    for (source, expected_name, expected_arity) in [
+        ("[Str]()", "Vector", 1),
+        ("[Str: Int]()", "Map", 2),
+        ("[[Str]]()", "Vector", 1),
+        ("[Str: [Int]]()", "Map", 2),
+    ] {
+        let Expr::Call { callee, args, .. } = parse_expr_only(source) else {
+            panic!("expected constructor call for {source}");
+        };
+        assert!(args.is_empty(), "{source}");
+        let Expr::Index {
+            receiver,
+            explicit_type_args: Some(type_args),
+            ..
+        } = callee.as_ref()
+        else {
+            panic!("expected explicit generic target for {source}");
+        };
+        assert!(
+            matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == expected_name),
+            "{source}: {receiver:#?}"
+        );
+        assert_eq!(type_args.len(), expected_arity, "{source}");
+    }
+
+    assert!(
+        matches!(parse_expr_only("[Str]"), Expr::ListLiteral { items, .. } if items.len() == 1),
+        "bare [Str] must remain a one-element vector literal"
+    );
+    assert!(
+        matches!(
+            parse_expr_only("[[Str]()]"),
+            Expr::ListLiteral { items, .. }
+                if matches!(items.as_slice(), [Expr::Call { .. }])
+        ),
+        "nested construction must remain a one-element vector literal"
+    );
+}
+
+#[test]
 fn rejects_removed_empty_map_literal_and_missing_map_value() {
     let cases = [
         ("[:]", "removed_empty_map_literal"),
