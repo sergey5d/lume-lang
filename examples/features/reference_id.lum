@@ -1,6 +1,5 @@
 # EXPECT:
 # semantic equality true
-# strict equality true
 # separate references false
 # alias references true
 # repeated reads true
@@ -21,7 +20,6 @@ def main() Unit {
     alias = first
 
     println("semantic equality", first == second)
-    println("strict equality", first === second)
     println("separate references", first.referenceId == second.referenceId)
     println("alias references", first.referenceId == alias.referenceId)
     println("repeated reads", first.referenceId == first.referenceId)

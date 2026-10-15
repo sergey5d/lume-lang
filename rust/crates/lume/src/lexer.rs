@@ -80,8 +80,6 @@ pub enum TokenKind {
     ColonAssign,
     EqEq,
     NotEq,
-    StrictEq,
-    StrictNotEq,
     LessEq,
     GreaterEq,
     PlusEq,
@@ -461,21 +459,9 @@ impl<'a> Lexer<'a> {
             '?' if self.take('?') => Some(TokenKind::QuestionQuestion),
             '?' => Some(TokenKind::Question),
             '=' if self.take('>') => Some(TokenKind::FatArrow),
-            '=' if self.take('=') => {
-                if self.take('=') {
-                    Some(TokenKind::StrictEq)
-                } else {
-                    Some(TokenKind::EqEq)
-                }
-            }
+            '=' if self.take('=') => Some(TokenKind::EqEq),
             '=' => Some(TokenKind::Eq),
-            '!' if self.take('=') => {
-                if self.take('=') {
-                    Some(TokenKind::StrictNotEq)
-                } else {
-                    Some(TokenKind::NotEq)
-                }
-            }
+            '!' if self.take('=') => Some(TokenKind::NotEq),
             '!' => Some(TokenKind::Bang),
             '<' if self.take('-') => Some(TokenKind::LeftArrow),
             '<' if self.take('=') => Some(TokenKind::LessEq),
@@ -856,9 +842,9 @@ mod tests {
     }
 
     #[test]
-    fn keeps_strict_inequality_distinct_from_postfix_extraction() {
+    fn keeps_postfix_extraction_distinct_from_equality() {
         let result = lex(&source(
-            "unwrapped = maybe! == expected\ndifferent = maybe!==expected\n",
+            "unwrapped = maybe! == expected\ndifferent = maybe != expected\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds = result
@@ -871,11 +857,11 @@ mod tests {
                 .windows(2)
                 .any(|pair| { pair == [TokenKind::Bang, TokenKind::EqEq] })
         );
-        assert!(kinds.contains(&TokenKind::StrictNotEq));
+        assert!(kinds.contains(&TokenKind::NotEq));
     }
 
     #[test]
-    fn lexes_strict_equality_operators_as_atomic_tokens() {
+    fn removed_strict_equality_spellings_are_not_atomic_tokens() {
         let result = lex(&source(
             "same = left === right\ndifferent = left !== other\n",
         ));
@@ -885,8 +871,16 @@ mod tests {
             .iter()
             .map(|token| token.kind)
             .collect::<Vec<_>>();
-        assert!(kinds.contains(&TokenKind::StrictEq));
-        assert!(kinds.contains(&TokenKind::StrictNotEq));
+        assert!(
+            kinds
+                .windows(2)
+                .any(|pair| pair == [TokenKind::EqEq, TokenKind::Eq])
+        );
+        assert!(
+            kinds
+                .windows(2)
+                .any(|pair| pair == [TokenKind::NotEq, TokenKind::Eq])
+        );
     }
 
     #[test]

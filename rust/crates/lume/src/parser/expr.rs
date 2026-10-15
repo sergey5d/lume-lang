@@ -112,14 +112,6 @@ impl<'a> Parser<'a> {
             return self
                 .parse_expression_brace_body_with_continuation()
                 .map(|body| match body {
-                    ExpressionBraceBody::Expression(Expr::RecordLiteral {
-                        fields,
-                        values,
-                        span,
-                    }) if fields.is_empty() && values.is_empty() => LambdaBody::Block(Block {
-                        statements: Vec::new(),
-                        span,
-                    }),
                     ExpressionBraceBody::Expression(expr) => LambdaBody::Expr(Box::new(expr)),
                     ExpressionBraceBody::Block(block) => LambdaBody::Block(block),
                 });
@@ -1214,8 +1206,6 @@ impl<'a> Parser<'a> {
             &[
                 (TokenKind::EqEq, BinaryOp::Eq),
                 (TokenKind::NotEq, BinaryOp::NotEq),
-                (TokenKind::StrictEq, BinaryOp::StrictEq),
-                (TokenKind::StrictNotEq, BinaryOp::StrictNotEq),
             ],
             "non_associative_equality",
             "equality",

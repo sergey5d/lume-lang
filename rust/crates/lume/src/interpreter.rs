@@ -3432,17 +3432,25 @@ impl<'a> Interpreter<'a> {
                 let end = args[1].as_int(self, span, "Range end")?;
                 let step = if args.len() == 3 {
                     args[2].as_int(self, span, "Range step")?
-                } else if start <= end {
-                    1
                 } else {
-                    -1
+                    1
                 };
+                if step == 0 {
+                    return Err(self.runtime_error(span, "Range step cannot be zero"));
+                }
                 self.construct_named_type(
                     "IntRange",
                     vec![Value::Int(start), Value::Int(end), Value::Int(step)],
                     span,
                     false,
                 )?
+            }
+            "IntRange" if args.len() == 3 => {
+                let step = args[2].as_int(self, span, "IntRange step")?;
+                if step == 0 {
+                    return Err(self.runtime_error(span, "Range step cannot be zero"));
+                }
+                self.construct_named_type(name, args.to_vec(), span, false)?
             }
             "Vector" | "LinkedList" | "Array" => {
                 Some(Value::List(Rc::new(RefCell::new(args.to_vec()))))
@@ -5837,79 +5845,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn values_have_same_concrete_type(&self, left: &Value, right: &Value) -> bool {
-        if let (Value::Aggregate(left_value), Value::Aggregate(right_value)) = (left, right) {
-            let left_value = left_value.borrow();
-            let right_value = right_value.borrow();
-            if left_value.kind == ast::TypeKind::Record
-                && right_value.kind == ast::TypeKind::Record
-                && let (Some(left_id), Some(right_id)) =
-                    (left_value.runtime_type_id, right_value.runtime_type_id)
-                && let (Some(left_ty), Some(right_ty)) = (
-                    self.runtime.type_by_id(left_id),
-                    self.runtime.type_by_id(right_id),
-                )
-            {
-                let mut left_fields = left_ty
-                    .fields
-                    .iter()
-                    .map(|field| (field.name.clone(), field.ty.clone()))
-                    .collect::<Vec<_>>();
-                let mut right_fields = right_ty
-                    .fields
-                    .iter()
-                    .map(|field| (field.name.clone(), field.ty.clone()))
-                    .collect::<Vec<_>>();
-                left_fields.sort_by(|left, right| left.0.cmp(&right.0));
-                right_fields.sort_by(|left, right| left.0.cmp(&right.0));
-                return left_fields == right_fields;
-            }
-        }
-
-        let left_shape = structural_shape_fields(left);
-        let right_shape = structural_shape_fields(right);
-        match (left_shape, right_shape) {
-            (Some(left_fields), Some(right_fields)) => {
-                let mut left_names = left_fields
-                    .into_iter()
-                    .map(|(name, _)| name)
-                    .collect::<Vec<_>>();
-                let mut right_names = right_fields
-                    .into_iter()
-                    .map(|(name, _)| name)
-                    .collect::<Vec<_>>();
-                left_names.sort();
-                right_names.sort();
-                return left_names == right_names;
-            }
-            (Some(_), None) | (None, Some(_)) => return false,
-            (None, None) => {}
-        }
-
-        match (left, right) {
-            (Value::ReferenceId(_), Value::ReferenceId(_))
-            | (Value::Unit, Value::Unit)
-            | (Value::Bool(_), Value::Bool(_))
-            | (Value::Int(_), Value::Int(_))
-            | (Value::Float(_), Value::Float(_))
-            | (Value::String(_), Value::String(_))
-            | (Value::Rune(_), Value::Rune(_))
-            | (Value::List(_), Value::List(_))
-            | (Value::Set(_), Value::Set(_))
-            | (Value::Map(_), Value::Map(_)) => true,
-            (Value::Tuple(left_items), Value::Tuple(right_items)) => {
-                left_items.len() == right_items.len()
-            }
-            (Value::Aggregate(left_value), Value::Aggregate(right_value)) => {
-                let left_value = left_value.borrow();
-                let right_value = right_value.borrow();
-                left_value.type_name == right_value.type_name
-                    && left_value.case_name == right_value.case_name
-            }
-            _ => false,
-        }
-    }
-
     pub(crate) fn value_index(
         &mut self,
         values: &[Value],
@@ -6678,22 +6613,6 @@ impl<'a> Interpreter<'a> {
                 self.ensure_observable_value(&left, span, "equality comparison")?;
                 self.ensure_observable_value(&right, span, "equality comparison")?;
                 Ok(Value::Bool(!self.values_equal(&left, &right, span)?))
-            }
-            ir::BinaryOp::StrictEq => {
-                self.ensure_observable_value(&left, span, "strict equality comparison")?;
-                self.ensure_observable_value(&right, span, "strict equality comparison")?;
-                Ok(Value::Bool(
-                    self.values_have_same_concrete_type(&left, &right)
-                        && self.values_equal(&left, &right, span)?,
-                ))
-            }
-            ir::BinaryOp::StrictNotEq => {
-                self.ensure_observable_value(&left, span, "strict equality comparison")?;
-                self.ensure_observable_value(&right, span, "strict equality comparison")?;
-                Ok(Value::Bool(
-                    !self.values_have_same_concrete_type(&left, &right)
-                        || !self.values_equal(&left, &right, span)?,
-                ))
             }
             ir::BinaryOp::Less => compare_binary(
                 left,
@@ -8517,7 +8436,7 @@ mod tests {
                 extended = { ...anonymous, value: 2 }
                 positional { x Int, y Int } = new(1, 2)
                 reversed { y Int, x Int } = new(3, 4)
-                callback fn() Unit = () => {}
+                callback fn() Unit = () => ()
                 shapeCallback fn() {} = () => new {}
                 callbackResult = { ...shapeCallback(), value: 3 }
                 callback()
@@ -8734,7 +8653,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_strict_equality_and_reference_ids() {
+    fn runs_semantic_equality_and_reference_ids() {
         let program = lower_inline(
             r#"
             class Box with Eq[Box] {
@@ -8752,9 +8671,9 @@ mod tests {
                 valuesAlias = values
                 valuesCopy = [1, 2]
 
-                OS.println(first === alias)
-                OS.println(first === separate)
-                OS.println(first !== different)
+                OS.println(first == alias)
+                OS.println(first == separate)
+                OS.println(first != different)
                 OS.println(first.referenceId == alias.referenceId)
                 OS.println(first.referenceId == separate.referenceId)
                 OS.println(values.referenceId == valuesAlias.referenceId)
@@ -8800,8 +8719,8 @@ mod tests {
                 println(point == different)
                 println(same == point)
                 println(point.equals(same))
-                println(point === same)
-                println(point !== different)
+                println(point == same)
+                println(point != different)
 
                 leftAnonymous { x Int, label Str } = { x: 1, label: "one" }
                 rightAnonymous { label Str, x Int } = { label: "one", x: 1 }
@@ -8854,14 +8773,14 @@ mod tests {
                 sameClass Identified = Entry(1)
                 different Identified = Entry(2)
                 println(left == right)
-                println(left === right)
-                println(left === sameClass)
-                println(left !== different)
+                println(left == right)
+                println(left == sameClass)
+                println(left != different)
 
                 account = Account(3)
                 widenedAccount Any = Any(account)
                 if let recovered Account = widenedAccount {
-                    println(recovered === account)
+                    println(recovered == account)
                 }
             }
             "#,
@@ -8869,7 +8788,7 @@ mod tests {
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "true\ntrue\ntrue\nfalse\ntrue\ntrue\ntrue\n");
+        assert_eq!(run.output, "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n");
     }
 
     #[test]
@@ -8991,10 +8910,15 @@ mod tests {
                 for item <- range {
                     total += item
                 }
-                descending IntRange = Range(3, 0)
+                descending IntRange = Range(3, 0, -1)
                 OS.println("descending", descending.start, descending.end, descending.step)
                 for item <- descending {
                     total += item
+                }
+                empty IntRange = Range(0, -1)
+                OS.println("empty", empty.start, empty.end, empty.step)
+                for item <- empty {
+                    total += 1000
                 }
                 explicit IntRange = IntRange(0, 2, 1)
                 for item <- explicit {
@@ -9009,9 +8933,31 @@ mod tests {
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(
             run.output,
-            "bounds 1 4 1\nrange 1\nrange 2\nrange 3\ndescending 3 0 -1\ntotal 19\n"
+            "bounds 1 4 1\nrange 1\nrange 2\nrange 3\ndescending 3 0 -1\nempty 0 -1 1\ntotal 19\n"
         );
         assert_eq!(run.return_value, None);
+    }
+
+    #[test]
+    fn rejects_zero_step_ranges() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                for item <- Range(0, 3, 0) {
+                    println(item)
+                }
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(
+            run.diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("Range step cannot be zero")),
+            "{:#?}",
+            run.diagnostics
+        );
     }
 
     #[test]
@@ -9497,9 +9443,9 @@ mod tests {
                 concrete = Point(1, 2)
 
                 println(first == second)
-                println(first === second)
+                println(first == second)
                 println(first == concrete)
-                println(first === concrete)
+                println(first == concrete)
                 println(first.runtimeType.name !)
                 match first {
                     case Point3D { z } => println(z)
@@ -9524,10 +9470,10 @@ mod tests {
                 contextual Point = { ...first }
                 forced Point = new { ...first }
                 updated = first with { x: 4 }
-                println(projected === concrete)
-                println(contextual === concrete)
-                println(forced === concrete)
-                println(updated === Point(4, 2))
+                println(projected == concrete)
+                println(contextual == concrete)
+                println(forced == concrete)
+                println(updated == Point(4, 2))
 
                 wider = WiderItems(1, [1], 3)
                 items Items = wider
@@ -10582,13 +10528,13 @@ $name
     }
 
     #[test]
-    fn runs_empty_lambda_body_after_newline() {
+    fn runs_unit_lambda_body_after_newline() {
         let program = lower_inline(
             r#"
             def main() Unit {
-                sameLine fn() Unit = () => {}
+                sameLine fn() Unit = () => ()
                 nextLine fn() Unit = () =>
-                    {}
+                    ()
 
                 sameLine()
                 nextLine()

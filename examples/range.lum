@@ -17,6 +17,7 @@
 # stepped 8
 # stepped 6
 # stepped total 24
+# empty count 0
 # remainder 2
 
 def main() Unit {
@@ -35,7 +36,7 @@ def main() Unit {
     println("another multiplied", multiplied)
 
     var descendingTotal = 0
-    for item <- Range(5, 1) {
+    for item <- Range(5, 1, -1) {
         println("descending", item)
         descendingTotal += item
     }
@@ -47,6 +48,13 @@ def main() Unit {
         steppedTotal += item
     }
     println("stepped total", steppedTotal)
+
+    var emptyCount = 0
+    n = 0
+    for _ <- Range(0, n - 1) {
+        emptyCount += 1
+    }
+    println("empty count", emptyCount)
 
     var remainder = 17
     remainder %= 5

@@ -9,10 +9,13 @@ public final class IntRange implements Iterable<Long> {
     public final long step;
 
     public IntRange(long start, long end) {
-        this(start, end, start <= end ? 1 : -1);
+        this(start, end, 1);
     }
 
     public IntRange(long start, long end, long step) {
+        if (step == 0) {
+            throw new LumePanic("Range step cannot be zero");
+        }
         this.start = start;
         this.end = end;
         this.step = step;

@@ -63,11 +63,15 @@ fn range_iterator(
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     debug_assert!(args.is_empty());
+    let step = range_field(interpreter, &receiver, "step", span)?;
+    if step == 0 {
+        return Err(interpreter.runtime_error(span, "Range step cannot be zero"));
+    }
     Ok(Value::Iterator(Rc::new(RefCell::new(
         IteratorState::Range {
             current: range_field(interpreter, &receiver, "start", span)?,
             end: range_field(interpreter, &receiver, "end", span)?,
-            step: range_field(interpreter, &receiver, "step", span)?,
+            step,
         },
     ))))
 }

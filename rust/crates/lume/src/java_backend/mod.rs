@@ -3724,6 +3724,64 @@ def sum(items [Int]) Int {
     }
 
     #[test]
+    fn java_range_defaults_to_positive_direction() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Range Java test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-range-direction");
+        let source = temp.join("range_direction.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/range_direction
+
+def main() Unit {
+    var emptyCount = 0
+    for _ <- Range(0, -1) {
+        emptyCount += 1
+    }
+    println(emptyCount)
+
+    for item <- Range(3, 0, -1) {
+        println(item)
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated Java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.range_direction.Range_directionMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("Java stdout utf8"),
+            "0\n3\n2\n1\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn readable_java_keeps_explicit_constructors_structured() {
         let temp = temp_path("lume-java-readable-constructor");
         let source = temp.join("constructor.lum");
@@ -4067,7 +4125,7 @@ def main() Unit {
     emptyWorker EmptyWorker = new {}
     emptySet Set[Str] = new {}
     nothing Unit = ()
-    callback fn() Unit = () => {}
+    callback fn() Unit = () => ()
     shapeCallback fn() {} = () => new {}
     callbackResult = { ...shapeCallback(), value: 4 }
     callback()
@@ -5970,13 +6028,13 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_runs_strict_equality_and_reference_ids() {
+    fn generated_java_runs_semantic_equality_and_reference_ids() {
         if !command_available("javac") || !command_available("java") {
-            eprintln!("skipping Java strict equality test because javac/java is not available");
+            eprintln!("skipping Java equality test because javac/java is not available");
             return;
         }
 
-        let temp = temp_path("lume-java-strict-equality");
+        let temp = temp_path("lume-java-equality");
         let source = temp.join("equality.lum");
         let out = temp.join("out");
         let classes = temp.join("classes");
@@ -5998,9 +6056,9 @@ def main() Unit {
     separate = Box(1)
     different = Box(2)
 
-    println(first === alias)
-    println(first === separate)
-    println(first !== different)
+    println(first == alias)
+    println(first == separate)
+    println(first != different)
     println(first.referenceId == alias.referenceId)
     println(first.referenceId == separate.referenceId)
 
@@ -6018,7 +6076,7 @@ def main() Unit {
 
         let module =
             fs::read_to_string(out.join("demo/equality/EqualityModule.java")).expect("read module");
-        assert!(module.contains("LumeRuntime.strictEquals"));
+        assert!(!module.contains("LumeRuntime.strictEquals"));
         assert!(module.contains("LumeRuntime.referenceIdOf"));
 
         let mut sources = core_runtime_sources();
@@ -6312,8 +6370,8 @@ def main() Unit {
     println(first == reordered)
     println(reordered == first)
     println(first.equals(reordered))
-    println(first === reordered)
-    println(Point(1, "one") === ReorderedPoint("one", 1))
+    println(first == reordered)
+    println(Point(1, "one") == ReorderedPoint("one", 1))
 
     println(Marker {} == Marker {})
 
@@ -6323,14 +6381,14 @@ def main() Unit {
     right Identified = AlternateEntry(1)
     sameClass Identified = Entry(1)
     println(left == right)
-    println(left === right)
-    println(left === sameClass)
+    println(left == right)
+    println(left == sameClass)
 
     id = 3
     account = Account { id }
     widenedAccount Any = Any(account)
     if let recovered Account = widenedAccount {
-        println(recovered === account)
+        println(recovered == account)
     }
 }
 "#,
@@ -6404,7 +6462,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfalse\ntrue\ntrue\n"
+            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7285,9 +7343,9 @@ def main() Unit {
     concrete = Point(1, 2)
 
     println(first == second)
-    println(first === second)
+    println(first == second)
     println(first == concrete)
-    println(first === concrete)
+    println(first == concrete)
     println(first.runtimeType.name !)
     match first {
         case Point3D { z } => println(z)
@@ -7312,10 +7370,10 @@ def main() Unit {
     contextual Point = { ...first }
     forced Point = new { ...first }
     updated = first with { x: 4 }
-    println(projected === concrete)
-    println(contextual === concrete)
-    println(forced === concrete)
-    println(updated === Point(4, 2))
+    println(projected == concrete)
+    println(contextual == concrete)
+    println(forced == concrete)
+    println(updated == Point(4, 2))
 
     wider = WiderItems(1, [1], 3)
     items Items = wider

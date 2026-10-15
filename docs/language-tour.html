@@ -126,10 +126,10 @@ label = match access {
         <h2 id="collections">Vectors and maps</h2>
         <p>Collection types and literals use parallel bracket syntax. An empty <code>[]</code> uses its expected vector or map type.</p>
         <pre><code>names [Str] = ["Ada", "Grace"]
-scores [Str : Int] = ["Ada": 10, "Grace": 12]
+scores [Str: Int] = ["Ada": 10, "Grace": 12]
 
 emptyNames [Str] = []
-emptyScores [Str : Int] = []</code></pre>
+emptyScores [Str: Int] = []</code></pre>
         <p>Higher-order methods accept explicit lambdas or compatible function and bound-method references. A lambda uses <code>=&gt;</code> and may use a block body.</p>
         <pre><code>lengths = names.map(name => name.size())
 labels = names.map(name => {

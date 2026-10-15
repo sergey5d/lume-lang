@@ -718,8 +718,6 @@ pub enum BinaryOp {
     Mod,
     Eq,
     NotEq,
-    StrictEq,
-    StrictNotEq,
     Less,
     LessEq,
     Greater,

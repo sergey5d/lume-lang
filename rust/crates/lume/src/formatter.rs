@@ -288,8 +288,6 @@ fn horizontal_operator(kind: TokenKind) -> bool {
             | TokenKind::ColonAssign
             | TokenKind::EqEq
             | TokenKind::NotEq
-            | TokenKind::StrictEq
-            | TokenKind::StrictNotEq
             | TokenKind::Less
             | TokenKind::LessEq
             | TokenKind::Greater
@@ -453,8 +451,6 @@ fn ends_with_continuation(kind: TokenKind) -> bool {
             | TokenKind::ColonAssign
             | TokenKind::EqEq
             | TokenKind::NotEq
-            | TokenKind::StrictEq
-            | TokenKind::StrictNotEq
             | TokenKind::Less
             | TokenKind::LessEq
             | TokenKind::Greater
@@ -528,6 +524,17 @@ mod tests {
         assert_eq!(
             result.text,
             "def main() Unit {\n    values = [\n        1,\n        2\n    ]\n    point = {\n        x: 1,\n        y: 2\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn normalizes_map_type_colon_spacing() {
+        let result =
+            format("def main() Unit {\nspaced [Str : Int] = []\ncompact [Str:Int] = []\n}\n");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def main() Unit {\n    spaced [Str: Int] = []\n    compact [Str: Int] = []\n}\n"
         );
     }
 

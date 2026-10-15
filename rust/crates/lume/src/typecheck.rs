@@ -9237,10 +9237,6 @@ impl<'a> Checker<'a> {
                 self.require_bool(right, span, "logical operator expects Bool operands");
                 Ty::bool()
             }
-            BinaryOp::StrictEq | BinaryOp::StrictNotEq => {
-                self.check_equality_operands(left, right, span);
-                Ty::bool()
-            }
             BinaryOp::Colon => Ty::Unknown,
         }
     }
@@ -12086,8 +12082,6 @@ impl<'a> Checker<'a> {
             BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => Ty::Unknown,
             BinaryOp::Eq
             | BinaryOp::NotEq
-            | BinaryOp::StrictEq
-            | BinaryOp::StrictNotEq
             | BinaryOp::Less
             | BinaryOp::LessEq
             | BinaryOp::Greater
@@ -16268,7 +16262,7 @@ def main(flag Bool) Unit {
     }
 
     #[test]
-    fn allows_strict_equality_and_reference_ids() {
+    fn allows_semantic_equality_and_reference_ids() {
         let program = parse_inline(
             r#"
 class Box with Eq[Box] {
@@ -16305,22 +16299,22 @@ shape Point {
 def main() Unit {
     first = Box(1)
     alias = first
-    sameValueAndType = first === Box(1)
-    differentValue = first !== Box(2)
+    sameValue = first == Box(1)
+    differentValue = first != Box(2)
     sameInstance = first.referenceId == alias.referenceId
 
     values = [1, 2]
     valuesAlias = values
     sameVectorReference = values.referenceId == valuesAlias.referenceId
-    sameObject = Shared === Shared
+    sameObject = Shared == Shared
     objectReference ReferenceId = Shared.referenceId
 
     left Identified = Entry(1)
     right Identified = AlternateEntry(1)
-    interfaceStrict = left === right
+    interfaceEquality = left == right
 
-    sameInt = 1 === 1
-    sameShape = Point(1) === Point(1)
+    sameInt = 1 == 1
+    sameShape = Point(1) == Point(1)
 }
 "#,
         );
@@ -16329,7 +16323,7 @@ def main() Unit {
     }
 
     #[test]
-    fn strict_equality_requires_an_equality_contract_and_same_domain() {
+    fn equality_requires_an_equality_contract_and_valid_reference_receivers() {
         let program = parse_inline(
             r#"
 class Box {
@@ -16350,12 +16344,12 @@ shape Point {
 }
 
 def main() Unit {
-    missingClassContract = Box(1) === Box(1)
+    missingClassContract = Box(1) == Box(1)
     left Named = Person("Ada")
     right Named = left
-    missingInterfaceContract = left === right
+    missingInterfaceContract = left == right
     unknown Any = Any(Box(1))
-    anyStrict = unknown === unknown
+    anyEquality = unknown == unknown
     number = 1
     invalidPrimitiveReference = number.referenceId
     invalidShapeReference = Point(1).referenceId
@@ -16391,7 +16385,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_strict_equality_between_unrelated_equality_domains() {
+    fn rejects_equality_between_unrelated_equality_domains() {
         let program = parse_inline(
             r#"
 class FirstBox with Eq[FirstBox] {
@@ -16403,7 +16397,7 @@ class SecondBox with Eq[SecondBox] {
 }
 
 def main() Unit {
-    same = FirstBox {} === SecondBox {}
+    same = FirstBox {} == SecondBox {}
 }
 "#,
         );
@@ -19414,7 +19408,7 @@ def main() Unit {
     accept(new {})
     result Unit = noop2()
     methodResult Unit = defaulted.noop()
-    callback fn() Unit = () => {}
+    callback fn() Unit = () => ()
     shapeCallback fn() {} = () => new {}
     callbackResult = { ...shapeCallback(), value: 1 }
 }
@@ -19439,6 +19433,7 @@ def explicit() Unit = {}
 
 def main() Unit {
     nothing Unit = {}
+    callback fn() Unit = () => {}
 }
 "#,
         );
@@ -19448,7 +19443,7 @@ def main() Unit {
             .iter()
             .filter(|diagnostic| diagnostic.code == "missing_empty_construction_target")
             .collect::<Vec<_>>();
-        assert_eq!(diagnostics.len(), 5, "{:#?}", result.diagnostics);
+        assert_eq!(diagnostics.len(), 6, "{:#?}", result.diagnostics);
         assert!(diagnostics.iter().all(|diagnostic| {
             diagnostic
                 .helps

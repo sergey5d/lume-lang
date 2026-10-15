@@ -6664,12 +6664,6 @@ impl<'a> SourceBodyEmitter<'a> {
             } => match op {
                 ast::BinaryOp::Eq => self.emit_equality(left, right, bindings, false),
                 ast::BinaryOp::NotEq => self.emit_equality(left, right, bindings, true),
-                ast::BinaryOp::StrictEq => {
-                    self.emit_strict_equality(left, right, bindings, false)
-                }
-                ast::BinaryOp::StrictNotEq => {
-                    self.emit_strict_equality(left, right, bindings, true)
-                }
                 ast::BinaryOp::Less
                 | ast::BinaryOp::LessEq
                 | ast::BinaryOp::Greater
@@ -6691,8 +6685,6 @@ impl<'a> SourceBodyEmitter<'a> {
                         ast::BinaryOp::Colon
                         | ast::BinaryOp::Eq
                         | ast::BinaryOp::NotEq
-                        | ast::BinaryOp::StrictEq
-                        | ast::BinaryOp::StrictNotEq
                         | ast::BinaryOp::Less
                         | ast::BinaryOp::LessEq
                         | ast::BinaryOp::Greater
@@ -7022,31 +7014,6 @@ impl<'a> SourceBodyEmitter<'a> {
         }
         let comparison = format!("{left_expr}.compareTo({right_expr})");
         Some(format!("({comparison} {operator} 0L)"))
-    }
-
-    fn emit_strict_equality(
-        &self,
-        left: &core::Expr,
-        right: &core::Expr,
-        bindings: &HashMap<String, String>,
-        negated: bool,
-    ) -> Option<String> {
-        let left_ty = self.expr_type(left, bindings)?;
-        let right_ty = self.expr_type(right, bindings)?;
-        if self.is_shape_type(&left_ty) && self.is_shape_type(&right_ty) {
-            return self.emit_equality(left, right, bindings, negated);
-        }
-
-        let strict = format!(
-            "lume.core.LumeRuntime.strictEquals({}, {})",
-            self.emit_expr(left, bindings)?,
-            self.emit_expr(right, bindings)?
-        );
-        Some(if negated {
-            format!("!{strict}")
-        } else {
-            strict
-        })
     }
 
     fn is_shape_type(&self, ty: &ir::Type) -> bool {
@@ -11745,8 +11712,6 @@ impl<'a> JavaIrSupport<'a> {
         match op {
             ir::BinaryOp::Eq
             | ir::BinaryOp::NotEq
-            | ir::BinaryOp::StrictEq
-            | ir::BinaryOp::StrictNotEq
             | ir::BinaryOp::Less
             | ir::BinaryOp::LessEq
             | ir::BinaryOp::Greater

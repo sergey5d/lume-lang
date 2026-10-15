@@ -5287,9 +5287,7 @@ impl<'a> FunctionLowerer<'a> {
                     | AstBinaryOp::Greater
                     | AstBinaryOp::GreaterEq
                     | AstBinaryOp::Eq
-                    | AstBinaryOp::NotEq
-                    | AstBinaryOp::StrictEq
-                    | AstBinaryOp::StrictNotEq => ir::Type::Bool,
+                    | AstBinaryOp::NotEq => ir::Type::Bool,
                     AstBinaryOp::Add
                         if matches!(&left, ir::Type::Str) || matches!(&right, ir::Type::Str) =>
                     {
@@ -9220,8 +9218,6 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
         AstBinaryOp::And => Some(ir::BinaryOp::And),
         AstBinaryOp::Eq => Some(ir::BinaryOp::Eq),
         AstBinaryOp::NotEq => Some(ir::BinaryOp::NotEq),
-        AstBinaryOp::StrictEq => Some(ir::BinaryOp::StrictEq),
-        AstBinaryOp::StrictNotEq => Some(ir::BinaryOp::StrictNotEq),
         AstBinaryOp::Less => Some(ir::BinaryOp::Less),
         AstBinaryOp::LessEq => Some(ir::BinaryOp::LessEq),
         AstBinaryOp::Greater => Some(ir::BinaryOp::Greater),

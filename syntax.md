@@ -344,36 +344,6 @@ equal = match unknown {
 }
 ```
 
-Strict equality adds a concrete-type restriction to ordinary equality:
-
-```txt
-interface Identified with Eq[Identified] {
-    def id Int
-}
-
-left Identified = DatabaseRecord(7)
-crossType Identified = CachedRecord(7)
-sameType Identified = DatabaseRecord(7)
-different Identified = DatabaseRecord(8)
-
-left == crossType   # true: Eq[Identified] considers them equal
-left === crossType  # false: different concrete classes
-left === sameType   # true: same concrete class and Eq[Identified] says equal
-left !== different  # true: same concrete class but unequal values
-```
-
-`===` means `sameConcreteType(left, right) && (left == right)`. `!==` is the
-negation of that complete relation. Both operators use exactly the equality
-contract selected for `==`; they do not select a concrete class's separate
-contract or compare all stored fields.
-
-For classes and declared-union payloads, concrete type identity is nominal. For
-shapes it is the complete structural schema: field names and normalized field
-types must match, while declaration name and field order do not matter. The
-operands must otherwise satisfy the same static equality-domain rules as `==`.
-In particular, interface operands require an `Eq[Interface]` contract visible
-through the interface, and `Any` operands must be narrowed first.
-
 Reference identity is explicit instance metadata rather than an equality
 operator:
 
@@ -383,7 +353,7 @@ alias = first
 separate = DatabaseRecord(7)
 
 first.referenceId == alias.referenceId    # true
-first.referenceId == separate.referenceId # false, even though `first === separate`
+first.referenceId == separate.referenceId # false, even when `first == separate`
 ```
 
 `referenceId` returns an opaque `ReferenceId`. Two such values compare equal if
@@ -2094,7 +2064,6 @@ Point(1, 2) == Point3D(1, 2, 3) # error: schemas differ
 point2d Point = Point3D(1, 2, 3)
 point2d.runtimeType.name ! # Point
 point2d == Point(1, 2)     # true
-point2d === Point(1, 2)    # true: both values now have the Point schema
 point2d is Point3D         # false: z was discarded
 ```
 
@@ -3033,6 +3002,14 @@ mapper = item =>
         1
 ```
 
+Exact empty braces follow the same construction rule as other expression-body
+positions. They do not become an empty Unit block; use `()` for a Unit callback:
+
+```txt
+callback fn() Unit = () => () # valid
+callback fn() Unit = () => {} # error: empty construction has no shape target
+```
+
 To put multiple statements inside the lambda, use an explicit block. Lambda
 scope is determined by tokens and braces, never by indentation:
 
@@ -3772,8 +3749,8 @@ if value is { x Int } {
 
 `not` is contextual after `is`; it is not a second general Boolean-negation
 operator. `value is not Worker` means exactly `!(value is Worker)`. The right
-side is always a type reference, so value comparisons continue to use `!=` or
-`!==`; reference identity compares the operands' `referenceId` values.
+side is always a type reference, so value comparisons continue to use `!=`;
+reference identity compares the operands' `referenceId` values.
 Anonymous-shape type references use the same rule without requiring the
 condition to be parenthesized; their braces are part of the type, not the `if`
 body.
@@ -4298,10 +4275,9 @@ Each postfix `!` extracts exactly one layer, so `nested!!` means
 `(nested!)!`. Prefix `!` remains Boolean negation; position distinguishes the
 two forms, and `!maybeReady!` means `!(maybeReady!)`.
 
-`!=` and `!==` remain indivisible binary operators. Therefore
-`maybe!==expected` is strict inequality, while extraction followed by
-equality is written `maybe! == expected`. The formatter places spaces around
-binary operators.
+`!=` is an indivisible binary operator. Extraction followed by equality is
+written `maybe! == expected`. The formatter places spaces around binary
+operators.
 
 Multiple dependent unwraps can be written as sequential `let ... else` / `try`
 statements or as a grouped `let` block with `else`:
@@ -4404,7 +4380,10 @@ for i <- Range(0, 10) {
 }
 ```
 
-`Range(start, end)` is start-inclusive and end-exclusive. With two arguments it automatically chooses a step of `1` or `-1` based on the bounds, and `Range(start, end, step)` allows an explicit step.
+`Range(start, end)` is start-inclusive and end-exclusive and uses a step of
+`1`. Descending iteration requires an explicit negative step, such as
+`Range(10, 0, -1)`. A range whose step points away from its end is empty, and
+the step cannot be zero.
 
 Generator heads normally bind one plain identifier, or `_` when the item is
 intentionally ignored:
@@ -5256,8 +5235,6 @@ Comparison:
 
 - `==`
 - `!=`
-- `===` (same concrete type and value equality)
-- `!==` (different concrete type or value inequality)
 - `<`
 - `<=`
 - `>`
@@ -5299,13 +5276,13 @@ Expression precedence, from highest to lowest:
 | Shape update | `with` | left |
 | Comparison | `<`, `<=`, `>`, `>=` | non-associative |
 | Type test | `is`, `is not` | non-associative |
-| Equality | `==`, `!=`, `===`, `!==` | non-associative |
+| Equality | `==`, `!=` | non-associative |
 | Boolean AND | `&&` | left |
 | Boolean OR | `||` | left |
 | Extract or fallback | `??` | right |
 
-Comparison, equality, strict equality, and runtime type-test operators cannot
-be chained without parentheses:
+Comparison, equality, and runtime type-test operators cannot be chained without
+parentheses:
 
 ```txt
 a < b < c       # invalid
@@ -5390,10 +5367,10 @@ Current operator overloading constraints:
   - indexing: `[]`
 - Not allowed to overload:
   - logical operators: `&&`, `||`, `!`
-  - equality operators: `==`, `!=`, `===`, `!==`
+  - equality operators: `==`, `!=`
   - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
 - Comparison operators use intrinsic numeric and string ordering, or `Comparable[T]` for user-defined values. `Comparable[T]` declares `compareTo(other T) Int`.
-- `==`, `!=`, `===`, and `!==` use the applicable `Eq[T]` contract and cannot be overloaded independently; `===` and `!==` additionally test concrete type.
+- `==` and `!=` use the applicable `Eq[T]` contract and cannot be overloaded independently.
 - Reference identity is expressed by equality between opaque `referenceId` values; `ReferenceId` equality and hashing cannot be overloaded.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
 - `:` is brace-entry syntax only, not an overloadable operator.
@@ -5404,7 +5381,7 @@ Newline continuation:
 - Ordinary expressions are no longer broadly newline-insensitive.
 - A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.`.
 - Continuation tokens:
-  - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `===`, `!==`, `<`, `<=`, `>`, `>=`
+  - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - extraction/fallback operators: `??`
   - exact shape update introducer: `with`
   - unary prefixes: unary `-`, `!`, `^`, `try`

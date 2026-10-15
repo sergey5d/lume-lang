@@ -2416,7 +2416,7 @@ def emptyExpression() = {}
 def blockBody() Unit {}
 
 def lambdas() Unit {
-    unitCallback = () => {}
+    emptyCallback = () => {}
     shapeCallback = () => new {}
 }
 "#,
@@ -2454,15 +2454,15 @@ def lambdas() Unit {
     let CallableBody::Block(body) = &lambdas.body else {
         panic!("expected lambdas block body");
     };
-    let Stmt::Binding(unit_callback) = &body.statements[0] else {
-        panic!("expected unit callback binding");
+    let Stmt::Binding(empty_callback) = &body.statements[0] else {
+        panic!("expected empty callback binding");
     };
     assert!(matches!(
-        unit_callback.values.as_slice(),
+        empty_callback.values.as_slice(),
         [Expr::Lambda {
-            body: LambdaBody::Block(block),
+            body: LambdaBody::Expr(expr),
             ..
-        }] if block.statements.is_empty()
+        }] if matches!(expr.as_ref(), Expr::RecordLiteral { fields, values, .. } if fields.is_empty() && values.is_empty())
     ));
     let Stmt::Binding(shape_callback) = &body.statements[1] else {
         panic!("expected shape callback binding");
@@ -2477,7 +2477,7 @@ def lambdas() Unit {
 }
 
 #[test]
-fn normalizes_empty_lambda_bodies_across_newline_layout() {
+fn parses_empty_lambda_braces_as_construction_across_newline_layout() {
     let result = parse(
         r#"
 def main() Unit {
@@ -2503,9 +2503,9 @@ def main() Unit {
         assert!(matches!(
             binding.values.as_slice(),
             [Expr::Lambda {
-                body: LambdaBody::Block(block),
+                body: LambdaBody::Expr(expr),
                 ..
-            }] if block.statements.is_empty()
+            }] if matches!(expr.as_ref(), Expr::RecordLiteral { fields, values, .. } if fields.is_empty() && values.is_empty())
         ));
     }
 }
@@ -6518,24 +6518,16 @@ fn rejects_value_expression_after_is_not() {
 }
 
 #[test]
-fn parses_strict_equality_operators() {
-    let equal = parse_expr_only("left === right");
-    assert!(matches!(
-        equal,
-        Expr::Binary {
-            op: BinaryOp::StrictEq,
-            ..
-        }
-    ));
-
-    let not_equal = parse_expr_only("left!==right");
-    assert!(matches!(
-        not_equal,
-        Expr::Binary {
-            op: BinaryOp::StrictNotEq,
-            ..
-        }
-    ));
+fn rejects_removed_strict_equality_operators() {
+    for operator in ["===", "!=="] {
+        let result = parse(&format!(
+            "def test(left Int, right Int) Bool = left {operator} right"
+        ));
+        assert!(
+            !result.diagnostics.is_empty(),
+            "{operator} should be rejected"
+        );
+    }
 }
 
 #[test]
@@ -6570,7 +6562,7 @@ fn rejects_chained_comparison_operators() {
 
 #[test]
 fn rejects_chained_equality_operators() {
-    for expression in ["a == b == c", "a != b == c", "a === b !== c"] {
+    for expression in ["a == b == c", "a != b == c"] {
         let result = parse(&format!(
             "def test(a Any, b Any, c Any) Bool = {expression}"
         ));
