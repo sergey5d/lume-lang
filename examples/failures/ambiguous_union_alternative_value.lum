@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# ambiguous_union_alternative at .*: union alternative 'Ready' is ambiguous: ConnectionState\.Ready, JobState\.Ready; use a qualified name
+
+type ConnectionState =
+    object Ready {}
+    | object Closed {}
+
+type JobState =
+    object Ready {}
+    | object Running {}
+
+def main() Unit {
+    state = Ready
+    println(state)
+}

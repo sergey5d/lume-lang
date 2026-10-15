@@ -6701,10 +6701,6 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::RecordLiteral { fields, values, .. } => {
                 if let Some(expected) = expected {
-                    if fields.is_empty() && values.is_empty() && matches!(expected, ir::Type::Unit)
-                    {
-                        return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
-                    }
                     if fields.is_empty()
                         && values.is_empty()
                         && matches!(expected, ir::Type::Named { name, .. } if runtime_collection_constructor_name(name))

@@ -1,0 +1,41 @@
+# EXPECT:
+# 5
+# 5
+# 0
+# 0
+
+type OptionX[T] =
+    class SomeX { value T }
+    | object NoneX {}
+
+annotation DefaultOption {
+    value OptionX[Int]
+}
+
+@DefaultOption { value: NoneX }
+def annotatedBare() Unit {}
+
+@DefaultOption { value: OptionX.NoneX }
+def annotatedQualified() Unit {}
+
+def readBare(value OptionX[Int]) Int = match value {
+    case SomeX(item) => item
+    case NoneX => 0
+}
+
+def readQualified(value OptionX[Int]) Int = match value {
+    case OptionX.SomeX(item) => item
+    case OptionX.NoneX => 0
+}
+
+def main() Unit {
+    bare OptionX[Int] = SomeX(5)
+    qualified OptionX[Int] = OptionX.SomeX(5)
+    empty OptionX[Int] = NoneX
+    qualifiedEmpty OptionX[Int] = OptionX.NoneX
+
+    println(readBare(bare))
+    println(readQualified(qualified))
+    println(readBare(empty))
+    println(readQualified(qualifiedEmpty))
+}

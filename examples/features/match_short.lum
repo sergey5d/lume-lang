@@ -28,7 +28,7 @@ class Worker with WorkerLike {
 def printBodyShape(value Int) {
     match value {
         case 0 => ()
-        case 1 => {}
+        case 1 => ()
         case 2 => {
             println("block body")
         }

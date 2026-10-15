@@ -483,6 +483,19 @@ struct EnumCaseSig {
 }
 
 #[derive(Debug, Clone)]
+struct NamedEnumCaseSig {
+    owner: String,
+    case: EnumCaseSig,
+}
+
+fn enum_case_result_owner(case: &EnumCaseSig) -> Option<String> {
+    match &case.result {
+        Ty::Named(owner, _) => Some(owner.clone()),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone)]
 struct TypeSig {
     kind: TypeKind,
     name: String,
@@ -1047,7 +1060,7 @@ struct AmbientInfo {
     types: HashMap<String, TypeSig>,
     objects: HashMap<String, TypeSig>,
     aliases: HashMap<String, TypeRef>,
-    enum_cases: HashMap<String, EnumCaseSig>,
+    enum_cases: HashMap<String, Vec<EnumCaseSig>>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
 }
 
@@ -1092,7 +1105,9 @@ impl AmbientInfo {
                 for (case_name, case_sig) in &sig.enum_cases {
                     ambient
                         .enum_cases
-                        .insert(case_name.clone(), case_sig.clone());
+                        .entry(case_name.clone())
+                        .or_default()
+                        .push(case_sig.clone());
                 }
                 ambient.types.insert(name, sig);
             }
@@ -1352,13 +1367,70 @@ impl World {
             .cloned()
     }
 
-    fn lookup_enum_case(&self, module: &ModuleInfo, name: &str) -> Option<EnumCaseSig> {
-        for sig in module.types.values() {
-            if let Some(case) = sig.enum_cases.get(name) {
-                return Some(case.clone());
-            }
+    fn lookup_bare_enum_cases(&self, module: &ModuleInfo, name: &str) -> Vec<NamedEnumCaseSig> {
+        let mut local = module
+            .types
+            .values()
+            .filter_map(|sig| {
+                sig.enum_cases
+                    .get(name)
+                    .cloned()
+                    .map(|case| NamedEnumCaseSig {
+                        owner: sig.name.clone(),
+                        case,
+                    })
+            })
+            .collect::<Vec<_>>();
+        if !local.is_empty() {
+            local.sort_by(|left, right| left.owner.cmp(&right.owner));
+            return local;
         }
-        self.ambient.enum_cases.get(name).cloned()
+
+        if let Some(imported) = module.symbol_imports.get(name)
+            && imported.kind == ImportedKind::UnionAlternative
+            && let Some(owner) = imported.object_name.as_deref()
+            && let Some(case) = self
+                .modules
+                .get(&imported.module_path)
+                .and_then(|source| source.types.get(owner))
+                .and_then(|sig| sig.enum_cases.get(&imported.original_name))
+        {
+            return vec![NamedEnumCaseSig {
+                owner: owner.to_string(),
+                case: case.clone(),
+            }];
+        }
+
+        let mut ambient = self
+            .ambient
+            .enum_cases
+            .get(name)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .map(|case| NamedEnumCaseSig {
+                owner: enum_case_result_owner(&case).unwrap_or_default(),
+                case,
+            })
+            .collect::<Vec<_>>();
+        ambient.sort_by(|left, right| left.owner.cmp(&right.owner));
+        ambient
+    }
+
+    fn lookup_enum_case(&self, module: &ModuleInfo, name: &str) -> Option<EnumCaseSig> {
+        let mut candidates = self.lookup_bare_enum_cases(module, name);
+        (candidates.len() == 1).then(|| candidates.remove(0).case)
+    }
+
+    fn ambiguous_enum_case_owners(&self, module: &ModuleInfo, name: &str) -> Vec<String> {
+        let candidates = self.lookup_bare_enum_cases(module, name);
+        if candidates.len() < 2 {
+            return Vec::new();
+        }
+        candidates
+            .into_iter()
+            .map(|candidate| candidate.owner)
+            .collect()
     }
 
     fn extension_method_sigs(
@@ -4962,6 +5034,9 @@ impl<'a> Checker<'a> {
                 if let Some(methods) = self.lookup_implicit_method_functions(name) {
                     return self.select_callable_reference_type(name, &methods, expected, *span);
                 }
+                if self.report_ambiguous_union_alternative(name, *span) {
+                    return Ty::Unknown;
+                }
                 if let Some(ty) = self.lookup_bare_enum_case_value_type(name, expected) {
                     return ty;
                 }
@@ -5280,9 +5355,6 @@ impl<'a> Checker<'a> {
                 base
             }
             Expr::RecordLiteral { fields, values, .. } => {
-                if fields.is_empty() && values.is_empty() && expected == &Ty::unit() {
-                    return Ty::unit();
-                }
                 if let Ty::Named(name, _) = expected
                     && let Some(sig) = self.lookup_any_type(name)
                 {
@@ -5604,11 +5676,16 @@ impl<'a> Checker<'a> {
             Expr::Is { left, target, .. } => {
                 self.check_expr(left);
                 let target_ty = match target {
-                    TypeRef::Named { name, args, .. } if args.is_empty() => self
-                        .world
-                        .lookup_enum_case(self.module, name)
-                        .map(|case| case.result)
-                        .unwrap_or_else(|| self.ty_from_type_ref(target)),
+                    TypeRef::Named { name, args, span } if args.is_empty() => {
+                        if self.report_ambiguous_union_alternative(name, *span) {
+                            Ty::Unknown
+                        } else {
+                            self.world
+                                .lookup_enum_case(self.module, name)
+                                .map(|case| case.result)
+                                .unwrap_or_else(|| self.ty_from_type_ref(target))
+                        }
+                    }
                     _ => self.ty_from_type_ref(target),
                 };
                 self.validate_runtime_type_ref(target, &target_ty, "type tests");
@@ -7629,6 +7706,12 @@ impl<'a> Checker<'a> {
                         return Some(ty);
                     }
                 }
+                if self.report_ambiguous_union_alternative(name, callee.span()) {
+                    for arg in args {
+                        self.check_expr(call_arg_value_expr(arg));
+                    }
+                    return Some(Ty::Unknown);
+                }
                 if let Some(case) = self.world.lookup_enum_case(self.module, name) {
                     return Some(self.check_enum_case_constructor_signature(
                         name,
@@ -9585,6 +9668,14 @@ impl<'a> Checker<'a> {
                 }
             }
             Pattern::Record { path, fields, .. } => {
+                if let [name] = path.as_slice()
+                    && self.report_ambiguous_union_alternative(name, pattern.span())
+                {
+                    for field in fields {
+                        self.bind_pattern(&field.pattern, &Ty::Unknown);
+                    }
+                    return;
+                }
                 let target_name = if path.is_empty() {
                     scrutinee.describe()
                 } else {
@@ -9656,6 +9747,14 @@ impl<'a> Checker<'a> {
                 option_shorthand,
                 ..
             } => {
+                if let [name] = path.as_slice()
+                    && self.report_ambiguous_union_alternative(name, pattern.span())
+                {
+                    for pattern in args {
+                        self.bind_pattern(pattern, &Ty::Unknown);
+                    }
+                    return;
+                }
                 if *option_shorthand
                     && !matches!(scrutinee, Ty::Named(name, args) if name == "Option" && args.len() == 1)
                 {
@@ -9886,29 +9985,18 @@ impl<'a> Checker<'a> {
         );
     }
 
-    fn match_case_name_for_enum<'b>(&self, path: &'b [String], enum_name: &str) -> Option<&'b str> {
-        match path {
-            [case_name] => self
-                .lookup_any_type(enum_name)
-                .and_then(|sig| {
-                    sig.enum_cases
-                        .contains_key(case_name)
-                        .then_some(case_name.as_str())
-                })
-                .or_else(|| {
-                    self.lookup_case_by_path(path)
-                        .filter(
-                            |case| matches!(&case.result, Ty::Named(name, _) if name == enum_name),
-                        )
-                        .map(|_| case_name.as_str())
-                }),
-            _ => {
-                let case_name = path.last()?;
-                self.lookup_case_by_path(path)
-                    .filter(|case| matches!(&case.result, Ty::Named(name, _) if name == enum_name))
-                    .map(|_| case_name.as_str())
-            }
+    fn match_case_name_for_enum(&self, path: &[String], enum_name: &str) -> Option<String> {
+        let case = self.lookup_case_by_path(path)?;
+        if !matches!(&case.result, Ty::Named(name, _) if name == enum_name) {
+            return None;
         }
+        if let [name] = path
+            && let Some(imported) = self.module.symbol_imports.get(name)
+            && imported.kind == ImportedKind::UnionAlternative
+        {
+            return Some(imported.original_name.clone());
+        }
+        path.last().cloned()
     }
 
     fn lookup_case_by_path(&self, path: &[String]) -> Option<EnumCaseSig> {
@@ -9922,15 +10010,7 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_case_by_pattern(&self, path: &[String], scrutinee: &Ty) -> Option<EnumCaseSig> {
-        if let Ty::Named(enum_name, _) = scrutinee {
-            if let Some(case_name) = self.match_case_name_for_enum(path, enum_name) {
-                if let Some(sig) = self.lookup_any_type(enum_name) {
-                    if let Some(case) = sig.enum_cases.get(case_name) {
-                        return Some(case.clone());
-                    }
-                }
-            }
-        }
+        let _ = scrutinee;
         self.lookup_case_by_path(path)
     }
 
@@ -12319,6 +12399,28 @@ impl<'a> Checker<'a> {
             .iter()
             .all(|param| param.has_initializer)
             .then(|| self.materialize_enum_case_result_against(&case.result, expected))
+    }
+
+    fn report_ambiguous_union_alternative(
+        &mut self,
+        name: &str,
+        span: crate::source::Span,
+    ) -> bool {
+        let owners = self.world.ambiguous_enum_case_owners(self.module, name);
+        if owners.is_empty() {
+            return false;
+        }
+        let choices = owners
+            .iter()
+            .map(|owner| format!("{owner}.{name}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.add_error(
+            "ambiguous_union_alternative",
+            format!("union alternative '{name}' is ambiguous: {choices}; use a qualified name"),
+            span,
+        );
+        true
     }
 
     fn materialize_enum_case_result_against(&self, result: &Ty, expected: &Ty) -> Ty {
@@ -15778,6 +15880,50 @@ def main() Int {
     }
 
     #[test]
+    fn bare_union_alternatives_require_unique_scope_resolution() {
+        let ambiguous = parse_inline(
+            r#"
+type ConnectionState = object Ready {} | object Closed {}
+type JobState = object Ready {} | object Running {}
+
+def main() Unit {
+    value ConnectionState = ConnectionState.Ready
+    other = Ready
+    match value {
+        case Ready => ()
+        case ConnectionState.Closed => ()
+    }
+}
+"#,
+        );
+        let result = check_program(&ambiguous);
+        let ambiguities = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "ambiguous_union_alternative")
+            .count();
+        assert_eq!(ambiguities, 2, "{:#?}", result.diagnostics);
+
+        let qualified = parse_inline(
+            r#"
+type ConnectionState = object Ready {} | object Closed {}
+type JobState = object Ready {} | object Running {}
+
+def main() Unit {
+    connection ConnectionState = ConnectionState.Ready
+    job JobState = JobState.Ready
+    match connection {
+        case ConnectionState.Ready => ()
+        case ConnectionState.Closed => ()
+    }
+}
+"#,
+        );
+        let result = check_program(&qualified);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
     fn rejects_invalid_known_addition_operands_without_cascading_unknowns() {
         let invalid = parse_inline(
             r#"
@@ -16831,6 +16977,47 @@ def main() Str {
         case Parser.Outcome.Parsed { text } => text
         case Parser.Outcome.Empty => "empty"
     }
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = check_path(&source).expect("typecheck");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn checks_explicitly_imported_union_alternative_aliases() {
+        let temp = workspace_root().join("rust/target/typecheck-union-alternative-import-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("states.lum"),
+            r#"
+module states
+
+type ConnectionState = object Ready {} | object Closed {}
+type JobState = object Ready {} | object Running {}
+"#,
+        )
+        .expect("write states module");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+
+use states/{ConnectionState, ConnectionState.Ready as ConnectionReady}
+
+def isReady(value ConnectionState) Bool = match value {
+    case ConnectionReady => true
+    case ConnectionState.Closed => false
+}
+
+def main() Bool {
+    value ConnectionState = ConnectionReady
+    isReady(value)
 }
 "#,
         )
@@ -19195,17 +19382,17 @@ class EmptyClass {}
 class DefaultedClass {
     value Int = 7
 
-    def noop() = {}
+    def noop() {}
 }
 
 class ExplicitEmpty {
-    new() = {}
+    new() {}
 }
 
 shape EmptyShape {}
 
-def noop() Unit = {}
-def noop2() = {}
+def noop() Unit {}
+def noop2() = ()
 
 def makeEmpty() EmptyClass = new {}
 
@@ -19219,7 +19406,7 @@ def main() Unit {
     values Vector[Str] = new {}
     lookup Map[Str, Int] = new {}
     set Set[Str] = new {}
-    nothing Unit = {}
+    nothing Unit = ()
     anonymous {} = new {}
     structural {} = {}
     defaultedStructural {} = default {}
@@ -19235,6 +19422,39 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_empty_braces_as_unit_expressions() {
+        let program = parse_inline(
+            r#"
+class Legacy {
+    new() = {}
+
+    def method() Unit = {}
+}
+
+def inferred() = {}
+def explicit() Unit = {}
+
+def main() Unit {
+    nothing Unit = {}
+}
+"#,
+        );
+        let result = check_program(&program);
+        let diagnostics = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "missing_empty_construction_target")
+            .collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 5, "{:#?}", result.diagnostics);
+        assert!(diagnostics.iter().all(|diagnostic| {
+            diagnostic
+                .helps
+                .iter()
+                .any(|help| help.contains("use '()' for Unit"))
+        }));
     }
 
     #[test]

@@ -7377,9 +7377,6 @@ impl<'a> SourceBodyEmitter<'a> {
                 values,
                 span,
             } => {
-                if fields.is_empty() && values.is_empty() && is_java_void_type(expected) {
-                    return Some("lume.core.LumeUnit.INSTANCE".to_string());
-                }
                 if fields.is_empty()
                     && values.is_empty()
                     && let ir::Type::Named { name, .. } = expected

@@ -153,6 +153,54 @@ Inline union rules:
   alternatives are referenced by name
 - `match` over a declared union is exhaustive over its alternatives
 
+### Union alternative names
+
+Every declared-union alternative has a qualified name, `Union.Alternative`.
+Its bare name may be used when that name resolves uniquely in the current
+scope. Qualified and bare references identify the same alternative and have
+identical construction, singleton-value, annotation-value, and pattern
+semantics:
+
+```txt
+first OptionX[Int] = SomeX(5)
+second OptionX[Int] = OptionX.SomeX(5)
+
+empty OptionX[Int] = NoneX
+alsoEmpty OptionX[Int] = OptionX.NoneX
+```
+
+Alternatives declared in the current module and prelude alternatives are bare
+name candidates. An explicitly imported alternative is available under its
+imported name or alias. Importing only the owning union does not introduce its
+alternatives as bare names:
+
+```txt
+use states/{ConnectionState}
+
+ready ConnectionState = ConnectionState.Ready
+```
+
+Import an alternative explicitly when an unqualified local spelling is useful:
+
+```txt
+use states/{ConnectionState.Ready as ConnectionReady}
+
+ready = ConnectionReady
+```
+
+When multiple visible alternatives have the same bare name, the bare name is
+ambiguous even if an expected type or match scrutinee could suggest one of
+them. Qualify the name or import one alternative under an alias:
+
+```txt
+type ConnectionState = object Ready {} | object Closed {}
+type JobState = object Ready {} | object Running {}
+
+connection = ConnectionState.Ready
+job = JobState.Ready
+ambiguous = Ready # error: choose ConnectionState.Ready or JobState.Ready
+```
+
 `Pet`, `Cat | Dog`, and `Dog | Cat` are the same type. Union members are flattened
 and de-duplicated, and their written order has no semantic effect.
 
@@ -1247,7 +1295,7 @@ anonymous = {
 
 copy = { ...source }
 
-nothing Unit = {}          # Unit, equivalent to ()
+nothing Unit = ()          # Unit value
 user EmptyUser = new {}    # zero-argument contextual class construction
 names [Str] = []           # empty Vector literal
 
@@ -1255,26 +1303,30 @@ empty = {}                 # error: no construction target
 empty = new {}             # error: no construction target
 ```
 
-Bare empty braces use an expected named or anonymous shape schema. Expected
-`Unit` produces `()`. A class or concrete collection requires `new {}` or an
-explicit constructor, and must satisfy its normal zero-argument construction
-rules. `Any`, an interface, a union, or no expected type does not identify a
-construction target. An empty shape must therefore state its schema explicitly:
+Bare empty braces use an expected named or anonymous shape schema. They do not
+produce `Unit`; write `()` for a Unit value. A class or concrete collection
+requires `new {}` or an explicit constructor, and must satisfy its normal
+zero-argument construction rules. `Any`, an interface, a union, `Unit`, or no
+expected type does not identify a construction target. An empty shape must
+therefore state its schema explicitly:
 
 ```txt
 unknown Any = {}       # error: Any is not a concrete target
+nothing Unit = {}      # error: write () for Unit
 empty {} = {}          # explicit empty structural target
 forced {} = new {}     # same target, explicit construction spelling
 defaults {} = default {} # default construction of the same empty schema
 point { x Int } = {}   # error: required field x is missing
 ```
 
-An exact empty callable body has one deliberate default: it produces `Unit`.
-This applies to direct bodies and unannotated `=` bodies:
+An exact empty direct callable body produces `Unit` because the braces delimit
+the callable body rather than an expression. An `=` body must use `()` when it
+produces Unit:
 
 ```txt
 def noop() {}
-def noop2() = {}
+def noop2() = ()
+def invalid() = {} # error: empty construction has no target
 ```
 
 An explicit return type remains an expected construction target, so these are
@@ -1552,7 +1604,7 @@ Braces are also the field construction form for declared-union payload alternati
 maybe = Some { value: 5 }
 ```
 
-Object alternatives are bare values, not calls:
+Object alternatives are values, not calls. Their names may be bare or qualified:
 
 ```txt
 none = None
@@ -1931,9 +1983,9 @@ new {}                           # forced empty construction; target required
 Single-expression braces such as `{ value }` are block expressions, not
 anonymous shapes. Use `new { value }` when `value` is a punned field. Bare `{}`
 and `new {}` are empty construction and both require an expected target. Bare
-field braces accept only shape or `Unit` targets; constructing a class or
-runtime-backed collection requires `new { ... }` or an explicitly named
-constructor.
+field braces accept only shape targets; constructing a class or runtime-backed
+collection requires `new { ... }` or an explicitly named constructor. Unit
+values use `()`.
 
 Braces that a declaration or control-flow construct requires remain body
 delimiters rather than expressions:
@@ -1941,8 +1993,8 @@ delimiters rather than expressions:
 ```txt
 class Marker {}                  # empty declaration body
 def noop() Unit {}               # empty callable body
-def noop2() = {}                 # inferred empty callable body; Unit
-def noopValue() Unit = {}        # expected Unit produces ()
+def noop2() = ()                 # expression-bodied callable returning Unit
+def invalid() Unit = {}          # error: {} is construction, not Unit
 def make() EmptyUser = new {}    # zero-argument contextual class construction
 ```
 
@@ -2178,7 +2230,7 @@ explicitEmpty = new {}                 # invalid: no construction target
 emptyShape {} = {}                     # explicit empty anonymous shape
 forcedEmpty {} = new {}                # same explicit target
 defaultEmpty {} = default {}           # same target with default initialization
-nothing Unit = {}                      # Unit from expected type
+nothing Unit = ()                      # explicit Unit value
 ```
 
 Anonymous shape field types come from the surrounding declaration:
@@ -4802,7 +4854,8 @@ Rules:
 - every `match` must be exhaustive; use a wildcard case when all remaining values share one result
 - a bare case-head identifier is a named zero-payload case or singleton, never
   a new local binding; use `_ as value` to bind an otherwise unrestricted value
-- object alternatives use their bare name; `Alternative()` is invalid
+- object alternatives use their alternative name, bare or qualified;
+  `Alternative()` is invalid
 - class, shape, primitive, and interface type tests use `_ Type` or `value Type`
 - named-field patterns must select at least one field; `Type {}` is invalid
 - negative numeric patterns are limited to `-` followed by an integer or float

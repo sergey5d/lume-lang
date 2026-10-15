@@ -4066,7 +4066,7 @@ def main() Unit {
     reversed { y Int, x Int } = new(3, 4)
     emptyWorker EmptyWorker = new {}
     emptySet Set[Str] = new {}
-    nothing Unit = {}
+    nothing Unit = ()
     callback fn() Unit = () => {}
     shapeCallback fn() {} = () => new {}
     callbackResult = { ...shapeCallback(), value: 4 }

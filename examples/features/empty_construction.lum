@@ -10,7 +10,7 @@ class Cache {
 
 def noop() {}
 
-def noop2() = {}
+def noop2() = ()
 
 def createCache() Cache = new {}
 
@@ -22,7 +22,7 @@ def main() Unit {
     structural {} = {}
     forced {} = new {}
     defaulted {} = default {}
-    nothing Unit = {}
+    nothing Unit = ()
     explicitUnit = ()
     widened Any = forced
 

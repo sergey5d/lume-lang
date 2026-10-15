@@ -8499,8 +8499,8 @@ mod tests {
 
             shape Marker {}
 
-            def noop() Unit = {}
-            def noop2() = {}
+            def noop() Unit {}
+            def noop2() = ()
 
             def main() Unit {
                 counter Counter = new {}
@@ -8509,7 +8509,7 @@ mod tests {
                 values Vector[Str] = new {}
                 lookup Map[Str, Int] = new {}
                 set Set[Str] = new {}
-                nothing Unit = {}
+                nothing Unit = ()
                 anonymous {} = new {}
                 structural {} = {}
                 defaultedStructural {} = default {}
@@ -10814,12 +10814,12 @@ $name
             def main() Unit {
                 apple = Apple(12)
                 OS.println(match MaybeApple.SomeX(apple) {
-                    case SomeX { value: Apple { size } } => "apple " + size
+                    case MaybeApple.SomeX { value: Apple { size } } => "apple " + size
                     case MaybeApple.NoneX => "apple none"
                 })
                 amount = Amount(13, "cad")
                 OS.println(match MaybeAmount.SomeX(amount) {
-                    case SomeX { value: Amount { count, label } } => "amount " + count + " " + label
+                    case MaybeAmount.SomeX { value: Amount { count, label } } => "amount " + count + " " + label
                     case MaybeAmount.NoneX => "amount none"
                 })
             }
@@ -11431,6 +11431,46 @@ $name
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "A\nA\nB\n11\n112\n110\n");
         assert_eq!(run.return_value.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn run_path_executes_imported_union_alternative_aliases() {
+        let temp = repo_root().join("rust/target/interpreter-union-alternative-import-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("states.lum"),
+            r#"
+module states
+
+type ConnectionState = object Ready {} | object Closed {}
+type JobState = object Ready {} | object Running {}
+"#,
+        )
+        .expect("write states module");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+
+use states/{ConnectionState, ConnectionState.Ready as ConnectionReady}
+
+def main() Unit {
+    value ConnectionState = ConnectionReady
+    println(match value {
+        case ConnectionReady => "ready"
+        case ConnectionState.Closed => "closed"
+    })
+}
+"#,
+        )
+        .expect("write source");
+
+        let run = run_path(&source, None).expect("run source");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "ready\n");
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]

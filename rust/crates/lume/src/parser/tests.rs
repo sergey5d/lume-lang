@@ -2412,7 +2412,7 @@ fn parses_empty_braces_as_construction_in_expression_positions() {
 class Empty {}
 
 def expressionBody() Empty = {}
-def inferredUnit() = {}
+def emptyExpression() = {}
 def blockBody() Unit {}
 
 def lambdas() Unit {
@@ -2433,13 +2433,14 @@ def lambdas() Unit {
             if fields.is_empty() && values.is_empty()
     ));
 
-    let Item::Function(block_body) = &program.items[2] else {
-        panic!("expected inferredUnit function");
+    let Item::Function(empty_expression) = &program.items[2] else {
+        panic!("expected emptyExpression function");
     };
-    assert!(!block_body.equals_body);
+    assert!(empty_expression.equals_body);
     assert!(matches!(
-        block_body.body,
-        CallableBody::Block(ref block) if block.statements.is_empty()
+        empty_expression.body,
+        CallableBody::Expr(Expr::RecordLiteral { ref fields, ref values, .. })
+            if fields.is_empty() && values.is_empty()
     ));
 
     let Item::Function(block_body) = &program.items[3] else {
@@ -2620,6 +2621,17 @@ fn rejects_trailing_commas_in_non_literal_forms() {
             result.diagnostics
         );
     }
+}
+
+#[test]
+fn parses_qualified_union_alternative_import_aliases() {
+    let result = parse("use states/{ConnectionState.Ready as ConnectionReady}");
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let import = program.imports.first().expect("import");
+    let symbol = import.symbols.first().expect("imported symbol");
+    assert_eq!(symbol.name, "ConnectionState.Ready");
+    assert_eq!(symbol.alias.as_deref(), Some("ConnectionReady"));
 }
 
 #[test]

@@ -241,6 +241,7 @@ pub(crate) enum ImportedKind {
     TypeAlias,
     Interface,
     Object,
+    UnionAlternative,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -554,7 +555,6 @@ fn load_module_with_options(
         }
 
         for symbol in symbols {
-            let local_name = symbol.alias.clone().unwrap_or(symbol.name.clone());
             let resolved = if let Some(object_name) = import.object_name.as_deref() {
                 resolve_imported_object_member(
                     child,
@@ -583,6 +583,13 @@ fn load_module_with_options(
                         )
                     })?
             };
+            let local_name = symbol.alias.clone().unwrap_or_else(|| {
+                if resolved.kind == ImportedKind::UnionAlternative {
+                    resolved.original_name.clone()
+                } else {
+                    symbol.name.clone()
+                }
+            });
 
             if module.imports.contains_key(&local_name) {
                 return Err(format!(
@@ -978,6 +985,47 @@ fn resolve_imported_symbol(
             });
         }
     }
+    let alternatives = if let Some((owner_name, case_name)) = name.rsplit_once('.') {
+        decls
+            .types
+            .get(owner_name)
+            .filter(|info| {
+                info.kind == TypeKind::Enum
+                    && declaration_path_is_importable(
+                        owner_name,
+                        info.visibility,
+                        same_module,
+                        &visibilities,
+                    )
+                    && info.enum_cases.contains_key(case_name)
+            })
+            .map(|_| vec![(owner_name.to_string(), case_name.to_string())])
+            .unwrap_or_default()
+    } else {
+        decls
+            .types
+            .iter()
+            .filter_map(|(owner_name, info)| {
+                (info.kind == TypeKind::Enum
+                    && declaration_path_is_importable(
+                        owner_name,
+                        info.visibility,
+                        same_module,
+                        &visibilities,
+                    )
+                    && info.enum_cases.contains_key(name))
+                .then_some((owner_name.clone(), name.to_string()))
+            })
+            .collect::<Vec<_>>()
+    };
+    if let [(owner_name, case_name)] = alternatives.as_slice() {
+        return Some(ImportedSymbol {
+            original_name: case_name.clone(),
+            object_name: Some(owner_name.clone()),
+            kind: ImportedKind::UnionAlternative,
+            module_path: module.path.clone(),
+        });
+    }
     None
 }
 
@@ -1104,7 +1152,7 @@ struct Resolver<'a> {
     types: HashMap<String, TypeInfo>,
     objects: HashMap<String, TypeInfo>,
     aliases: HashMap<String, TypeAliasInfo>,
-    enum_case_values: HashMap<String, crate::source::Span>,
+    enum_case_values: HashMap<String, Vec<String>>,
     imported_values: HashMap<String, Symbol>,
     imported_functions: HashMap<String, crate::source::Span>,
     imported_types: HashMap<String, TypeInfo>,
@@ -1206,7 +1254,10 @@ impl<'a> Resolver<'a> {
                             if decl.kind == TypeKind::Enum {
                                 for member in &decl.members {
                                     if let TypeMember::Case(case) = member {
-                                        self.enum_case_values.insert(case.name.clone(), case.span);
+                                        self.enum_case_values
+                                            .entry(case.name.clone())
+                                            .or_default()
+                                            .push(decl.name.clone());
                                     }
                                 }
                             }
@@ -1353,6 +1404,24 @@ impl<'a> Resolver<'a> {
                 ImportedKind::Value => {
                     if let Some(sym) = decls.globals.get(&symbol.original_name) {
                         self.imported_values.insert(local_name.clone(), *sym);
+                    }
+                }
+                ImportedKind::UnionAlternative => {
+                    if let Some(owner_name) = symbol.object_name.as_deref()
+                        && let Some(span) = decls
+                            .types
+                            .get(owner_name)
+                            .and_then(|info| info.enum_cases.get(&symbol.original_name))
+                    {
+                        self.imported_values.insert(
+                            local_name.clone(),
+                            Symbol {
+                                span: *span,
+                                visibility: Visibility::Default,
+                                mutable: false,
+                                kind: SymbolKind::EnumCase,
+                            },
+                        );
                     }
                 }
                 ImportedKind::Type | ImportedKind::Interface => {
@@ -1550,9 +1619,11 @@ impl<'a> Resolver<'a> {
                         .iter()
                         .all(|value| self.is_annotation_static_value(value))
             }
-            Expr::Identifier { name, .. } => self
-                .lookup_global_value(name)
-                .is_some_and(|symbol| !symbol.mutable),
+            Expr::Identifier { name, .. } => {
+                self.lookup_global_value(name)
+                    .is_some_and(|symbol| !symbol.mutable)
+                    || !self.bare_union_alternative_owners(name).is_empty()
+            }
             Expr::Member { .. } => self.is_stable_annotation_member(expr),
             Expr::Unary {
                 op: crate::ast::UnaryOp::OptionWrap,
@@ -2239,6 +2310,13 @@ impl<'a> Resolver<'a> {
                 {
                     return;
                 }
+                if self.lookup_global_value(name).is_none()
+                    && !self.functions.contains_key(name)
+                    && !self.imported_functions.contains_key(name)
+                    && self.report_ambiguous_union_alternative(name, *span)
+                {
+                    return;
+                }
                 if !self.is_name_defined(name) {
                     self.add_error("undefined_name", self.undefined_value_message(name), *span);
                 }
@@ -2660,6 +2738,9 @@ impl<'a> Resolver<'a> {
         if path.is_empty() {
             return;
         }
+        if path.len() == 1 && self.report_ambiguous_union_alternative(&path[0], span) {
+            return;
+        }
         let base = &path[0];
         if self.modules_by_alias.contains_key(base) {
             if let Some(message) = self.validate_module_segments(path) {
@@ -2827,6 +2908,9 @@ impl<'a> Resolver<'a> {
                 for arg in args {
                     self.resolve_type_ref(Some(arg));
                 }
+                if args.is_empty() && self.report_ambiguous_union_alternative(name, *span) {
+                    return;
+                }
                 if args.is_empty() && self.is_unique_enum_case(name) {
                     return;
                 }
@@ -2861,13 +2945,56 @@ impl<'a> Resolver<'a> {
             });
         }
 
-        self.types
-            .values()
-            .chain(self.imported_types.values())
-            .chain(self.ambient.types.values())
-            .filter(|info| info.kind == TypeKind::Enum && info.enum_cases.contains_key(name))
-            .count()
-            == 1
+        self.bare_union_alternative_owners(name).len() == 1
+    }
+
+    fn bare_union_alternative_owners(&self, name: &str) -> Vec<String> {
+        let mut owners = self
+            .types
+            .iter()
+            .filter_map(|(owner, info)| {
+                (info.kind == TypeKind::Enum && info.enum_cases.contains_key(name))
+                    .then_some(owner.clone())
+            })
+            .collect::<Vec<_>>();
+        if owners.is_empty()
+            && let Some(imported) = self.module.symbol_imports.get(name)
+            && imported.kind == ImportedKind::UnionAlternative
+            && let Some(owner) = imported.object_name.as_ref()
+        {
+            owners.push(owner.clone());
+        }
+        if owners.is_empty() {
+            owners.extend(self.ambient.types.iter().filter_map(|(owner, info)| {
+                (info.kind == TypeKind::Enum && info.enum_cases.contains_key(name))
+                    .then_some(owner.clone())
+            }));
+        }
+        owners.sort();
+        owners.dedup();
+        owners
+    }
+
+    fn report_ambiguous_union_alternative(
+        &mut self,
+        name: &str,
+        span: crate::source::Span,
+    ) -> bool {
+        let owners = self.bare_union_alternative_owners(name);
+        if owners.len() < 2 {
+            return false;
+        }
+        let choices = owners
+            .iter()
+            .map(|owner| format!("{owner}.{name}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.add_error(
+            "ambiguous_union_alternative",
+            format!("union alternative '{name}' is ambiguous: {choices}; use a qualified name"),
+            span,
+        );
+        true
     }
 
     fn define_binding(&mut self, binding: &Binding, code: &'static str) {
@@ -3765,6 +3892,123 @@ def main() Unit {}
         let result =
             resolve_path(workspace_root().join("examples/import_forms.lum")).expect("resolve");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_ambiguous_bare_union_alternatives() {
+        let program = parse_inline(
+            r#"
+type ConnectionState = object Ready {} | object Closed {}
+type JobState = object Ready {} | object Running {}
+
+def main() Unit {
+    value = Ready
+}
+"#,
+        );
+        let result = resolve_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "ambiguous_union_alternative"
+                    && diagnostic.message.contains("ConnectionState.Ready")
+                    && diagnostic.message.contains("JobState.Ready")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn imports_union_alternatives_only_when_explicitly_requested() {
+        let temp = workspace_root().join("rust/target/resolver-union-alternative-import-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("states.lum"),
+            r#"
+module states
+
+type ConnectionState = object Ready {} | object Closed {}
+type JobState = object Ready {} | object Running {}
+"#,
+        )
+        .expect("write states module");
+
+        let owner_only = temp.join("owner_only.lum");
+        fs::write(
+            &owner_only,
+            r#"
+module app
+use states/{ConnectionState}
+
+def main() Unit {
+    value ConnectionState = Ready
+}
+"#,
+        )
+        .expect("write owner-only source");
+        let result = resolve_path(&owner_only).expect("resolve owner-only source");
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.diagnostic.code == "undefined_name"
+                    && diagnostic.diagnostic.message.contains("Ready")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+
+        let explicit = temp.join("explicit.lum");
+        fs::write(
+            &explicit,
+            r#"
+module app
+use states/{ConnectionState, ConnectionState.Ready as ConnectionReady}
+
+def main() ConnectionState = ConnectionReady
+"#,
+        )
+        .expect("write explicit source");
+        let result = resolve_path(&explicit).expect("resolve explicit source");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn qualified_union_alternatives_respect_owner_visibility() {
+        let temp = workspace_root().join("rust/target/resolver-union-alternative-visibility-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("states.lum"),
+            r#"
+module states
+
+private type SecretState = object Hidden {} | object Revealed {}
+"#,
+        )
+        .expect("write states module");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+use states/{SecretState.Hidden as Hidden}
+
+def main() Unit {
+    value = Hidden
+}
+"#,
+        )
+        .expect("write consumer module");
+
+        let error = resolve_path(&source).expect_err("private union alternative import must fail");
+        assert!(
+            error.contains("no visible symbol 'SecretState.Hidden'"),
+            "unexpected error: {error}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]

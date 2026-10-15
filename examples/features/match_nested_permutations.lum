@@ -138,20 +138,20 @@ def main() Unit {
 
     apple12 = Apple(12)
     classInUnion = match MaybeApple.SomeX(apple12) {
-        case SomeX { value: Apple { size } } => "class in union " + size
+        case MaybeApple.SomeX { value: Apple { size } } => "class in union " + size
         case MaybeApple.NoneX => "class in union none"
     }
     println(classInUnion)
 
     amount13 = Amount(13, "cad")
     shapeInUnion = match MaybeAmount.SomeX(amount13) {
-        case SomeX { value: Amount { count, label } } => "shape in union " + count + " " + label
+        case MaybeAmount.SomeX { value: Amount { count, label } } => "shape in union " + count + " " + label
         case MaybeAmount.NoneX => "shape in union none"
     }
     println(shapeInUnion)
 
     tupleInUnion = match MaybePair.SomeX((14, 15)) {
-        case SomeX { value: (left, right) } => "tuple in union " + left + " " + right
+        case MaybePair.SomeX { value: (left, right) } => "tuple in union " + left + " " + right
         case MaybePair.NoneX => "tuple in union none"
     }
     println(tupleInUnion)
