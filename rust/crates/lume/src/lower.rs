@@ -10364,9 +10364,9 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir::Type::option(ir::Type::named("ShapeType"))),
         }),
-        ("Type", "asEnum") => Some(ir::Type::Function {
+        ("Type", "asUnion") => Some(ir::Type::Function {
             params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("EnumType"))),
+            ret: Box::new(ir::Type::option(ir::Type::named("UnionType"))),
         }),
         ("Type", "asInterface") => Some(ir::Type::Function {
             params: Vec::new(),
@@ -10381,7 +10381,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::option(ir::Type::named("AnnotationType"))),
         }),
         (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "name" | "qualifiedName",
         ) => Some(ir::Type::Function {
@@ -10389,7 +10389,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::option(ir::Type::Str)),
         }),
         (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "kind",
         ) => Some(ir::Type::Function {
@@ -10397,16 +10397,16 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::named("TypeKind")),
         }),
         (
-            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType" | "Field" | "Method" | "EnumCase",
+            "Type" | "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
+            | "AnnotationType" | "Field" | "Method" | "UnionAlternative",
             "annotation",
         ) => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::option(ir::Type::named("AnnotationValue"))),
         }),
         (
-            "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType" | "Field" | "Method" | "EnumCase",
+            "Type" | "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
+            | "AnnotationType" | "Field" | "Method" | "UnionAlternative",
             "hasAnnotation",
         ) => Some(ir::Type::Function {
             params: Vec::new(),
@@ -10434,7 +10434,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::Str],
             ret: Box::new(ir::Type::option(ir::Type::named("Field"))),
         }),
-        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType", "methods") => {
+        ("ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType", "methods") => {
             Some(ir::Type::Function {
                 params: Vec::new(),
                 ret: Box::new(ir::Type::list(ir::Type::named("Method"))),
@@ -10451,13 +10451,13 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
                 args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
             }),
         }),
-        ("EnumType", "cases") => Some(ir::Type::Function {
+        ("UnionType", "alternatives") => Some(ir::Type::Function {
             params: Vec::new(),
-            ret: Box::new(ir::Type::list(ir::Type::named("EnumCase"))),
+            ret: Box::new(ir::Type::list(ir::Type::named("UnionAlternative"))),
         }),
-        ("EnumType", "case") => Some(ir::Type::Function {
+        ("UnionType", "alternative") => Some(ir::Type::Function {
             params: vec![ir::Type::Str],
-            ret: Box::new(ir::Type::option(ir::Type::named("EnumCase"))),
+            ret: Box::new(ir::Type::option(ir::Type::named("UnionAlternative"))),
         }),
         ("Field", "name") => Some(ir::Type::Function {
             params: Vec::new(),
@@ -10508,15 +10508,15 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: Vec::new(),
             ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
         }),
-        ("EnumCase", "name") => Some(ir::Type::Function {
+        ("UnionAlternative", "name") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::Str),
         }),
-        ("EnumCase", "fields") => Some(ir::Type::Function {
+        ("UnionAlternative", "fields") => Some(ir::Type::Function {
             params: Vec::new(),
             ret: Box::new(ir::Type::list(ir::Type::named("Field"))),
         }),
-        ("EnumCase", "construct") => Some(ir::Type::Function {
+        ("UnionAlternative", "construct") => Some(ir::Type::Function {
             params: vec![ir::Type::list(ir::Type::named("Any"))],
             ret: Box::new(ir::Type::Named {
                 name: "Result".to_string(),
@@ -10684,26 +10684,25 @@ fn builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Type", "name" | "qualifiedName")
         | (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "name" | "qualifiedName",
         ) => Some(ir::Type::option(ir::Type::Str)),
         ("Type", "kind")
         | (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "kind",
         ) => Some(ir::Type::named("TypeKind")),
-        ("AnnotationValue", "name") | ("Field" | "Method" | "Param" | "EnumCase", "name") => {
-            Some(ir::Type::Str)
-        }
+        ("AnnotationValue", "name")
+        | ("Field" | "Method" | "Param" | "UnionAlternative", "name") => Some(ir::Type::Str),
         ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields")
-        | ("EnumCase", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
-        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType", "methods") => {
+        | ("UnionAlternative", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
+        ("ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType", "methods") => {
             Some(ir::Type::list(ir::Type::named("Method")))
         }
         ("Method", "params") => Some(ir::Type::list(ir::Type::named("Param"))),
-        ("EnumType", "cases") => Some(ir::Type::list(ir::Type::named("EnumCase"))),
+        ("UnionType", "alternatives") => Some(ir::Type::list(ir::Type::named("UnionAlternative"))),
         ("Field", "fieldType") | ("Method", "returnType") | ("Param", "paramType") => {
             Some(ir_exact_runtime_type(ir::Type::Unknown))
         }
@@ -10740,13 +10739,13 @@ fn is_annotated_metadata_type(ty: &ir::Type) -> bool {
                 "Type"
                     | "ClassType"
                     | "ShapeType"
-                    | "EnumType"
+                    | "UnionType"
                     | "InterfaceType"
                     | "ObjectType"
                     | "AnnotationType"
                     | "Field"
                     | "Method"
-                    | "EnumCase"
+                    | "UnionAlternative"
             )
     )
 }

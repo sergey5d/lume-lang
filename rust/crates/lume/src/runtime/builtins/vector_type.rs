@@ -351,7 +351,7 @@ fn list_sort(
             } else {
                 interpreter.invoke_method(
                     values[i].clone(),
-                    "compare",
+                    "compareTo",
                     vec![values[j].clone()],
                     span,
                 )?

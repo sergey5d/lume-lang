@@ -4,7 +4,7 @@
 class Consumer {
 
     new(values [Str]) {}
-    new(values [Str : Int]) {}
+    new(values [Str: Int]) {}
 }
 
 

@@ -5746,11 +5746,11 @@ fn parses_map_type_ref_shorthand() {
     let result = parse(
         r#"
 class Store {
-    counts [Str : Int]
-    nested [Str : [Int : Bool]]
+    counts [Str: Int]
+    nested [Str: [Int: Bool]]
 }
 
-def lookup(values [Str : Int], key Str) Option[Int] = values[key]
+def lookup(values [Str: Int], key Str) Option[Int] = values[key]
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);

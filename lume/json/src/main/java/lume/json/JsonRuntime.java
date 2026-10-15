@@ -112,8 +112,8 @@ public final class JsonRuntime {
                 || type.kind() == LumeTypeKind.Object) {
             return encodeStructured(value, type);
         }
-        if (type.kind() == LumeTypeKind.Enum) {
-            return encodeEnum(value);
+        if (type.kind() == LumeTypeKind.Union) {
+            return encodeUnion(value);
         }
         return str(String.valueOf(value));
     }
@@ -238,7 +238,7 @@ public final class JsonRuntime {
         throw new IllegalStateException(result.getError().message());
     }
 
-    private static JsonValue encodeEnum(Object value) {
+    private static JsonValue encodeUnion(Object value) {
         var caseName = value.getClass().getSimpleName();
         var fields = new LinkedHashMap<String, Object>();
         for (var method : value.getClass().getDeclaredMethods()) {
@@ -249,7 +249,7 @@ public final class JsonRuntime {
                 method.setAccessible(true);
                 fields.put(method.getName(), method.invoke(value));
             } catch (IllegalAccessException | InvocationTargetException err) {
-                throw new IllegalStateException("cannot encode enum case field '" + method.getName() + "'", err);
+                throw new IllegalStateException("cannot encode union alternative field '" + method.getName() + "'", err);
             }
         }
         if (fields.isEmpty()) {

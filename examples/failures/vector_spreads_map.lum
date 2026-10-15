@@ -2,6 +2,6 @@
 # .*cannot spread a map into a vector literal.*
 
 def main() Unit {
-    entries [Str : Int] = ["one": 1]
+    entries [Str: Int] = ["one": 1]
     values = [0, ...entries]
 }

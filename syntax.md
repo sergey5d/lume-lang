@@ -15,7 +15,7 @@ Primitive types:
 
 Intrinsic collection types:
 
-- `[K : V]` (map; nominal spelling `Map[K, V]` is also accepted)
+- `[K: V]` (map; nominal spelling `Map[K, V]` is also accepted)
 - `Vector[T]` or `[T]`
 
 `Vector` and `Map` are concrete classes with intrinsic bracket type/literal
@@ -25,8 +25,8 @@ Vector and map shorthand can be nested, for example:
 
 - `[[Int]]`
 - `[[[(Str, Int)]]]`
-- `[Str : [Int]]`
-- `[Str : [Int : Bool]]`
+- `[Str: [Int]]`
+- `[Str: [Int: Bool]]`
 
 `T?` is shorthand for `Option[T]` in every type position:
 
@@ -214,7 +214,7 @@ Common stdlib/prelude types:
 - `Iterator[T]`
 - `Type[T]`
 - `TypeKind`
-- `Ordered[T]`
+- `Comparable[T]`
 - `Printer`
 - `OS`
 
@@ -350,8 +350,8 @@ It means "some definite type, but this code does not know which one."
 
 ```txt
 a Vector[_] = Vector(1, 2, 3)
-b [_ : Str] = intStrMap()
-c [_ : _] = strIntMap()
+b [_: Str] = intStrMap()
+c [_: _] = strIntMap()
 ```
 
 When a value is viewed through `_`, the unknown type is captured at that source:
@@ -474,10 +474,8 @@ otherwise not known precisely, the represented type is captured and may be
 written at use sites as `Type[_]`. This is still `Type[T]` with wildcard
 capture, not a separate metadata type.
 
-The current reflection ABI retains the compatibility names `EnumType`,
-`EnumCase`, `TypeKind.Enum`, and `asEnum()` for closed declared-union metadata.
-These are reflection API names only; source declarations use `type ... =` with
-`class`, `shape`, and `object` alternatives.
+Closed declared unions use `UnionType`, `UnionAlternative`, `TypeKind.Union`,
+and `asUnion()` in the reflection API.
 
 Common metadata operations:
 
@@ -491,10 +489,10 @@ let Some { value as nameField } = classType.field("name") else panic("expected n
 println(nameField.fieldType.name !)
 println(nameField.isPrivate)
 
-enumType EnumType[Status] = typeOf[Status].asEnum() !
-let Some { value as pendingCase } = enumType.case("Pending") else panic("expected Pending case")
-println(pendingCase.name)
-constructedCase Result[Any, ReflectionError] = pendingCase.construct()
+unionType UnionType[Status] = typeOf[Status].asUnion() !
+let Some { value as pending } = unionType.alternative("Pending") else panic("expected Pending alternative")
+println(pending.name)
+constructedAlternative Result[Any, ReflectionError] = pending.construct()
 ```
 
 Safe reflective invocation uses `Result` values:
@@ -520,13 +518,13 @@ Rules:
 
 - `typeOf[T]` is a built-in type metadata operator, not an index operation
 - `runtimeType` is available as a read-only synthetic field on values
-- `TypeKind` includes `Class`, `Shape`, `Enum`, `Interface`, `Object`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
+- `TypeKind` includes `Class`, `Shape`, `Union`, `Interface`, `Object`, `Annotation`, `Primitive`, `Tuple`, `Function`, and `AnonymousShape`
 - field, method, parameter, and declared-union alternative metadata are runtime
   values; their read-only metadata uses getters such as `name`, `fieldType`,
   `isPrivate`, `params`, and `returnType`
 - annotation lookup is typed and reified: use `metadata.hasAnnotation[Route]()` and `metadata.annotation[Route]()`
 - reflective construction is supported for class and named shape metadata through `construct(args...)`
-- reflective declared-union alternative construction is supported through the compatibility API `EnumCase.construct(args...)`
+- reflective declared-union alternative construction is supported through `UnionAlternative.construct(args...)`
 - annotations are metadata only; they cannot be constructed as runtime values in source code or through reflection
 - reflective field reads use `Field.get(receiver)` and reflective safe method calls use `Method.call(receiver, args...)`
 
@@ -677,7 +675,7 @@ Meaning:
   use a selected symbol set
 - `use module/sub/SingletonName/*`
   use all visible singleton methods unqualified
-- `use module/sub/SingletonName/{printLn as printN, print}`
+- `use module/sub/SingletonName/{println as printN, print}`
   use selected visible singleton methods from a singleton
 
 Built-in `OS` methods are available implicitly in every file, so `print(...)`, `println(...)`, and `printf(...)` work without writing `use OS/*`. Prelude functions like `panic(...)`, `assert(...)`, `ensure(...)`, and `identity(...)` are also available in every file. Fields like `OS.stdout` and `OS.stderr` still use explicit member access.
@@ -2915,7 +2913,7 @@ dtos = users.map(this.mapUser)
 # same as: users.map(user => this.mapUser(user))
 
 dtos = users.map(User.toDto)
-# named object method reference
+# unbound class method reference
 ```
 
 Supported callable references:
@@ -2923,7 +2921,7 @@ Supported callable references:
 - top-level function name
 - bound instance method, such as `mapper.mapUser`
 - bound `this` method, such as `this.mapUser`
-- bound named-object method, such as `User.toDto`
+- unbound class method, such as `User.toDto`
 
 Stored fields, computed getters, and methods share one member-name namespace.
 A type cannot reuse a name across those categories, including through an
@@ -3435,12 +3433,12 @@ nonEmptyTotal = values.reduce((left, right) => left + right)
 ```
 
 `sort` mutates the vector and returns that same vector. Values implementing
-`Ordered[T]` can use the parameterless form; an explicit comparator function
+`Comparable[T]` can use the parameterless form; an explicit comparator function
 provides an ad hoc ordering:
 
 ```txt
 values.sort()
-values.sort((left, right) => left.score - right.score)
+values.sort((left, right) => left.score.compareTo(right.score))
 firstTen = values.take(10)
 ```
 
@@ -3448,7 +3446,7 @@ To preserve the original order, copy first and sort the copy:
 
 ```txt
 ordered = [...values]
-ordered.sort((left, right) => left.score - right.score)
+ordered.sort((left, right) => left.score.compareTo(right.score))
 ```
 
 `Vector`, `LinkedList`, and `Set` provide `makeStr`. The one-argument form uses
@@ -3462,7 +3460,9 @@ evidence.makeStr(", ", value => value.label())
 
 A comparator returns a negative value when `left` belongs before `right`, zero
 when they compare equally, and a positive value when `left` belongs after
-`right`.
+`right`. `Int`, `Float`, and `Str` implement `Comparable` directly. Prefer
+`left.compareTo(right)` to subtracting numeric sort keys: subtraction can wrap
+for `Int` values near the limits of its range.
 
 `flatten()` removes one iterable layer. The vector element type must implement
 `Iterable[X]`; this includes nested vectors, sets, and `Option[X]`. An absent
@@ -3476,18 +3476,18 @@ nested [Int] = [[1, 2], [3]].flatten()             # [1, 2, 3]
 Map construction:
 
 ```txt
-entries [Str : Int] = ["a": 1, "b": 2]
-empty [Str : Int] = []
+entries [Str: Int] = ["a": 1, "b": 2]
+empty [Str: Int] = []
 value Option[Int] = entries["a"]
 allKeys [Str] = entries.keys()
 allValues [Int] = entries.values()
 
-totals [Str : Int] = ["Ada": 10]
+totals [Str: Int] = ["Ada": 10]
 totals["Ada"] += 5
 totals["Ada"] -= 2
 
-defaults [Str : Int] = ["port": 80, "secure": 0]
-overrides [Str : Int] = ["port": 443]
+defaults [Str: Int] = ["port": 80, "secure": 0]
+overrides [Str: Int] = ["port": 443]
 copy = [...defaults]
 merged = [...defaults, "retries": 3, ...overrides]
 ```
@@ -3497,7 +3497,7 @@ Indexed map compound assignment updates an existing entry and supports the same
 It panics when the key is absent; use `map[key] := initial` when insertion is
 intended.
 
-`[K : V]` is the concise map type syntax and is equivalent to `Map[K, V]`.
+`[K: V]` is the concise map type syntax and is equivalent to `Map[K, V]`.
 The colon belongs to type grammar here; it does not construct a pair value.
 
 Non-empty map literals use `[key: value, ...]`. Keys are expressions, so
@@ -3505,8 +3505,8 @@ computed and tuple keys do not need a separate marker:
 
 ```txt
 dynamic = "name"
-scores [Str : Int] = [dynamic: 10, makeKey(): 20]
-positions [(Int, Int) : Str] = [(10, 20): "start"]
+scores [Str: Int] = [dynamic: 10, makeKey(): 20]
+positions [(Int, Int): Str] = [(10, 20): "start"]
 ```
 
 Map entries and spreads are comma-separated and may be interleaved. Spreading
@@ -3549,19 +3549,19 @@ type:
 
 ```txt
 names [Str] = []                 # empty vector
-counts [Str : Int] = []          # empty map
+counts [Str: Int] = []          # empty map
 
 def emptyNames() [Str] = []
-def emptyCounts() [Str : Int] = []
+def emptyCounts() [Str: Int] = []
 
 consumeNames([])                  # valid when the parameter is [Str]
-consumeCounts([])                 # valid when the parameter is [Str : Int]
+consumeCounts([])                 # valid when the parameter is [Str: Int]
 
 values = []                       # invalid: collection type is unknown
 ```
 
-The compiler does not default `[]` to a vector, infer `[Any]` or `[Any : Any]`,
-or infer its type from later mutations. Only `[T]` and `[K : V]` provide valid
+The compiler does not default `[]` to a vector, infer `[Any]` or `[Any: Any]`,
+or infer its type from later mutations. Only `[T]` and `[K: V]` provide valid
 contexts; `Set[T]`, `Array[T]`, and custom collection types retain their own
 construction syntax. If overloaded vector and map parameters both match `[]`,
 the call is ambiguous and requires an intermediate typed binding. The former
@@ -3591,7 +3591,7 @@ let (value, _, _) = tuple3   # valid full-arity extraction
 `:` is not a general expression operator. It appears in map types, map
 literals, and construction field lists:
 
-- `[K : V]` separates the key and value types of a map
+- `[K: V]` separates the key and value types of a map
 - `[key: value]` constructs a map entry
 - `field: value` binds a value to a construction field
 
@@ -3867,7 +3867,7 @@ result = if value > 0 {
 }
 ```
 
-Brace-delimited branches are the preferred `if` form. `else` does not require `:`.
+Brace-delimited branches are the preferred `if` form.
 
 ## Irrefutable and Refutable Bindings
 
@@ -5339,7 +5339,7 @@ Current operator overloading constraints:
   - logical operators: `&&`, `||`, `!`
   - equality operators: `==`, `!=`, `===`, `!==`
   - symbolic collection/custom forms: `:+`, `:-`, `++`, `--`, `::`
-- Comparison operators use intrinsic numeric and string ordering, or `Ordered[T]` for user-defined values. `Ordered[T]` declares `compare(other T) Int`.
+- Comparison operators use intrinsic numeric and string ordering, or `Comparable[T]` for user-defined values. `Comparable[T]` declares `compareTo(other T) Int`.
 - `==`, `!=`, `===`, and `!==` use the applicable `Eq[T]` contract and cannot be overloaded independently; `===` and `!==` additionally test concrete type.
 - Reference identity is expressed by equality between opaque `referenceId` values; `ReferenceId` equality and hashing cannot be overloaded.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
@@ -5425,14 +5425,9 @@ size = "hello"
 
 Supported today:
 
-- `internal` on top-level declarations, immutable bindings, fields, methods, and constructors
-- `private` on top-level `def`
-- `private` on top-level immutable bindings
-- `private` on top-level `interface`
-- `private` on top-level `class` / `shape` / `object` / `type`
-- `private` on fields
-- `private` on methods
-- `private` on constructors
+- `private` and `internal` on top-level `def` and immutable bindings
+- `private` and `internal` on top-level `annotation`, `interface`, `class`, `shape`, `object`, and `type` declarations
+- `private` and `internal` on fields, methods, and constructors, subject to the structural-field restriction below
 
 Default visibility is public. There is no `public` keyword.
 Use `internal` for declarations and members shared by files with the same

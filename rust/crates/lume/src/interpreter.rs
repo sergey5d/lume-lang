@@ -1110,7 +1110,7 @@ impl Value {
             Value::RuntimeField { .. } => "<field>".to_string(),
             Value::RuntimeMethod { .. } => "<method>".to_string(),
             Value::RuntimeParam { .. } => "<param>".to_string(),
-            Value::RuntimeEnumCase { .. } => "<enum-case>".to_string(),
+            Value::RuntimeEnumCase { .. } => "<union-alternative>".to_string(),
         }
     }
 }
@@ -2159,7 +2159,7 @@ impl<'a> Interpreter<'a> {
                 self.runtime_type_value_for_ir_type(&ir::Type::named("Param"))
             }
             Value::RuntimeEnumCase { .. } => {
-                self.runtime_type_value_for_ir_type(&ir::Type::named("EnumCase"))
+                self.runtime_type_value_for_ir_type(&ir::Type::named("UnionAlternative"))
             }
             _ => self
                 .runtime_type_id_for_value(value)
@@ -2364,7 +2364,7 @@ impl<'a> Interpreter<'a> {
             }
             "asClass" => self.runtime_type_cast_value(runtime_type, "Class", method, args, span),
             "asShape" => self.runtime_type_cast_value(runtime_type, "Shape", method, args, span),
-            "asEnum" => self.runtime_type_cast_value(runtime_type, "Enum", method, args, span),
+            "asUnion" => self.runtime_type_cast_value(runtime_type, "Union", method, args, span),
             "asInterface" => {
                 self.runtime_type_cast_value(runtime_type, "Interface", method, args, span)
             }
@@ -2390,11 +2390,11 @@ impl<'a> Interpreter<'a> {
                 let name = self.expect_metadata_string_arg(method, &args[0], span)?;
                 Ok(self.runtime_type_method_value(&runtime_type, &name))
             }
-            "cases" => {
+            "alternatives" => {
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(self.runtime_type_enum_cases_value(&runtime_type))
             }
-            "case" => {
+            "alternative" => {
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 let name = self.expect_metadata_string_arg(method, &args[0], span)?;
                 Ok(self.runtime_type_enum_case_value(&runtime_type, &name))
@@ -2624,7 +2624,7 @@ impl<'a> Interpreter<'a> {
                     crate::ast::TypeKind::Record => "Shape",
                     crate::ast::TypeKind::Object => "Object",
                     crate::ast::TypeKind::Interface => "Interface",
-                    crate::ast::TypeKind::Enum => "Enum",
+                    crate::ast::TypeKind::Enum => "Union",
                 })
                 .unwrap_or("Primitive"),
             RuntimeTypeValue::Primitive(_) | RuntimeTypeValue::Unknown => "Primitive",
@@ -5660,6 +5660,26 @@ impl<'a> Interpreter<'a> {
                 }
                 Ok(Some(Value::Int(self.hash_value(&receiver, span)?)))
             }
+            "compareTo" => {
+                if args.len() != 1 {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("compareTo expects 1 argument, got {}", args.len()),
+                    ));
+                }
+                let comparison = match (&receiver, &args[0]) {
+                    (Value::Int(left), Value::Int(right)) => left.cmp(right),
+                    (Value::Float(left), Value::Float(right)) => left.total_cmp(right),
+                    (Value::String(left), Value::String(right)) => left.cmp(right),
+                    _ => return Ok(None),
+                };
+                let value = match comparison {
+                    std::cmp::Ordering::Less => -1,
+                    std::cmp::Ordering::Equal => 0,
+                    std::cmp::Ordering::Greater => 1,
+                };
+                Ok(Some(Value::Int(value)))
+            }
             _ => Ok(None),
         }
     }
@@ -6786,7 +6806,7 @@ impl<'a> Interpreter<'a> {
                     "Type" | "Annotated" => true,
                     "ClassType" => self.runtime_type_kind_case(runtime_type) == "Class",
                     "ShapeType" => self.runtime_type_kind_case(runtime_type) == "Shape",
-                    "EnumType" => self.runtime_type_kind_case(runtime_type) == "Enum",
+                    "UnionType" => self.runtime_type_kind_case(runtime_type) == "Union",
                     "InterfaceType" => self.runtime_type_kind_case(runtime_type) == "Interface",
                     "ObjectType" => self.runtime_type_kind_case(runtime_type) == "Object",
                     "AnnotationType" => self.runtime_type_kind_case(runtime_type) == "Annotation",
@@ -6795,7 +6815,7 @@ impl<'a> Interpreter<'a> {
                 Value::RuntimeField { .. } => name == "Field" || name == "Annotated",
                 Value::RuntimeMethod { .. } => name == "Method" || name == "Annotated",
                 Value::RuntimeParam { .. } => name == "Param",
-                Value::RuntimeEnumCase { .. } => name == "EnumCase" || name == "Annotated",
+                Value::RuntimeEnumCase { .. } => name == "UnionAlternative" || name == "Annotated",
                 Value::ReferenceId(_) => name == "ReferenceId",
                 Value::FileStream(_) => matches!(
                     name.as_str(),
@@ -7660,8 +7680,8 @@ fn compare_binary(
         }
         _ => {
             let comparison = in_
-                .invoke_method(left, "compare", vec![right], span)?
-                .as_int(in_, span, "Ordered.compare result")?;
+                .invoke_method(left, "compareTo", vec![right], span)?
+                .as_int(in_, span, "Comparable.compareTo result")?;
             Ok(Value::Bool(int_op(comparison, 0)))
         }
     }

@@ -2,11 +2,12 @@
 # true true true true
 # ascending 1 2 3
 # descending 3 2 1
+# boundary -1 1
 
-class Score with Ordered[Score] {
+class Score with Comparable[Score] {
     value Int
 
-    def compare(other Score) Int = value - other.value
+    def compareTo(other Score) Int = value.compareTo(other.value)
 }
 
 def main() Unit {
@@ -18,6 +19,10 @@ def main() Unit {
     scores.sort()
     println("ascending", scores[0].value, scores[1].value, scores[2].value)
 
-    scores.sort((left, right) => right.compare(left))
+    scores.sort((left, right) => right.compareTo(left))
     println("descending", scores[0].value, scores[1].value, scores[2].value)
+
+    minimum Int = -9223372036854775808
+    maximum Int = 9223372036854775807
+    println("boundary", minimum.compareTo(maximum), maximum.compareTo(minimum))
 }

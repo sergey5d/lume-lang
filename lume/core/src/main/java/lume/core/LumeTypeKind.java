@@ -3,7 +3,7 @@ package lume.core;
 public enum LumeTypeKind {
     Class,
     Shape,
-    Enum,
+    Union,
     Interface,
     Object,
     Annotation,

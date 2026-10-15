@@ -5,11 +5,11 @@
 
 def main() Int {
     asc [Int] = [3, 1, 4, 2]
-    asc.sort((left, right) => left - right)
+    asc.sort((left, right) => left.compareTo(right))
     println("asc " + (asc.at(0) ?? 0) + " " + (asc.at(1) ?? 0) + " " + (asc.at(2) ?? 0) + " " + (asc.at(3) ?? 0))
 
     desc [Int] = [3, 1, 4, 2]
-    desc.sort((left, right) => right - left)
+    desc.sort((left, right) => right.compareTo(left))
     println("desc " + (desc.at(0) ?? 0) + " " + (desc.at(1) ?? 0) + " " + (desc.at(2) ?? 0) + " " + (desc.at(3) ?? 0))
 
     0

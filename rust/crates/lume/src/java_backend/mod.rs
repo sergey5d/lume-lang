@@ -1425,7 +1425,7 @@ fn parse_javap_lume_kind(output: &str) -> Option<TypeKind> {
         "shape" => Some(TypeKind::Record),
         "object" => Some(TypeKind::Object),
         "interface" => Some(TypeKind::Interface),
-        "enum" => Some(TypeKind::Enum),
+        "union" => Some(TypeKind::Enum),
         _ => None,
     }
 }
@@ -2969,12 +2969,12 @@ def main() Unit {
 module demo/mapliteral
 
 def main() Unit {
-    entries [Str : Int] = ["one": 1, "two": 2]
-    copy [Str : Int] = [...entries]
-    merged [Str : Int] = [...copy, "three": 3]
+    entries [Str: Int] = ["one": 1, "two": 2]
+    copy [Str: Int] = [...entries]
+    merged [Str: Int] = [...copy, "three": 3]
     entryList [(Str, Int)] = [...merged.entries()]
     keys [Str] = merged.keys()
-    empty [Str : Int] = []
+    empty [Str: Int] = []
     println(entries.size, copy.size, merged.size, entryList.size, keys.size, empty.size)
 }
 "#,
@@ -6108,7 +6108,7 @@ def main() Unit {
     })
     println(copyView(view()).name)
     println(span.end - span.start)
-    println("alice".compare("bob") < 0)
+    println("alice".compareTo("bob") < 0)
 }
 "#,
         )
@@ -6994,10 +6994,10 @@ def main() Unit {
     println(ageField.name)
     println(ageField.fieldType.name !)
 
-    enumType EnumType[Status] = typeOf[Status].asEnum() !
-    println(enumType.name !)
-    println(enumType.kind)
-    println((enumType.case("Pending") !).name)
+    unionType UnionType[Status] = typeOf[Status].asUnion() !
+    println(unionType.name !)
+    println(unionType.kind)
+    println((unionType.alternative("Pending") !).name)
 }
 "#,
         )
@@ -7037,7 +7037,7 @@ def main() Unit {
         let actual = String::from_utf8(output.stdout).expect("java stdout utf8");
         assert_eq!(
             actual,
-            "User\ndemo.metadata.User\nClass\n2\nname\nStr\nage\nInt\nStatus\nEnum\nPending\n"
+            "User\ndemo.metadata.User\nClass\n2\nname\nStr\nage\nInt\nStatus\nUnion\nPending\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7781,17 +7781,17 @@ def main() Unit {
             r#"
 module demo/mapassignment
 
-def emptyMap() [Str : Int] = []
-def mapSize(values [Str : Int]) Int = values.size
+def emptyMap() [Str: Int] = []
+def mapSize(values [Str: Int]) Int = values.size
 
 class Cache {
-    private var values [Str : Int] = []
+    private var values [Str: Int] = []
 
     new() {}
 
     def currentValue() Int = 7
 
-    def empty() [Str : Int] = []
+    def empty() [Str: Int] = []
 
     def store(key Str) Unit {
         values[key] := currentValue()
@@ -8227,10 +8227,10 @@ class Holder {
     payload { x Int }
 }
 
-class Rank with Ordered[Rank] {
+class Rank with Comparable[Rank] {
     value Int
 
-    def compare(other Rank) Int = value - other.value
+    def compareTo(other Rank) Int = value.compareTo(other.value)
 }
 
 class GuardTracker {
@@ -8298,6 +8298,11 @@ def main() Int {
     maximum Int = 9223372036854775807
     minimum Int = maximum + 1
     println(minimum, minimum / -1, minimum % -1)
+    println(maximum.compareTo(minimum), minimum.compareTo(maximum))
+    boundaries = [maximum, minimum]
+    boundaries.sort()
+    println(boundaries[0], boundaries[1])
+    println(1.5.compareTo(2.5), "alice".compareTo("bob"))
 
     println(1.0 / 0.0 > 0.0, 0.0 / 0.0 < 0.0, 5.5 % 2.0)
     println(high > 9007199254740992.0)

@@ -9,7 +9,7 @@ public final class LumeType {
     private final LumeTypeKind kind;
     private final List<LumeField> fields;
     private final List<LumeMethod> methods;
-    private final List<LumeEnumCase> cases;
+    private final List<LumeUnionAlternative> alternatives;
     private final List<LumeAnnotation> annotations;
 
     private LumeType(
@@ -18,14 +18,14 @@ public final class LumeType {
             LumeTypeKind kind,
             List<LumeField> fields,
             List<LumeMethod> methods,
-            List<LumeEnumCase> cases,
+            List<LumeUnionAlternative> alternatives,
             List<LumeAnnotation> annotations) {
         this.name = name;
         this.qualifiedName = qualifiedName;
         this.kind = kind;
         this.fields = List.copyOf(fields);
         this.methods = List.copyOf(methods);
-        this.cases = List.copyOf(cases);
+        this.alternatives = List.copyOf(alternatives);
         this.annotations = List.copyOf(annotations);
     }
 
@@ -81,27 +81,27 @@ public final class LumeType {
                 List.of(annotations));
     }
 
-    public static LumeType enumType(
+    public static LumeType unionType(
             String name,
             String qualifiedName,
-            LumeEnumCase[] cases,
+            LumeUnionAlternative[] alternatives,
             LumeMethod[] methods) {
-        return enumType(name, qualifiedName, cases, methods, new LumeAnnotation[] {});
+        return unionType(name, qualifiedName, alternatives, methods, new LumeAnnotation[] {});
     }
 
-    public static LumeType enumType(
+    public static LumeType unionType(
             String name,
             String qualifiedName,
-            LumeEnumCase[] cases,
+            LumeUnionAlternative[] alternatives,
             LumeMethod[] methods,
             LumeAnnotation[] annotations) {
         return new LumeType(
                 name,
                 qualifiedName,
-                LumeTypeKind.Enum,
+                LumeTypeKind.Union,
                 List.of(),
                 List.of(methods),
-                List.of(cases),
+                List.of(alternatives),
                 List.of(annotations));
     }
 
@@ -189,8 +189,8 @@ public final class LumeType {
         return kind == LumeTypeKind.Shape ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
-    public Option<LumeType> asEnum() {
-        return kind == LumeTypeKind.Enum ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
+    public Option<LumeType> asUnion() {
+        return kind == LumeTypeKind.Union ? LumeRuntime.optionSome(this) : LumeRuntime.optionNone();
     }
 
     public Option<LumeType> asInterface() {
@@ -271,13 +271,13 @@ public final class LumeType {
                 + args.length + " arguments");
     }
 
-    public LumeVector<LumeEnumCase> cases() {
-        return LumeVector.from(cases);
+    public LumeVector<LumeUnionAlternative> alternatives() {
+        return LumeVector.from(alternatives);
     }
 
-    public Option<LumeEnumCase> case_(String name) {
-        return cases.stream()
-                .filter(enumCase -> enumCase.name().equals(name))
+    public Option<LumeUnionAlternative> alternative(String name) {
+        return alternatives.stream()
+                .filter(alternative -> alternative.name().equals(name))
                 .findFirst()
                 .map(LumeRuntime::optionSome)
                 .orElseGet(LumeRuntime::optionNone);

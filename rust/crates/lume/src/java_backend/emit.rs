@@ -1093,7 +1093,7 @@ fn lume_type_kind_name(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape",
         TypeKind::Object => "object",
         TypeKind::Interface => "interface",
-        TypeKind::Enum => "enum",
+        TypeKind::Enum => "union",
     }
 }
 
@@ -1188,7 +1188,7 @@ fn type_descriptor_expr(
             )
         }
         TypeKind::Enum => format!(
-            "lume.core.LumeType.enumType({}, {}, {}, {}, {})",
+            "lume.core.LumeType.unionType({}, {}, {}, {}, {})",
             name,
             qualified,
             enum_case_array_expr(ty, names, &qualified_name),
@@ -1380,7 +1380,7 @@ fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames, owner_qualified_nam
         .iter()
         .map(|case| {
             format!(
-                "lume.core.LumeEnumCase.of({}, {}, {}, {})",
+                "lume.core.LumeUnionAlternative.of({}, {}, {}, {})",
                 java_string_literal(owner_qualified_name),
                 java_string_literal(&case.name),
                 type_field_array_expr(&case.fields, names, &ty.type_params),
@@ -1389,7 +1389,7 @@ fn enum_case_array_expr(ty: &ir::TypeDef, names: &JavaNames, owner_qualified_nam
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("new lume.core.LumeEnumCase[] {{{items}}}")
+    format!("new lume.core.LumeUnionAlternative[] {{{items}}}")
 }
 
 fn annotation_array_expr(annotations: &[ir::Annotation]) -> String {
@@ -7020,11 +7020,7 @@ impl<'a> SourceBodyEmitter<'a> {
         if type_is_numeric(&left_ty) && type_is_numeric(&right_ty) {
             return Some(format!("({left_expr} {operator} {right_expr})"));
         }
-        let comparison = if type_is_str(&left_ty) && type_is_str(&right_ty) {
-            format!("{left_expr}.compareTo({right_expr})")
-        } else {
-            format!("{left_expr}.compare({right_expr})")
-        };
+        let comparison = format!("{left_expr}.compareTo({right_expr})");
         Some(format!("({comparison} {operator} 0L)"))
     }
 
@@ -9265,18 +9261,22 @@ impl<'a> SourceBodyEmitter<'a> {
                     return emitted;
                 }
                 let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
+                let receiver_ty = self.expr_type(receiver, bindings);
                 let args = args
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
-                let widen_string_compare = self.is_java_string_compare(receiver, name, bindings);
+                if name == "compareTo"
+                    && let Some(call) = format_java_intrinsic_compare_to(
+                        receiver_ty.as_ref(),
+                        &receiver_expr,
+                        &args,
+                    )
+                {
+                    return Some(call);
+                }
                 let method = self.java_instance_method_name(receiver, name, bindings);
-                Some(format_java_instance_call(
-                    &receiver_expr,
-                    &method,
-                    &args,
-                    widen_string_compare,
-                ))
+                Some(format_java_instance_call(&receiver_expr, &method, &args))
             }
             core::Expr::Index { .. } => {
                 if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
@@ -9613,15 +9613,7 @@ impl<'a> SourceBodyEmitter<'a> {
         }
         let receiver_ty = JavaIrSupport::new(self.bundle, self.function, self.names)
             .operand_type(lowered_receiver);
-        let widen_string_compare = name == "compare"
-            && receiver_ty.as_ref().is_some_and(|ty| {
-                type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str))
-            });
-        let java_method = if widen_string_compare {
-            "compareTo".to_string()
-        } else {
-            self.java_instance_method_name(receiver, name, bindings)
-        };
+        let java_method = self.java_instance_method_name(receiver, name, bindings);
 
         let resolved_function = self
             .bundle
@@ -9666,11 +9658,19 @@ impl<'a> SourceBodyEmitter<'a> {
                 .collect::<Option<Vec<_>>>()?;
             emitted_args.extend(self.emit_source_reified_evidence(call, call.reified_arg_count)?);
             let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
+            if name == "compareTo"
+                && let Some(call) = format_java_intrinsic_compare_to(
+                    receiver_ty.as_ref(),
+                    &receiver_expr,
+                    &emitted_args,
+                )
+            {
+                return Some(call);
+            }
             return Some(format_java_instance_call(
                 &receiver_expr,
                 &java_method,
                 &emitted_args,
-                widen_string_compare,
             ));
         };
         for (spec, source_spec) in param_specs.iter_mut().zip(call.param_specs.iter()) {
@@ -9728,11 +9728,19 @@ impl<'a> SourceBodyEmitter<'a> {
                 emitted_args.push(value);
             }
             let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
+            if name == "compareTo"
+                && let Some(call) = format_java_intrinsic_compare_to(
+                    receiver_ty.as_ref(),
+                    &receiver_expr,
+                    &emitted_args,
+                )
+            {
+                return Some(call);
+            }
             return Some(format_java_instance_call(
                 &receiver_expr,
                 &java_method,
                 &emitted_args,
-                widen_string_compare,
             ));
         }
         let mut args = self
@@ -9763,11 +9771,16 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             None
         })?;
+        if name == "compareTo"
+            && let Some(call) =
+                format_java_intrinsic_compare_to(receiver_ty.as_ref(), &receiver_expr, &args)
+        {
+            return Some(call);
+        }
         Some(format_java_instance_call(
             &receiver_expr,
             &java_method,
             &args,
-            widen_string_compare,
         ))
     }
 
@@ -9779,7 +9792,6 @@ impl<'a> SourceBodyEmitter<'a> {
     ) -> String {
         if self.is_java_string_receiver(receiver, bindings) {
             match name {
-                "compare" => return "compareTo".to_string(),
                 "trimLeft" => return "stripLeading".to_string(),
                 "trimRight" => return "stripTrailing".to_string(),
                 "toLower" => return "toLowerCase".to_string(),
@@ -9790,15 +9802,6 @@ impl<'a> SourceBodyEmitter<'a> {
             }
         }
         java_member_name(name)
-    }
-
-    fn is_java_string_compare(
-        &self,
-        receiver: &core::Expr,
-        name: &str,
-        bindings: &HashMap<String, String>,
-    ) -> bool {
-        name == "compare" && self.is_java_string_receiver(receiver, bindings)
     }
 
     fn is_java_string_receiver(
@@ -12083,8 +12086,8 @@ impl JavaNames {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            ir::Type::Named { name, args } if name == "Ordered" => format!(
-                "lume.core.Ordered<{}>",
+            ir::Type::Named { name, args } if name == "Comparable" => format!(
+                "lume.core.Comparable<{}>",
                 args.iter()
                     .map(|arg| self.value_type(arg))
                     .collect::<Vec<_>>()
@@ -12284,15 +12287,15 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Rune" => Some("Integer".to_string()),
         "Eq" => Some("lume.core.Eq".to_string()),
         "Hashed" => Some("lume.core.Hashed".to_string()),
-        "Ordered" => Some("lume.core.Ordered".to_string()),
-        "Type" | "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+        "Comparable" => Some("lume.core.Comparable".to_string()),
+        "Type" | "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
         | "AnnotationType" => Some("lume.core.LumeType".to_string()),
         "TypeKind" => Some("lume.core.LumeTypeKind".to_string()),
         "AnnotationValue" => Some("lume.core.LumeAnnotation".to_string()),
         "Field" => Some("lume.core.LumeField".to_string()),
         "Method" => Some("lume.core.LumeMethod".to_string()),
         "Param" => Some("lume.core.LumeParam".to_string()),
-        "EnumCase" => Some("lume.core.LumeEnumCase".to_string()),
+        "UnionAlternative" => Some("lume.core.LumeUnionAlternative".to_string()),
         "ReflectionError" => Some("lume.core.ReflectionError".to_string()),
         "ReferenceId" => Some("lume.core.ReferenceId".to_string()),
         "InvalidIndex" => Some("lume.core.InvalidIndex".to_string()),
@@ -12319,7 +12322,7 @@ fn is_reflection_type(name: &str) -> bool {
         "Type"
             | "ClassType"
             | "ShapeType"
-            | "EnumType"
+            | "UnionType"
             | "InterfaceType"
             | "ObjectType"
             | "AnnotationType"
@@ -12405,7 +12408,7 @@ fn builtin_method_param_types(
 ) -> Option<Vec<ir::Type>> {
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
-            ("split" | "splitRegex" | "contains" | "indexOf" | "compare", 1) => {
+            ("split" | "splitRegex" | "contains" | "indexOf" | "compareTo", 1) => {
                 Some(vec![ir::Type::Str])
             }
             ("replaceFirstRegex" | "replaceAllRegex", 2) => {
@@ -12494,7 +12497,7 @@ fn builtin_method_return_type(
             ("trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper", 0) => Some(ir::Type::Str),
             ("replaceFirstRegex" | "replaceAllRegex", 2) => Some(ir::Type::Str),
             ("isEmpty" | "nonEmpty", 0) | ("contains", 1) => Some(ir::Type::Bool),
-            ("size", 0) | ("indexOf" | "compare", 1) => Some(ir::Type::Int),
+            ("size", 0) | ("indexOf" | "compareTo", 1) => Some(ir::Type::Int),
             ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
             _ => None,
         };
@@ -12506,13 +12509,13 @@ fn builtin_method_return_type(
                 "Type"
                     | "ClassType"
                     | "ShapeType"
-                    | "EnumType"
+                    | "UnionType"
                     | "InterfaceType"
                     | "ObjectType"
                     | "AnnotationType"
                     | "Field"
                     | "Method"
-                    | "EnumCase"
+                    | "UnionAlternative"
             ) && method == "annotation"
                 && arg_len == 0 =>
         {
@@ -12527,13 +12530,13 @@ fn builtin_method_return_type(
                 "Type"
                     | "ClassType"
                     | "ShapeType"
-                    | "EnumType"
+                    | "UnionType"
                     | "InterfaceType"
                     | "ObjectType"
                     | "AnnotationType"
                     | "Field"
                     | "Method"
-                    | "EnumCase"
+                    | "UnionAlternative"
             ) && method == "hasAnnotation"
                 && arg_len == 0 =>
         {
@@ -12698,18 +12701,33 @@ fn java_member_name(name: &str) -> String {
     sanitize_identifier(name, IdentifierStyle::Member)
 }
 
-fn format_java_instance_call(
+fn format_java_instance_call(receiver: &str, method: &str, args: &[String]) -> String {
+    format!("{receiver}.{method}({})", args.join(", "))
+}
+
+fn format_java_intrinsic_compare_to(
+    receiver_ty: Option<&ir::Type>,
     receiver: &str,
-    method: &str,
     args: &[String],
-    widen_string_compare: bool,
-) -> String {
-    let call = format!("{receiver}.{method}({})", args.join(", "));
-    if widen_string_compare {
-        format!("((long) {call})")
-    } else {
-        call
+) -> Option<String> {
+    let [other] = args else {
+        return None;
+    };
+    let receiver_ty = receiver_ty?;
+    if type_is_named_or_primitive(receiver_ty, "Int", |ty| matches!(ty, ir::Type::Int)) {
+        return Some(format!(
+            "((long) java.lang.Long.compare({receiver}, {other}))"
+        ));
     }
+    if type_is_named_or_primitive(receiver_ty, "Float", |ty| matches!(ty, ir::Type::Float)) {
+        return Some(format!(
+            "((long) java.lang.Double.compare({receiver}, {other}))"
+        ));
+    }
+    if type_is_named_or_primitive(receiver_ty, "Str", |ty| matches!(ty, ir::Type::Str)) {
+        return Some(format!("((long) {receiver}.compareTo({other}))"));
+    }
+    None
 }
 
 fn tuple_field_index(name: &str) -> Option<usize> {
@@ -13319,26 +13337,25 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
         ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Type", "name" | "qualifiedName")
         | (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "name" | "qualifiedName",
         ) => Some(ir::Type::option(ir::Type::Str)),
         ("Type", "kind")
         | (
-            "ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType"
+            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
             | "AnnotationType",
             "kind",
         ) => Some(ir::Type::named("TypeKind")),
-        ("AnnotationValue", "name") | ("Field" | "Method" | "Param" | "EnumCase", "name") => {
-            Some(ir::Type::Str)
-        }
+        ("AnnotationValue", "name")
+        | ("Field" | "Method" | "Param" | "UnionAlternative", "name") => Some(ir::Type::Str),
         ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields")
-        | ("EnumCase", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
-        ("ClassType" | "ShapeType" | "EnumType" | "InterfaceType" | "ObjectType", "methods") => {
+        | ("UnionAlternative", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
+        ("ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType", "methods") => {
             Some(ir::Type::list(ir::Type::named("Method")))
         }
         ("Method", "params") => Some(ir::Type::list(ir::Type::named("Param"))),
-        ("EnumType", "cases") => Some(ir::Type::list(ir::Type::named("EnumCase"))),
+        ("UnionType", "alternatives") => Some(ir::Type::list(ir::Type::named("UnionAlternative"))),
         ("Field", "fieldType") | ("Method", "returnType") | ("Param", "paramType") => {
             Some(ir::Type::named("Type"))
         }

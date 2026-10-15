@@ -2,5 +2,5 @@
 # .*empty map literal.*was removed.*use.*with an expected map type.*
 
 def main() Unit {
-    values [Str : Int] = [: 5]
+    values [Str: Int] = [: 5]
 }

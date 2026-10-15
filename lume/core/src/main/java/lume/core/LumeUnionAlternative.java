@@ -3,21 +3,21 @@ package lume.core;
 import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 
-public final class LumeEnumCase {
+public final class LumeUnionAlternative {
     private final String ownerQualifiedName;
     private final String name;
     private final List<LumeField> fields;
     private final List<LumeAnnotation> annotations;
 
-    private LumeEnumCase(String name, List<LumeField> fields) {
+    private LumeUnionAlternative(String name, List<LumeField> fields) {
         this(null, name, fields, List.of());
     }
 
-    private LumeEnumCase(String name, List<LumeField> fields, List<LumeAnnotation> annotations) {
+    private LumeUnionAlternative(String name, List<LumeField> fields, List<LumeAnnotation> annotations) {
         this(null, name, fields, annotations);
     }
 
-    private LumeEnumCase(
+    private LumeUnionAlternative(
             String ownerQualifiedName,
             String name,
             List<LumeField> fields,
@@ -28,20 +28,20 @@ public final class LumeEnumCase {
         this.annotations = List.copyOf(annotations);
     }
 
-    public static LumeEnumCase of(String name, LumeField[] fields) {
-        return new LumeEnumCase(name, List.of(fields));
+    public static LumeUnionAlternative of(String name, LumeField[] fields) {
+        return new LumeUnionAlternative(name, List.of(fields));
     }
 
-    public static LumeEnumCase of(String name, LumeField[] fields, LumeAnnotation[] annotations) {
-        return new LumeEnumCase(name, List.of(fields), List.of(annotations));
+    public static LumeUnionAlternative of(String name, LumeField[] fields, LumeAnnotation[] annotations) {
+        return new LumeUnionAlternative(name, List.of(fields), List.of(annotations));
     }
 
-    public static LumeEnumCase of(
+    public static LumeUnionAlternative of(
             String ownerQualifiedName,
             String name,
             LumeField[] fields,
             LumeAnnotation[] annotations) {
-        return new LumeEnumCase(ownerQualifiedName, name, List.of(fields), List.of(annotations));
+        return new LumeUnionAlternative(ownerQualifiedName, name, List.of(fields), List.of(annotations));
     }
 
     public String name() {
@@ -54,14 +54,14 @@ public final class LumeEnumCase {
 
     public Result<Object, ReflectionError> construct(Object... args) {
         if (ownerQualifiedName == null || ownerQualifiedName.isBlank()) {
-            return reflectionErr("cannot construct enum case '" + name + "': parent enum type is unknown");
+            return reflectionErr("cannot construct union alternative '" + name + "': parent union type is unknown");
         }
 
         Class<?> caseClass;
         try {
             caseClass = Class.forName(ownerQualifiedName + "$" + name);
         } catch (ClassNotFoundException err) {
-            return reflectionErr("cannot construct enum case '" + name + "': Java case class '"
+            return reflectionErr("cannot construct union alternative '" + name + "': Java alternative class '"
                     + ownerQualifiedName + "$" + name + "' is not available");
         }
 
@@ -74,14 +74,14 @@ public final class LumeEnumCase {
                 return new Result.Ok<>(constructor.newInstance(convertArgs(constructor.getParameterTypes(), args)));
             } catch (ReflectiveOperationException | RuntimeException err) {
                 lastError = new ReflectionError(
-                        "cannot construct enum case '" + name + "': " + reflectionMessage(err));
+                        "cannot construct union alternative '" + name + "': " + reflectionMessage(err));
             }
         }
 
         if (lastError != null) {
             return new Result.Err<>(lastError);
         }
-        return reflectionErr("cannot construct enum case '" + name + "': no public constructor accepts "
+        return reflectionErr("cannot construct union alternative '" + name + "': no public constructor accepts "
                 + args.length + " arguments");
     }
 
@@ -151,7 +151,7 @@ public final class LumeEnumCase {
     }
 
     public LumeType runtimeType() {
-        return LumeType.primitive("EnumCase");
+        return LumeType.primitive("UnionAlternative");
     }
 
     @Override

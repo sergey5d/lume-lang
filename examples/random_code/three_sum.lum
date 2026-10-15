@@ -16,7 +16,7 @@
 object Solution {
 
     def sol2(nums [Int]) [[Int]] {
-        nums.sort((left, right) => left - right)
+        nums.sort((left, right) => left.compareTo(right))
 
         res [[Int]] = []
 
@@ -74,7 +74,7 @@ object Solution {
     }
 
     def threeSum(nums [Int]) [[Int]] {
-        nums.sort((left, right) => left - right)
+        nums.sort((left, right) => left.compareTo(right))
 
         res [[Int]] = []
 

@@ -110,9 +110,9 @@ class RecordAggregator {
             leftRollup = left[1]
             rightRollup = right[1]
             if leftRollup.total == rightRollup.total {
-                return left[0].compare(right[0])
+                return left[0].compareTo(right[0])
             }
-            rightRollup.total - leftRollup.total
+            rightRollup.total.compareTo(leftRollup.total)
         })
         values.map(entry => "${entry[0]}(${entry[1].count},${entry[1].total})")
     }

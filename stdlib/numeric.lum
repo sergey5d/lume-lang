@@ -1,0 +1,11 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+interface Int with Comparable[Int] {
+    def compareTo(other Int) Int
+}
+
+interface Float with Comparable[Float] {
+    def compareTo(other Float) Int
+}

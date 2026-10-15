@@ -4,31 +4,31 @@
 # 3
 # 0
 
-class OrderedInt with Ordered[OrderedInt] {
+class ComparableInt with Comparable[ComparableInt] {
     value Int
 
-    def compare(other OrderedInt) Int = value - other.value
+    def compareTo(other ComparableInt) Int = value.compareTo(other.value)
 }
 
 
-class Box[T with Ordered[T]] {
+class Box[T with Comparable[T]] {
     value T
 }
 
 class Mapper {
 
-    def pick[X with Ordered[X]](value X) X = value
+    def pick[X with Comparable[X]](value X) X = value
 }
 
 
-def pick[T with Ordered[T]](value T) T = value
+def pick[T with Comparable[T]](value T) T = value
 
-def useBox(value Box[OrderedInt]) Int = value.value.value
+def useBox(value Box[ComparableInt]) Int = value.value.value
 
 def main() Int {
     mapper Mapper = Mapper {}
-    left = OrderedInt { value: 3 }
-    right = OrderedInt { value: 4 }
+    left = ComparableInt { value: 3 }
+    right = ComparableInt { value: 4 }
     println(pick(left).value + mapper.pick(right).value)
     println(left < right)
     values = [right, left]

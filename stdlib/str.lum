@@ -2,11 +2,11 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Str {
+interface Str with Comparable[Str] {
     def size Int
     def isEmpty Bool
     def nonEmpty Bool
-    def compare(other Str) Int
+    def compareTo(other Str) Int
     def runeAt(index Int) Option[Rune]
     def split(separator Str) Vector[Str]
     def splitRegex(pattern Str) Vector[Str]

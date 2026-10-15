@@ -19,7 +19,7 @@ class ReflectionError {
 type TypeKind =
     object Class {}
     | object Shape {}
-    | object Enum {}
+    | object Union {}
     | object Interface {}
     | object Object {}
     | object Annotation {}
@@ -35,7 +35,7 @@ interface Type[A] with Annotated {
 
     def asClass() Option[ClassType[A]]
     def asShape() Option[ShapeType[A]]
-    def asEnum() Option[EnumType[A]]
+    def asUnion() Option[UnionType[A]]
     def asInterface() Option[InterfaceType[A]]
     def asObject() Option[ObjectType[A]]
     def asAnnotation() Option[AnnotationType[A]]
@@ -55,9 +55,9 @@ interface ShapeType[A] with Type[A] {
     def construct(args [Any] vararg) Result[A, ReflectionError]
 }
 
-interface EnumType[A] with Type[A] {
-    def cases [EnumCase]
-    def case(name Str) Option[EnumCase]
+interface UnionType[A] with Type[A] {
+    def alternatives [UnionAlternative]
+    def alternative(name Str) Option[UnionAlternative]
     def methods [Method]
 }
 
@@ -95,7 +95,7 @@ interface Param {
     def paramType Type[_]
 }
 
-interface EnumCase with Annotated {
+interface UnionAlternative with Annotated {
     def name Str
     def fields [Field]
     def construct(args [Any] vararg) Result[Any, ReflectionError]

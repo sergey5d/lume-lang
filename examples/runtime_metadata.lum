@@ -8,7 +8,7 @@
 # Int
 # Primitive
 # Status
-# Enum
+# Union
 # Pending
 
 class User {
@@ -43,8 +43,8 @@ def main() Unit {
 
     println(typeOf[Int].kind)
 
-    enumType EnumType[Status] = typeOf[Status].asEnum() !
-    println(enumType.name !)
-    println(enumType.kind)
-    println(enumType.case("Pending")!.name)
+    unionType UnionType[Status] = typeOf[Status].asUnion() !
+    println(unionType.name !)
+    println(unionType.kind)
+    println(unionType.alternative("Pending")!.name)
 }

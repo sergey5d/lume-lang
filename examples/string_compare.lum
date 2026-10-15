@@ -5,8 +5,8 @@
 # -1
 
 def main() Unit {
-    println("alice".compare("bob"))
-    println("alice".compare("alice"))
-    println("bob".compare("alice"))
-    println("alice".compare("alice2"))
+    println("alice".compareTo("bob"))
+    println("alice".compareTo("alice"))
+    println("bob".compareTo("alice"))
+    println("alice".compareTo("alice2"))
 }

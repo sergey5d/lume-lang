@@ -9184,14 +9184,17 @@ impl<'a> Checker<'a> {
         }
         if (left.is_numeric() && right.is_numeric())
             || (left.is_str() && right.is_str())
-            || self.is_assignable(left, &Ty::Named("Ordered".to_string(), vec![right.clone()]))
+            || self.is_assignable(
+                left,
+                &Ty::Named("Comparable".to_string(), vec![right.clone()]),
+            )
         {
             return;
         }
         self.add_error(
             "invalid_comparison_operands",
             format!(
-                "comparison requires numeric values, Str values, or a left operand implementing Ordered[{}]; got '{}' and '{}'",
+                "comparison requires numeric values, Str values, or a left operand implementing Comparable[{}]; got '{}' and '{}'",
                 right.describe(),
                 left.describe(),
                 right.describe()
@@ -15683,7 +15686,7 @@ fn is_reflection_metadata_type(name: &str) -> bool {
         "Type"
             | "ClassType"
             | "ShapeType"
-            | "EnumType"
+            | "UnionType"
             | "InterfaceType"
             | "ObjectType"
             | "AnnotationType"
@@ -17539,7 +17542,7 @@ def main() Int {
         let program = parse_inline(
             r#"
 class Cache {
-    private var values [Str : Int] = []
+    private var values [Str: Int] = []
 
     new() {}
 
@@ -20991,9 +20994,9 @@ def main() Unit {
     anyMetadata Type[Any] = typeOf[Any]
     classType ClassType[User] = declared.asClass() !
     unknownClass ClassType[_] = classType
-    enumType EnumType[Status] = typeOf[Status].asEnum() !
+    unionType UnionType[Status] = typeOf[Status].asUnion() !
     fieldType Type[_] = (classType.fields.at(0) !).fieldType
-    OS.println(actual.name !, unknown.name !, anyMetadata.kind, unknownClass.name !, enumType.name !, fieldType.name !)
+    OS.println(actual.name !, unknown.name !, anyMetadata.kind, unknownClass.name !, unionType.name !, fieldType.name !)
 }
 "#,
         );
@@ -21229,14 +21232,14 @@ def main() Unit {
     fn checks_empty_collection_literal_from_expected_type() {
         let program = parse_inline(
             r#"
-def countMap(values [Str : Int]) Int = values.size
+def countMap(values [Str: Int]) Int = values.size
 def countArray(values [Str]) Int = values.size
 def consume(rows Iterable[[Int]]) Unit = ()
-def emptyMap() [Str : Int] = []
+def emptyMap() [Str: Int] = []
 def emptyArray() [Str] = []
 
 def main() Int {
-    directMap [Str : Int] = []
+    directMap [Str: Int] = []
     directArray [Str] = []
     emptyIterable Iterable[[Int]] = []
     nestedVector [[Int]] = [[]]
@@ -21327,10 +21330,10 @@ def main() Unit {
     second = [3, 4]
     values [Int] = [0, ...first, ...second, 5]
 
-    defaults [Str : Int] = ["one": 1, "shared": 2]
-    overrides [Str : Int] = ["shared": 20, "three": 3]
-    copy [Str : Int] = [...defaults]
-    merged [Str : Int] = [...defaults, "two": 2, ...overrides]
+    defaults [Str: Int] = ["one": 1, "shared": 2]
+    overrides [Str: Int] = ["shared": 20, "three": 3]
+    copy [Str: Int] = [...defaults]
+    merged [Str: Int] = [...defaults, "two": 2, ...overrides]
     entries [(Str, Int)] = [...merged.entries()]
 
     println(values.size, copy.size, merged.size, entries.size)
@@ -21347,10 +21350,10 @@ def main() Unit {
             r#"
 def main() Unit {
     values = [1, 2]
-    entries [Str : Int] = ["one": 1]
+    entries [Str: Int] = ["one": 1]
     mixed = [...values, ...entries]
     invalidList = [0, ...entries]
-    invalidMap [Str : Int] = [...values]
+    invalidMap [Str: Int] = [...values]
 }
 "#,
         );
@@ -21433,7 +21436,7 @@ def main() Unit {
 class Consumer {
 
     new(values [Str]) {}
-    new(values [Str : Int]) {}
+    new(values [Str: Int]) {}
 }
 
 

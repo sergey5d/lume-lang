@@ -1,0 +1,7 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+interface Comparable[T] {
+    def compareTo(other T) Int
+}

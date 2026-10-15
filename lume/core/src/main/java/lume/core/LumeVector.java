@@ -197,10 +197,22 @@ public final class LumeVector<T> implements Iterable<T> {
 
     @SuppressWarnings("unchecked")
     public LumeVector<T> sort() {
-        values.sort((left, right) ->
-            Long.compare(((Ordered<T>) left).compare(right), 0)
-        );
+        values.sort((left, right) -> Long.compare(compareValues(left, right), 0));
         return this;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> long compareValues(T left, T right) {
+        if (left instanceof Long lhs && right instanceof Long rhs) {
+            return Long.compare(lhs, rhs);
+        }
+        if (left instanceof Double lhs && right instanceof Double rhs) {
+            return Double.compare(lhs, rhs);
+        }
+        if (left instanceof String lhs && right instanceof String rhs) {
+            return lhs.compareTo(rhs);
+        }
+        return ((Comparable<T>) left).compareTo(right);
     }
 
     public LumeVector<T> take(long count) {

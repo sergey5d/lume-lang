@@ -53,7 +53,9 @@ class WorkerTimeTracker {
             totals[worker.workerId] := worker.total()
         }
 
-        eligible.sort((left, right) => totals[right.workerId]! - totals[left.workerId]!)
+        eligible.sort((left, right) =>
+            totals[right.workerId]!.compareTo(totals[left.workerId]!)
+        )
         eligible.take(count).map(worker => worker.workerId)
     }
 }

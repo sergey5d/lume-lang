@@ -37,7 +37,7 @@ def main() Int {
     println("built-in made", made)
 
     personKey = PersonKey("Ada", 1)
-    personMap [PersonKey : Int] = [personKey: 99]
+    personMap [PersonKey: Int] = [personKey: 99]
 
     let Some(shapeValue) = personMap[PersonKey("Ada", 1)] else return 1
     println("shape key", shapeValue)

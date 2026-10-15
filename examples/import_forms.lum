@@ -15,7 +15,7 @@ use model/things/A as AliasA
 use model/things/{B as AliasB, Named}
 use model/things/*
 use model/things/C/*
-use model/things/C/{printLn as printN, print}
+use model/things/D/{println as printN}
 
 def main() Int {
     value A = A {}
