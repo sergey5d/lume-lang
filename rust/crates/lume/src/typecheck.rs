@@ -212,10 +212,6 @@ impl Ty {
         Self::named("Str")
     }
 
-    fn rune() -> Self {
-        Self::named("Rune")
-    }
-
     fn unit() -> Self {
         Self::named("Unit")
     }
@@ -5229,6 +5225,26 @@ impl<'a> Checker<'a> {
                 if let Some(ty) = self.static_member_value_type(receiver, name, expected) {
                     return ty;
                 }
+                if let Some(sig) = self
+                    .brace_call_type_sig(receiver)
+                    .filter(|sig| sig.kind != TypeKind::Object)
+                    && self
+                        .method_sigs_for_type(&sig, name)
+                        .is_some_and(|methods| !methods.is_empty())
+                {
+                    self.add_error(
+                        "unbound_method_reference",
+                        format!(
+                            "cannot take method reference '{}.{}' from {} '{}' without an instance; use an instance receiver or declare the method on a named object",
+                            sig.name,
+                            name,
+                            type_kind_label(sig.kind),
+                            sig.name
+                        ),
+                        *span,
+                    );
+                    return Ty::Unknown;
+                }
                 let receiver_ty = self.check_expr(receiver);
                 if name == "runtimeType" {
                     return Ty::value_runtime_type(receiver_ty);
@@ -6961,37 +6977,6 @@ impl<'a> Checker<'a> {
         };
 
         match (type_name.as_str(), name.as_str()) {
-            ("Array", factory @ ("ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune")) => {
-                if args.len() != 1 {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!("Array.{factory} expects 1 argument, got {}", args.len()),
-                        span,
-                    );
-                }
-                if let Some(arg) = args.first() {
-                    let ty = self.check_expr(&arg.value);
-                    self.require_assignable(
-                        &ty,
-                        &Ty::int(),
-                        arg.span,
-                        "invalid_argument_type",
-                        format!(
-                            "Array.{factory} expects Int capacity, got '{}'",
-                            ty.describe()
-                        ),
-                    );
-                }
-                let item_ty = match factory {
-                    "ofInt" => Ty::int(),
-                    "ofFloat" => Ty::float(),
-                    "ofBool" => Ty::bool(),
-                    "ofStr" => Ty::str(),
-                    "ofRune" => Ty::rune(),
-                    _ => unreachable!(),
-                };
-                Some(Ty::Named("Array".to_string(), vec![item_ty]))
-            }
             (collection @ ("Array" | "Vector"), "fill") => {
                 if args.len() != 2 {
                     self.add_error(
@@ -17817,15 +17802,16 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_array_primitive_static_helpers() {
+    fn allows_array_fill_for_primitive_defaults() {
         let program = parse_inline(
             r#"
 def main() Unit {
-    ints Array[Int] = Array.ofInt(3)
-    floats Array[Float] = Array.ofFloat(3)
-    bools Array[Bool] = Array.ofBool(3)
-    texts Array[Str] = Array.ofStr(3)
-    runes Array[Rune] = Array.ofRune(3)
+    nul Rune = "\0".runeAt(0)!
+    ints Array[Int] = Array.fill(3, 0)
+    floats Array[Float] = Array.fill(3, 0.0)
+    bools Array[Bool] = Array.fill(3, false)
+    texts Array[Str] = Array.fill(3, "")
+    runes Array[Rune] = Array.fill(3, nul)
 }
 "#,
         );
@@ -22790,6 +22776,32 @@ def main(formatter Formatter) Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_unbound_class_method_references() {
+        let program = parse_inline(
+            r#"
+class User {
+    name Str
+
+    def toDto(user User) Str = user.name
+}
+
+def main() Unit {
+    convert fn(User) Str = User.toDto
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "unbound_method_reference"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

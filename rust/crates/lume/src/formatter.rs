@@ -528,6 +528,18 @@ mod tests {
     }
 
     #[test]
+    fn preserves_trailing_commas_in_multiline_lists() {
+        let result = format(
+            "def combine(\nleft Int,\nright Int,\n) Int {\npair = (\nleft,\nright,\n)\npair[0] + pair[1]\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def combine(\n    left Int,\n    right Int,\n) Int {\n    pair = (\n        left,\n        right,\n    )\n    pair[0] + pair[1]\n}\n"
+        );
+    }
+
+    #[test]
     fn normalizes_map_type_colon_spacing() {
         let result =
             format("def main() Unit {\nspaced [Str : Int] = []\ncompact [Str:Int] = []\n}\n");

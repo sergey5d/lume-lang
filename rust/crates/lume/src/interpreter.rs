@@ -3106,31 +3106,6 @@ impl<'a> Interpreter<'a> {
             let collection = path[0].as_str();
             let method = path[1].as_str();
             match method {
-                "ofInt" | "ofFloat" | "ofBool" | "ofStr" | "ofRune" if collection == "Array" => {
-                    if args.len() != 1 {
-                        return Err(self.runtime_error(
-                            span,
-                            format!("Array.{method} expects 1 argument, got {}", args.len()),
-                        ));
-                    }
-                    let context = format!("Array.{method} length");
-                    let len = args[0].as_int(self, span, &context)?;
-                    if len < 0 {
-                        return Err(self.runtime_error(
-                            span,
-                            format!("Array.{method} length must be non-negative"),
-                        ));
-                    }
-                    let default = match method {
-                        "ofInt" => Value::Int(0),
-                        "ofFloat" => Value::Float(0.0),
-                        "ofBool" => Value::Bool(false),
-                        "ofStr" => Value::String(String::new()),
-                        "ofRune" => Value::Rune('\0'),
-                        _ => unreachable!(),
-                    };
-                    return Ok(Value::list(vec![default; len as usize]));
-                }
                 "fill" => {
                     if args.len() != 2 {
                         return Err(self.runtime_error(
@@ -9595,12 +9570,12 @@ mod tests {
                 OS.println((left + Vec(1, 2))[1])
                 OS.println((-left)[0])
 
-                ints = Array.ofInt(2)
-                floats = Array.ofFloat(1)
-                bools = Array.ofBool(1)
-                strs = Array.ofStr(1)
-                runes = Array.ofRune(1)
                 nul Rune = "\0".runeAt(0)!
+                ints = Array.fill(2, 0)
+                floats = Array.fill(1, 0.0)
+                bools = Array.fill(1, false)
+                strs = Array.fill(1, "")
+                runes = Array.fill(1, nul)
                 OS.println(ints[0], floats[0], bools[0], strs[0], runes[0] == nul)
             }
             "#,

@@ -514,31 +514,18 @@ impl<'a> Parser<'a> {
                 }
             };
             entries.push(entry);
-            let comma_after_entry = if self.match_token(TokenKind::Comma) {
-                Some(self.previous_span())
-            } else {
-                None
-            };
-            let separated_by_comma = comma_after_entry.is_some();
+            let separated_by_comma = self.match_token(TokenKind::Comma);
             let separated_by_newline = if !separated_by_comma {
                 self.match_token(TokenKind::Newline)
             } else {
                 false
             };
             self.skip_newlines();
-            let comma_after_newline = if separated_by_newline && self.match_token(TokenKind::Comma)
-            {
-                Some(self.previous_span())
-            } else {
-                None
-            };
-            if comma_after_newline.is_some() {
+            let comma_after_newline = separated_by_newline && self.match_token(TokenKind::Comma);
+            if comma_after_newline {
                 self.skip_newlines();
             }
             if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
-                if let Some(comma) = comma_after_entry.or(comma_after_newline) {
-                    self.report_trailing_comma(comma, "brace construction literal");
-                }
                 break;
             }
             if !separated_by_comma && !separated_by_newline {
@@ -871,7 +858,6 @@ impl<'a> Parser<'a> {
             });
 
             let separated_by_comma = self.match_token(TokenKind::Comma);
-            let comma = separated_by_comma.then(|| self.previous_span());
             let separated_by_newline = if separated_by_comma {
                 false
             } else {
@@ -879,9 +865,6 @@ impl<'a> Parser<'a> {
             };
             self.skip_newlines();
             if self.at(TokenKind::RBrace) {
-                if let Some(comma) = comma {
-                    self.report_trailing_comma(comma, "anonymous object body");
-                }
                 break;
             }
             if !separated_by_comma && !separated_by_newline && !self.at(TokenKind::Eof) {
@@ -1666,10 +1649,8 @@ impl<'a> Parser<'a> {
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
-            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::RBracket) {
-                self.report_trailing_comma(comma, "type argument list");
                 break;
             }
             type_args.push(self.parse_type_ref()?);
@@ -1760,12 +1741,10 @@ impl<'a> Parser<'a> {
             return None;
         };
         if self.match_token(TokenKind::Comma) {
-            let mut comma = self.previous_span();
             let mut items = vec![index];
             loop {
                 self.skip_newlines();
                 if self.at(TokenKind::RBracket) {
-                    self.report_trailing_comma(comma, "index list");
                     break;
                 }
                 items.push(
@@ -1775,7 +1754,6 @@ impl<'a> Parser<'a> {
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
-                comma = self.previous_span();
             }
             let tuple_span = items
                 .first()
@@ -1950,10 +1928,8 @@ impl<'a> Parser<'a> {
             };
             params.push(param);
             while self.match_token(TokenKind::Comma) {
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.report_trailing_comma(comma, "lambda parameter list");
                     break;
                 }
                 let Some(param) = self.parse_lambda_param(params.len()) else {
@@ -2082,10 +2058,8 @@ impl<'a> Parser<'a> {
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
-            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::RParen) {
-                self.report_trailing_comma(comma, "call argument list");
                 break;
             }
             let _ = start;
@@ -2438,10 +2412,8 @@ impl<'a> Parser<'a> {
             items.push(self.parse_list_literal_item()?);
             self.skip_newlines();
             while self.match_token(TokenKind::Comma) {
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RBracket) {
-                    self.report_trailing_comma(comma, "vector literal");
                     break;
                 }
                 if self.collection_literal_entry_has_colon() {
@@ -2503,10 +2475,8 @@ impl<'a> Parser<'a> {
             if !self.match_token(TokenKind::Comma) {
                 break;
             }
-            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::RBracket) {
-                self.report_trailing_comma(comma, "map literal");
                 break;
             }
         }
@@ -2605,11 +2575,9 @@ impl<'a> Parser<'a> {
         let first = self.parse_expr()?;
         self.skip_newlines();
         if self.match_token(TokenKind::Comma) {
-            let comma = self.previous_span();
             let mut items = vec![first];
             self.skip_newlines();
             if self.at(TokenKind::RParen) {
-                self.report_trailing_comma(comma, "tuple expression");
                 let end = self.consume(TokenKind::RParen, "expected ')' after tuple literal")?;
                 return Some(Expr::Group {
                     inner: Box::new(items.pop()?),
@@ -2618,10 +2586,8 @@ impl<'a> Parser<'a> {
             }
             items.push(self.parse_expr()?);
             while self.match_token(TokenKind::Comma) {
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.report_trailing_comma(comma, "tuple expression");
                     break;
                 }
                 items.push(self.parse_expr()?);

@@ -123,9 +123,11 @@ public final class LumeRuntime {
         return text.contains(part);
     }
 
-    public static Long stringIndexOf(String text, String part) {
+    public static Option<Long> stringIndexOf(String text, String part) {
         int utf16Index = text.indexOf(part);
-        return utf16Index < 0 ? -1L : (long) text.codePointCount(0, utf16Index);
+        return utf16Index < 0
+            ? optionNone()
+            : optionSome((long) text.codePointCount(0, utf16Index));
     }
 
     public static String stringReplaceFirstRegex(String text, String pattern, String replacement) {

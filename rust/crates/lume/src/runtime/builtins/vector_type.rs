@@ -793,10 +793,10 @@ fn list_index_of(
     let items = list_items(&receiver);
     for (index, value) in items.borrow().iter().enumerate() {
         if values_match(interpreter, value, needle, span, "Vector.indexOf")? {
-            return Ok(Value::Int(index as i64));
+            return Ok(interpreter.option_some(Value::Int(index as i64)));
         }
     }
-    Ok(Value::Int(-1))
+    Ok(interpreter.option_none())
 }
 
 fn list_iterator(

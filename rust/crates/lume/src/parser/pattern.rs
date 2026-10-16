@@ -405,10 +405,8 @@ impl<'a> Parser<'a> {
                     self.consume(TokenKind::RParen, "expected ')' after pattern")?;
                     return Some(first);
                 }
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.report_trailing_comma(comma, "tuple pattern");
                     self.consume(TokenKind::RParen, "expected ')' after tuple pattern")?;
                     return Some(first);
                 }
@@ -418,10 +416,8 @@ impl<'a> Parser<'a> {
                     if !self.match_token(TokenKind::Comma) {
                         break;
                     }
-                    let comma = self.previous_span();
                     self.skip_newlines();
                     if self.at(TokenKind::RParen) {
-                        self.report_trailing_comma(comma, "tuple pattern");
                         break;
                     }
                 }
@@ -471,10 +467,8 @@ impl<'a> Parser<'a> {
                             if !self.match_token(TokenKind::Comma) {
                                 break;
                             }
-                            let comma = self.previous_span();
                             self.skip_newlines();
                             if self.at(TokenKind::RParen) {
-                                self.report_trailing_comma(comma, "constructor pattern");
                                 break;
                             }
                         }
@@ -590,7 +584,6 @@ impl<'a> Parser<'a> {
             });
 
             let separated_by_comma = self.match_token(TokenKind::Comma);
-            let mut comma = separated_by_comma.then(|| self.previous_span());
             let separated_by_newline = if !separated_by_comma {
                 self.match_token(TokenKind::Newline)
             } else {
@@ -598,17 +591,10 @@ impl<'a> Parser<'a> {
             };
             self.skip_newlines();
             if separated_by_newline {
-                if self.match_token(TokenKind::Comma) {
-                    comma = Some(self.previous_span());
-                }
+                self.match_token(TokenKind::Comma);
                 self.skip_newlines();
             }
             if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
-                if self.at(TokenKind::RBrace) {
-                    if let Some(comma) = comma {
-                        self.report_trailing_comma(comma, "record pattern");
-                    }
-                }
                 break;
             }
             if !separated_by_comma && !separated_by_newline {
@@ -647,11 +633,7 @@ impl<'a> Parser<'a> {
                     rest = Some(ListPatternRest { name, span });
                     self.skip_newlines();
                     if self.match_token(TokenKind::Comma) {
-                        let comma = self.previous_span();
                         self.skip_newlines();
-                        if self.at(TokenKind::RBracket) {
-                            self.report_trailing_comma(comma, "list pattern");
-                        }
                     }
                     break;
                 }
@@ -661,10 +643,8 @@ impl<'a> Parser<'a> {
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RBracket) {
-                    self.report_trailing_comma(comma, "list pattern");
                     break;
                 }
             }

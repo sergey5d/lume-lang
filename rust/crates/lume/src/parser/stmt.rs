@@ -468,10 +468,8 @@ impl<'a> Parser<'a> {
     ) -> Option<Vec<Binding>> {
         let mut bindings = vec![self.parse_brace_destructure_binding(mutable)?];
         while self.match_token(TokenKind::Comma) {
-            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::RBrace) {
-                self.report_trailing_comma(comma, "brace destructuring pattern");
                 break;
             }
             bindings.push(self.parse_brace_destructure_binding(mutable)?);
@@ -482,10 +480,8 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_binding_list(&mut self, mutable: bool) -> Option<Vec<Binding>> {
         let mut bindings = vec![self.parse_binding(mutable)?];
         while self.match_token(TokenKind::Comma) {
-            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::Eq) {
-                self.report_trailing_comma(comma, "binding list");
                 break;
             }
             bindings.push(self.parse_binding(mutable)?);
@@ -496,10 +492,8 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_tuple_binding_list(&mut self, mutable: bool) -> Option<Vec<Binding>> {
         let mut bindings = vec![self.parse_binding(mutable)?];
         while self.match_token(TokenKind::Comma) {
-            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::RParen) {
-                self.report_trailing_comma(comma, "tuple destructuring pattern");
                 break;
             }
             bindings.push(self.parse_binding(mutable)?);

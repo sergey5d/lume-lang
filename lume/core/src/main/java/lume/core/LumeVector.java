@@ -66,6 +66,11 @@ public final class LumeVector<T> implements Iterable<T> {
         return values.contains(value);
     }
 
+    public Option<Long> indexOf(T value) {
+        var index = values.indexOf(value);
+        return index < 0 ? LumeRuntime.optionNone() : LumeRuntime.optionSome((long) index);
+    }
+
     public Option<T> at(long index) {
         if (index < 0 || index >= values.size()) {
             return LumeRuntime.optionNone();

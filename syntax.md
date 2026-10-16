@@ -588,7 +588,7 @@ Rules:
 - `Str.contains(part)` performs literal substring membership; `contains` is the
   common membership spelling for strings and collections
 - `Str.indexOf(part)` returns the zero-based Unicode-scalar index of the first
-  literal match, or `-1` when no match exists
+  literal match as `Some(index)`, or `None` when no match exists
 - `Str.split(separator)` treats `separator` as literal text and returns a
   growable `Vector[Str]`
 - `Str.splitRegex(pattern)` explicitly interprets `pattern` as a regular
@@ -1229,19 +1229,78 @@ updated = account.withBalance(42)
 ## Construction
 
 This section defines target selection and brace interpretation for every
-construction expression. Constructor declarations later in the reference
-define which inputs a class accepts, but do not create a second expression
-model.
+construction expression. Class input contracts are defined once under
+[Constructors](#constructors).
 
-Bare field braces construct structural shape values. Parsing is entirely
-syntactic:
+### Brace classification
+
+Braces carry several meanings. Classification is syntactic and uses the tokens
+before the braces and the first entry inside them:
 
 ```txt
-{ field: value }  # construction
-{ ...source }     # construction
-{ value }         # block expression
-{}                # empty construction; requires an expected target
+{ field: value }                 # contextual or anonymous shape construction
+{ ...source }                    # contextual or anonymous shape construction
+{ expression }                   # block expression
+{}                               # empty shape construction; target required
+Type { field: value }            # named field construction or union payload
+Type { field }                   # named construction with field punning
+call { x => ... }                # trailing lambda
+object { field Type = value; def method() Type = value }
+object with Interface { field Type = value; def method() Type = value }
+new(value, other)                # contextual positional construction
+new { field: value }             # forced named-field construction
+new { field }                    # forced construction with field punning
+new {}                           # forced empty construction; target required
 ```
+
+A single-expression brace such as `{ value }` is a block, not an anonymous
+shape. Use `new { value }` when `value` is a punned field. Unit values use `()`.
+Braces required by declarations and control-flow constructs remain body
+delimiters:
+
+```txt
+class Marker {}
+def noop() Unit {}
+def noop2() = ()
+def invalid() Unit = {}       # error: construction, not Unit
+def make() EmptyUser = new {} # contextual class construction
+```
+
+A leading labeled field or spread selects construction; otherwise bare braces
+select a block. An explicit lambda head after a callee takes precedence over
+field construction. Commas appearing later inside a block do not reclassify it:
+
+```txt
+result = {
+    left, right = 1, 2
+    left + right
+}
+
+consume { value =>
+    left, right = 1, 2
+    value + left + right
+}
+```
+
+The same rule applies after a callable-body `=`, lambda `=>`, match-case `=>`,
+and `yield`:
+
+```txt
+def origin() Point = { x: 0, y: 0 }
+mapper = value => { x: value, y: 0 }
+
+point Point = match ready {
+    case true => { x: 1, y: 2 }
+    case false => { ...fallback }
+}
+
+points = for value <- values yield {
+    x: value
+    y: 0
+}
+```
+
+### Target selection
 
 The type checker applies bare construction fields to a named or anonymous shape
 target supplied by context. Without a shape target, nonempty labeled fields or
@@ -1586,6 +1645,8 @@ declarations and shape alternatives inside declared unions. Expression-level
 `shape with Interface { ... }` are invalid. Use field braces, `new { ... }`,
 and `object with Interface { ... }` respectively.
 
+### Shape conversion
+
 Construction can project a wider shape by visible field name. This includes
 expected types flowing through generic callbacks such as `Option.map`. Given
 `StoredRollup` with all `Rollup` fields plus additional fields, these forms all
@@ -1617,6 +1678,30 @@ rollup.runtimeType # Rollup
 Projection is a shallow copy. Field bindings are copied into the new shape;
 nested classes and mutable collections retain their existing references. The
 source value itself is unchanged.
+
+Structural assignment requires every target field to exist in the source with
+an assignable type. A target field's construction default is used only during
+explicit construction; it does not create missing data during assignment:
+
+```txt
+shape Small { x Int }
+shape Full { x Int, y Int = 42 }
+
+source = Small(1)
+target Full = source        # invalid: source does not provide y
+target = Full { ...source } # valid: construction supplies y = 42
+```
+
+Class-to-shape conversion is also explicit: construct the target shape with
+`{ ...instance }`, using only visible class fields. Shape values satisfy only
+interfaces declared through their `with` bounds; conversion through an
+intermediate shape does not make a class implement that interface. A shape does
+not implicitly become a class, and tuples do not convert to shapes or classes.
+Use the target's ordinary construction syntax for those boundaries.
+
+An anonymous shape literal can still be supplied as an ordinary call argument,
+for example `describe({ name: "Cara", age: 14 })`, when the parameter provides
+the expected shape schema.
 
 The same projection rule applies to parameter passing, returns, casts, and
 collection storage. The projected value has no hidden source shape and cannot
@@ -1796,7 +1881,7 @@ settings Settings = new {}
 Named shapes are data-only structural field views:
 - fields are always visible and read-only
 - fields are declared in the `shape` body
-- methods are declared directly in the `shape` body after fields
+- methods are declared directly in the `shape` body
 - custom `new` constructors are not allowed
 - shapes may declare interface bounds with `shape Name with Interface`
 - brace field construction uses `ShapeName { field: value }`
@@ -1840,11 +1925,11 @@ named = Point { x: 3, y: 4 }
 positional Point = Point(5, 6)
 ```
 
-Class and shape call sites use the authoritative expression model in
-[Construction](#construction). Runtime-backed collections such as `Vector`, `Map`, `Array`,
-`LinkedList`, and `Set` use ordinary class construction; `Range(...)` is a
-stdlib factory. The rules below define class constructor contracts rather than
-a separate construction-expression model.
+Class and shape call sites use the expression model in
+[Construction](#construction). Runtime-backed collections such as `Vector`,
+`Map`, `Array`, `LinkedList`, and `Set` use ordinary class construction;
+`Range(...)` is a stdlib factory. Class input contracts are defined under
+[Constructors](#constructors).
 
 ```txt
 class Holder {
@@ -1857,192 +1942,7 @@ fromLiteral = Holder({ x: 7 }) # one positional shape argument
 named = Holder { payload }      # one named input using field punning
 ```
 
-Explicit constructor rules:
-
-- `new(field Type = default, other Type) { ... }` declares explicit constructor inputs; defaults may appear anywhere
-- constructor parameters do not have to be class fields; they are inputs to the constructor body
-- `Type { field: value, other: value }` matches explicit constructor inputs by parameter name
-- `Type(value, otherValue)` fills the same explicit constructor inputs by declaration order
-- named construction may omit any constructor parameter that has a default
-- positional construction fills a prefix of constructor parameters in declaration order
-- a positional call may stop only when every remaining constructor parameter has a default
-- positional arguments never skip an earlier default to initialize a later parameter
-- if any explicit `new` exists, implicit field construction is disabled for that class
-- explicit constructors may use one trailing variadic constructor parameter such as `items [T] vararg`
-- a variadic constructor parameter receives the extra positional arguments as `[T]`
-- only one variadic constructor parameter is allowed
-- construction fields can target a variadic constructor parameter by passing a `[T]` value
-- variadic constructor parameters may have a default `[T]` value
-
-```txt
-class Article {
-    body Str
-    title Str
-    new(body Str = "body", title Str) {
-        this.body = body
-        this.title = title
-    }
-}
-
-full Article = Article("custom body", "Intro")
-named Article = Article { title: "Intro" }
-custom Article = Article { body: "custom body", title: "Intro" }
-
-# Invalid: the argument initializes body, leaving title unset.
-# Article("Intro")
-```
-
-Implicit field construction rules:
-
-- if a class has no explicit `new`, the compiler synthesizes one stable constructor contract from its public fields
-- the implicit constructor contract is the same in every module and from every call site
-- public fields without initializers are required constructor inputs
-- public fields with initializers are optional constructor inputs
-- initialized public fields may appear anywhere in the declaration
-- `private` and `internal` fields never become implicit constructor inputs
-- every non-public field must have an initializer when a class relies on implicit construction; otherwise the class must declare `new(...)`
-- construction braces check the synthesized public-field shape
-- `Type {}` works when the public constructor contract has no required inputs
-- positional construction follows declared public-field order
-- a positional call may stop only when every remaining public field has an initializer
-- positional arguments never skip an initialized field to initialize a later field
-- the declaration position of initialized non-public fields does not affect positional construction
-- whether a class field is mutable or read-only does not affect explicit spread construction
-- named class values do not structurally convert to other named class values
-
-```txt
-class Account {
-    owner Str
-    internal region Str = "US"
-    balance Int
-    private cache Cache = Cache()
-}
-
-# The same public contract is used inside and outside this module.
-account = Account("Ada", 100)
-
-class SecuredAccount {
-    owner Str
-    private token Str
-}
-
-# Invalid without an explicit `new(...)`: `token` has no initializer.
-```
-
-## Brace Disambiguation
-
-Braces carry several meanings. The parser chooses by the tokens before and inside the braces:
-
-```txt
-{ field: value }                 # contextual named-shape or anonymous-shape construction
-{ ...source }                    # anonymous or contextual shape construction
-{ expr }                         # block expression
-{}                               # empty shape construction; shape target required
-Type { field: value }            # brace field construction or union payload
-Type { field }                   # brace construction with a punned field
-call { x => ... }                # trailing lambda
-object { field Type = value; def method() Type = value } # anonymous object
-object with Interface, Other { field Type = value; def method() Type = value } # anonymous object implementing interfaces
-new(field Type)                  # constructor declaration
-new(value, other)                # contextual positional construction
-new { field: value }             # forced named-field construction
-new { field }                    # forced punned-field construction
-new {}                           # forced empty construction; target required
-```
-
-Single-expression braces such as `{ value }` are block expressions, not
-anonymous shapes. Use `new { value }` when `value` is a punned field. Bare `{}`
-and `new {}` are empty construction and both require an expected target. Bare
-field braces accept only shape targets; constructing a class or runtime-backed
-collection requires `new { ... }` or an explicitly named constructor. Unit
-values use `()`.
-
-Braces that a declaration or control-flow construct requires remain body
-delimiters rather than expressions:
-
-```txt
-class Marker {}                  # empty declaration body
-def noop() Unit {}               # empty callable body
-def noop2() = ()                 # expression-bodied callable returning Unit
-def invalid() Unit = {}          # error: {} is construction, not Unit
-def make() EmptyUser = new {}    # zero-argument contextual class construction
-```
-
-Brace classification uses the first syntactic entry, not punctuation found
-later in the body. A leading construction field or spread selects an anonymous
-shape; otherwise bare braces select a block. When braces follow a callee, an
-explicit lambda head is recognized before shape construction. Commas in an
-ordinary block statement therefore do not reclassify the block:
-
-```txt
-result = {
-    left, right = 1, 2
-    left + right
-}
-
-consume { value =>
-    left, right = 1, 2
-    value + left + right
-}
-```
-
-The same classification applies anywhere a brace-delimited expression body is
-accepted: after a callable-body `=`, a lambda `=>`, a match-case `=>`, and
-`yield`. Labeled fields and spreads are construction expressions in every one
-of those positions:
-
-```txt
-def origin() Point = { x: 0, y: 0 }
-
-mapper = value => { x: value, y: 0 }
-
-point Point = match ready {
-    case true => { x: 1, y: 2 }
-    case false => { ...fallback }
-}
-
-points = for value <- values yield {
-    x: value
-    y: 0
-}
-```
-
-Braces belonging to a declaration or control-flow construct remain that
-construct's body. Ambiguous punning still requires `new { x, y }`.
-
-Shape conversion rules:
-- field names and field types must match at compile time
-- extra fields are allowed when passing a value to a narrower shape
-- missing fields are rejected
-- named shape fields may declare construction defaults
-- construction defaults do not participate in structural assignment compatibility
-- explicit shape construction may use a target field's default when that field is omitted
-- shape-to-shape assignment is structural by field names and field types
-- class-to-shape assignment is not implicit; construct the target shape explicitly with `{ ...instance }`
-- shape-to-interface follows the shape's explicit `with Interface` bounds
-- class-to-interface-through-shape is not automatic; explicitly construct the interface-bearing shape first
-- only visible class fields may be used by explicit shape construction
-- an already-created shape value does not implicitly become a class; use a class constructor such as `Pixel { ...point }`
-- tuple-to-shape and tuple-to-class are not allowed; use named shape construction, class constructors, or anonymous construction fields
-- ordinary calls may still accept named anonymous shapes in parentheses, for example `describe({ name: "Cara", age: 14 })`
-- construction fields inside braces use `field: value`; bare `field` is shorthand for `field: field`
-- bare punned fields require `Type { field }` or `new { field }`; `{ field }` is a block
-- construction fields cannot include a type; put an anonymous shape type on a
-  binding, field, parameter, or return declaration, and use a named `shape`
-  declaration when the schema needs a reusable name
-- single-expression braces like `{ value }` are still block expressions, not anonymous shapes
-
-Assignment projects fields that already exist; it never creates missing data from
-the destination's construction defaults:
-
-```txt
-shape Small { x Int }
-shape Full { x Int, y Int = 42 }
-
-source = Small(1)
-target Full = source            # invalid: source does not provide y
-target = Full { ...source }     # valid: construction supplies y = 42
-```
+### Shape equality
 
 Shape equality is structural across shape declarations:
 
@@ -2579,6 +2479,8 @@ names = Set[Str]()
 anything Set[Any] = Set()
 ```
 
+### Callable parameters
+
 Function and method parameters may end with one variadic vector parameter. `vararg`
 is written after the parameter type:
 
@@ -2598,7 +2500,7 @@ constructor-parameter = name Type [vararg] [= default]
 
 Rules:
 
-- `vararg` is postfix-only; the removed prefix form `vararg values [T]` is invalid.
+- `vararg` is postfix-only: write `values [T] vararg`; `vararg values [T]` is invalid.
 - A variadic parameter must have an explicit vector type `[T]`.
 - Only the final parameter may be variadic.
 - A parameter list may contain at most one variadic parameter.
@@ -2709,8 +2611,9 @@ leftMapped = either.mapLeft(error => error.toStr())
 ```
 
 Classes, shapes, and named objects declare methods directly in their declaration
-bodies, after storage fields and constructors. Declared unions put shared
-behavior in an extension block:
+bodies. Canonical member ordering is described under
+[Constructors](#constructors). Declared unions put shared behavior in an
+extension block:
 
 ```txt
 class Counter {
@@ -2752,40 +2655,32 @@ user User = User { name: "Ada" }
 label = user.displayName()
 ```
 
-Custom constructors are class-only and use a dedicated `new(...)` declaration in
-the class body.
+### Constructors
 
-- `new(...)` declares constructor inputs
-- `new(...) { body }` declares a block-bodied constructor
-- `new(...) = expression` declares an expression-bodied constructor
-- shape, union alternative, object, annotation, and interface declarations cannot define custom `new` constructors
-- constructor parameters use `name Type`, with optional defaults such as `age Int = 0`
-- constructor defaults may appear anywhere
-- `Type { field: value }` constructs by matching constructor parameters by field name
-- `Type(value)` constructs by filling constructor parameters positionally by declaration order
-- named construction may omit any constructor parameter with a default
-- positional construction fills a declaration-order prefix and may stop only when every remaining parameter has a default
-- positional construction never skips an earlier parameter
-- constructor parameters may end with one variadic vector parameter such as `items [Str] vararg`
-- `internal new(...) { body }` declares a constructor callable only from the same module
-- `private new(...) { body }` declares a private constructor
-- each explicit class constructor must initialize every field that does not have a field initializer, or delegate to another constructor
-- `this(...)` inside a constructor delegates positionally to another constructor of the same class
-- `this { field: value }` inside a constructor delegates with construction fields to another constructor of the same class
-- delegating constructors use expression bodies, for example `new(label Str) = this { name: label }`
-- direct and indirect constructor-delegation cycles are rejected
-- in a class declaration, `new(...)` declares a constructor; in expression position, `new(...)` performs contextual construction
-- contextual `new(...)` is not constructor delegation; use `this(...)` or `this { ... }` to delegate
-- explicitly targeted class call sites use braces for construction fields, for example `Person { name: "Ada", age: 10 }`
-- explicitly targeted class call sites use parentheses for positional arguments, for example `Person("Ada", 10)`
-- contextual class call sites use `new { ... }` or `new(...)` with the target supplied by context, as defined in [Construction](#construction)
-- `this` is the instance receiver
-- instance fields on classes and named objects may be accessed bare when they are not shadowed
-- use `this.field` when a parameter/local shadows a field, for example `this.age`
-- member order does not affect validity or semantics
-- canonical formatting places storage fields first, constructors next, and methods last
-- declared-union alternatives contain fields only; put shared methods in `ext UnionName`
-- source code may interleave fields, constructors, and methods; a formatter should restore canonical order
+Custom constructors are class-only and use a dedicated `new(...)` declaration
+in the class body. Shapes, union alternatives, objects, annotations, and
+interfaces cannot declare them.
+
+- `new(...) { body }` declares a block-bodied constructor.
+- `new(...) = expression` declares an expression-bodied constructor.
+- Constructor parameters use `name Type`; they are inputs to the body and do not have to correspond to stored fields.
+- Defaults, named arguments, positional-prefix binding, and `vararg` follow the shared [callable parameter rules](#callable-parameters). By-name parameters remain function- and method-only.
+- `Type {}` is valid when the selected constructor has no required inputs.
+- Declaring any explicit `new` disables the implicit public-field constructor for that class.
+- A variadic constructor input can be supplied as one vector-valued named construction field.
+- `internal new(...)` is callable only from the same module; `private new(...)` is callable only from the declaring class.
+- Every constructor must initialize each field without a field initializer or delegate to another constructor.
+- `this(...)` delegates positionally; `this { field: value }` delegates by input name.
+- Delegating constructors use expression bodies, for example `new(label Str) = this { name: label }`.
+- Direct and indirect delegation cycles are rejected.
+- In a class declaration, `new(...)` declares a constructor. In expression position, `new(...)` performs contextual construction and does not delegate.
+
+Explicit and contextual call-site syntax, target selection, and named versus
+positional construction are defined in [Construction](#construction).
+
+Inside a constructor, `this` is the instance receiver. Instance fields on
+classes and named objects may be accessed bare when they are not shadowed; use
+`this.field` when a parameter or local has the same name.
 
 ```txt
 class Person {
@@ -2805,6 +2700,62 @@ class Person {
     }
 }
 ```
+
+Defaults do not need to form a trailing suffix. Named construction can omit a
+defaulted input anywhere, while positional construction still fills one
+contiguous prefix:
+
+```txt
+class Article {
+    body Str
+    title Str
+
+    new(body Str = "body", title Str) {
+        this.body = body
+        this.title = title
+    }
+}
+
+full = Article("custom body", "Intro")
+named = Article { title: "Intro" }
+custom = Article { body: "custom body", title: "Intro" }
+Article("Intro") # invalid: initializes body and leaves title unset
+```
+
+When a class declares no explicit `new`, the compiler synthesizes one stable
+contract from its public fields:
+
+- Public fields without initializers are required inputs.
+- Public fields with initializers are optional inputs and may appear anywhere in the declaration.
+- `private` and `internal` fields are never constructor inputs and must have initializers; otherwise the class must declare an explicit constructor.
+- The contract is identical in every module and at every call site.
+- Named construction checks the public-field names and may omit initialized fields.
+- Positional construction follows public-field declaration order and may stop only when every remaining public field has an initializer.
+- Initialized non-public fields do not affect positional order.
+- Field mutability does not affect explicit spread construction.
+- Named class values do not structurally convert to other named class values.
+
+```txt
+class Account {
+    owner Str
+    internal region Str = "US"
+    balance Int
+    private cache Cache = Cache()
+}
+
+account = Account("Ada", 100) # same public contract in every module
+
+class SecuredAccount {
+    owner Str
+    private token Str
+}
+
+# Invalid without an explicit constructor: token has no initializer.
+```
+
+Member order does not affect validity or semantics. Canonical formatting places
+storage fields first, constructors next, and methods last. Declared-union
+alternatives contain fields only; shared methods belong in `ext UnionName`.
 
 Variadic constructor parameters collect positional arguments into a `[T]`
 inside the constructor body:
@@ -2934,7 +2885,7 @@ dtos = users.map(this.mapUser)
 # same as: users.map(user => this.mapUser(user))
 
 dtos = users.map(User.toDto)
-# unbound class method reference
+# named object method reference
 ```
 
 Supported callable references:
@@ -2942,7 +2893,7 @@ Supported callable references:
 - top-level function name
 - bound instance method, such as `mapper.mapUser`
 - bound `this` method, such as `this.mapUser`
-- unbound class method, such as `User.toDto`
+- named object method, such as `User.toDto`
 
 Stored fields, computed getters, and methods share one member-name namespace.
 A type cannot reuse a name across those categories, including through an
@@ -3385,10 +3336,11 @@ populated = LinkedList(1, 2, 3)
 ```
 
 `at`, `first`, `last`, `removeFirst()`, and `removeLast()` are safe and
-return `Option[T]`. Indexed mutations return `Result` with an `InvalidIndex`
-that records the rejected index and the collection size. `setAt` returns the
-replaced value, `removeAt` returns the removed value, and `insertAt` accepts
-indices from zero through the current size and returns `Unit`:
+return `Option[T]`. `indexOf(value)` returns `Some(index)` for the first match
+and `None` when the value is absent. Indexed mutations return `Result` with an
+`InvalidIndex` that records the rejected index and the collection size. `setAt`
+returns the replaced value, `removeAt` returns the removed value, and `insertAt`
+accepts indices from zero through the current size and returns `Unit`:
 
 ```txt
 shape InvalidIndex {
@@ -3402,18 +3354,16 @@ removedAt Result[Int, InvalidIndex] = queue.removeAt(0)
 ```
 
 `LinkedList {}` is named empty construction and `LinkedList()` is its positional
-equivalent; non-empty values use `LinkedList(...)`. The old indexed `get` and
-`remove` methods are not part of the collection API.
+equivalent; non-empty values use `LinkedList(...)`. Indexed access uses `at`,
+and removal uses `removeFirst`; `get` and `remove` are not collection methods.
 
 Array construction:
 
 ```txt
-ints Array[Int] = Array.ofInt(3)       # [0, 0, 0]
-floats Array[Float] = Array.ofFloat(3) # [0.0, 0.0, 0.0]
-bools Array[Bool] = Array.ofBool(3)    # [false, false, false]
-texts Array[Str] = Array.ofStr(3)      # ["", "", ""]
-runes Array[Rune] = Array.ofRune(3)    # default NUL rune values
-
+ints Array[Int] = Array.fill(3, 0)
+floats Array[Float] = Array.fill(3, 0.0)
+bools Array[Bool] = Array.fill(3, false)
+texts Array[Str] = Array.fill(3, "")
 filled Array[Int] = Array.fill(3, 7)
 generated Array[Int] = Array.generate(3, idx => idx * 2)
 
@@ -3558,19 +3508,39 @@ Collection literals are distinguished by their contents and spread sources:
 [...map]              # map copy
 ```
 
-Trailing commas are not supported. This applies uniformly to collection
-literals, brace construction, declarations, calls, types, tuples, and patterns:
+Trailing commas are allowed in delimited comma-separated forms. They are
+particularly useful for multiline values because adding or reordering the final
+entry does not require editing the preceding line:
 
 ```txt
-values = [1, 2,]                           # invalid
-lookup = ["left": 1, "right": 2,]         # invalid
-point = { x: 10, y: 20, }                  # invalid
-def process(name Str, amount Int,) Unit {}  # invalid
-fn(Int,) Int                                # invalid
-Box[Int,]                                  # invalid
-(1, 2,)                                    # invalid
-let (left, right,) = pair                  # invalid
+values = [
+    1,
+    2,
+]
+
+lookup = [
+    "left": 1,
+    "right": 2,
+]
+
+point = {
+    x: 10,
+    y: 20,
+}
+
+def process(
+    name Str,
+    amount Int,
+) Unit {}
+
+fn(Int,) Int
+Box[Int,]
+(1, 2,)
+let (left, right,) = pair
 ```
+
+Lume has no singleton tuples. A trailing comma in `(value,)` or `(Type,)` does
+not introduce one; the parentheses retain their ordinary grouping meaning.
 
 An empty `[]` literal contains no elements that identify its collection family
 or type arguments. It therefore requires an immediate expected vector or map
@@ -3593,12 +3563,12 @@ The compiler does not default `[]` to a vector, infer `[Any]` or `[Any: Any]`,
 or infer its type from later mutations. Only `[T]` and `[K: V]` provide valid
 contexts; `Set[T]`, `Array[T]`, and custom collection types retain their own
 construction syntax. If overloaded vector and map parameters both match `[]`,
-the call is ambiguous and requires an intermediate typed binding. The former
-empty-map spelling `[:]` is not supported.
+the call is ambiguous and requires an intermediate typed binding. `[:]` is not
+a map literal; use `[]` with an expected map type.
 
-Map construction belongs only to bracket literals. The former brace forms,
-including `Map { "key": value }` and `Map { [key]: value }`, are not
-supported. Braces remain reserved for construction fields and shape literals.
+Map construction belongs only to bracket literals. Forms such as
+`Map { "key": value }` and `Map { [key]: value }` are invalid. Braces remain
+reserved for construction fields and shape literals.
 
 Tuple literal:
 
@@ -3607,13 +3577,13 @@ Tuple literal:
 pair (Str, Int) = ("a", 1)
 ```
 
-Tuples always contain at least two elements. The general trailing-comma rule
-also rejects singleton tuple spellings:
+Tuples always contain at least two elements. A trailing comma does not create a
+singleton tuple; parenthesized expressions and types retain grouping semantics:
 
 ```txt
-value = (1,)                 # invalid; use 1
-value (Int,) = ...           # invalid; use Int
-let (value,) = tuple         # invalid
+value = (1,)                 # same as 1
+value (Int,) = 1             # same as value Int = 1
+let (value,) = tuple         # invalid: this is a plain one-name let binding
 let (value, _, _) = tuple3   # valid full-arity extraction
 ```
 
@@ -5374,11 +5344,11 @@ Current operator overloading constraints:
 - Reference identity is expressed by equality between opaque `referenceId` values; `ReferenceId` equality and hashing cannot be overloaded.
 - Standard collections do not define symbolic operators like `:+`, `:-`, `++`, or `--`; collection APIs should prefer searchable method names.
 - `:` is brace-entry syntax only, not an overloadable operator.
-- The spellings `:+`, `:-`, `++`, `--`, and `::` are removed from the language surface and currently produce `unsupported_operator` lexer diagnostics.
+- The spellings `:+`, `:-`, `++`, `--`, and `::` are unsupported operators and produce `unsupported_operator` lexer diagnostics.
 
 Newline continuation:
 
-- Ordinary expressions are no longer broadly newline-insensitive.
+- Ordinary expressions are newline-sensitive except at explicit continuation points.
 - A newline continues the current expression only when the previous line clearly ends in a continuation form, except postfix chains may continue when the next line starts with `.`.
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`

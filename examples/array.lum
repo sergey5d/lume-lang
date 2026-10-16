@@ -4,6 +4,7 @@
 # each 6
 # index 4 6
 # at 5 true
+# indexOf 1 true
 # first 4
 # last 6
 # mapped 8 12
@@ -38,17 +39,19 @@ def main() Unit {
     let (zippedValue, zippedLabel) = pairs[1]
     let (indexedValue, indexedPos) = indexed[2]
 
-    assigned = Array.ofInt(2)
+    assigned = Array.fill(2, 0)
     assigned[0] := 9
     assigned[1] := 10
-    defaultFloats = Array.ofFloat(1)
-    defaultBools = Array.ofBool(1)
-    defaultStrs = Array.ofStr(1)
-    defaultRunes = Array.ofRune(1)
+    nul Rune = "\0".runeAt(0)!
+    defaultFloats = Array.fill(1, 0.0)
+    defaultBools = Array.fill(1, false)
+    defaultStrs = Array.fill(1, "")
+    defaultRunes = Array.fill(1, nul)
     filled = Array.fill(2, 7)
     generated = Array.generate(3, idx => idx * 2)
 
     println("at " + middle + " " + values.at(9).isEmpty)
+    println("indexOf " + (values.indexOf(5) ?? -1) + " " + values.indexOf(9).isEmpty)
     println("first " + first)
     println("last " + last)
     println("mapped " + mapped[0] + " " + mapped[2])

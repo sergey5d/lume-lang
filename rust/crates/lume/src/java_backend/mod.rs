@@ -6540,7 +6540,7 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_executable_runs_array_of_rune() {
+    fn generated_java_executable_runs_array_fill_with_rune() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java executable test because javac/java is not available");
             return;
@@ -6557,7 +6557,8 @@ def main() Unit {
 module demo/runarray
 
 def main() Int {
-    runes Array[Rune] = Array.ofRune(2)
+    nul Rune = "\0".runeAt(0)!
+    runes Array[Rune] = Array.fill(2, nul)
     0
 }
 "#,
@@ -6579,7 +6580,7 @@ def main() Int {
         let module =
             fs::read_to_string(out.join("demo/runarray/RunarrayModule.java")).expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
-        assert!(module.contains("LumeArray.ofRune(2L)"));
+        assert!(module.contains("LumeArray.fill(2L"));
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -7508,7 +7509,16 @@ def main() Unit {
     reduced = values.reduce((left, right) => left + right)
     returned = values.sort((left, right) => left - right)
 
-    println(values.first!, returned.first!, mapped.first!, filtered.first!, folded, reduced!)
+    println(
+        values.first!,
+        returned.first!,
+        mapped.first!,
+        filtered.first!,
+        folded,
+        reduced!,
+        values.indexOf(2)!,
+        values.indexOf(9).isEmpty
+    )
 }
 "#,
         )
@@ -7533,7 +7543,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "1 1 30 3 6 6\n"
+            "1 1 30 3 6 6 1 true\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7646,6 +7656,8 @@ def main() Unit {
     println(users.setAt(0, User { name: "Cara", cost: 4 })!.name)
     println(users.removeAt(1)!.name)
     println(users.fold(0, (cost, user) => cost + user.cost))
+    println(users.indexOf(users.at(0)!)!)
+    println(users.indexOf(User { name: "missing", cost: 0 }).isEmpty)
 
     values [Int] = [1, 2]
     println(values.setAt(0, 3) !)
@@ -7656,6 +7668,8 @@ def main() Unit {
     println(values.contains(2))
     println(values.first ?? 0)
     println(values.last ?? 0)
+    println(values.indexOf(4)!)
+    println(values.indexOf(9).isEmpty)
     empty [Int] = []
     println(empty.last ?? -1)
     match values.removeAt(9) {
@@ -7670,6 +7684,8 @@ def main() Unit {
     println(array.at(1) !)
     println(array.setAt(1, 7) !)
     println(array[1])
+    println(array.indexOf(7)!)
+    println(array.indexOf(9).isEmpty)
 
     filled [Int] = Vector.fill(2, 6)
     filled.add(8)
@@ -7717,7 +7733,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "Bob\nBob\nAda\n4\n1\n2\n3\ntrue\nfalse\n3\n4\n-1\n9\n2\n5\n5\n7\n6,6,8\n0,2,4\n7\n11\n"
+            "Bob\nBob\nAda\n4\n0\ntrue\n1\n2\n3\ntrue\nfalse\n3\n4\n1\ntrue\n-1\n9\n2\n5\n5\n7\n1\ntrue\n6,6,8\n0,2,4\n7\n11\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7765,7 +7781,8 @@ def main() Unit {
     println(text.toUpper().trim())
     println(text.contains("LuMe"))
     println(text.contains("missing"))
-    println("😀ab".indexOf("a"))
+    println("😀ab".indexOf("a") ?? -1)
+    println("😀ab".indexOf("missing").isEmpty)
     println("a1 b22".replaceFirstRegex("\d+", "#"))
     println("a1 b22".replaceAllRegex("\d+", "#"))
 }
@@ -7816,7 +7833,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n[LuMe]\n[LuMe  ]\n[  LuMe]\nlume\nLUME\ntrue\nfalse\n1\na# b22\na# b#\n"
+            "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n[LuMe]\n[LuMe  ]\n[  LuMe]\nlume\nLUME\ntrue\nfalse\n1\ntrue\na# b22\na# b#\n"
         );
 
         let _ = fs::remove_dir_all(temp);

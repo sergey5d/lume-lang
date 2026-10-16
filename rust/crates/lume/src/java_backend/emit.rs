@@ -6643,15 +6643,9 @@ impl<'a> SourceBodyEmitter<'a> {
                     ast::UnaryOp::UnsafeExtract => {
                         let value = self.emit_expr(operand, bindings)?;
                         let result_ty = self
-                            .bundle
-                            .ir
-                            .source_exprs
-                            .iter()
-                            .find(|source| {
-                                source.function == self.function.id && source.span == *span
-                            })?
-                            .ty
-                            .clone();
+                            .source_expr_type(*span)
+                            .or_else(|| self.source_expr_expected(*span))
+                            .unwrap_or(ir::Type::Unknown);
                         Some(format!(
                             "(({}) lume.core.LumeRuntime.extractSuccessValue({value}))",
                             self.names.value_type(&result_ty)
@@ -8941,13 +8935,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         if (owner == "Array"
                             && matches!(
                                 name.as_str(),
-                                "ofInt"
-                                    | "ofFloat"
-                                    | "ofBool"
-                                    | "ofStr"
-                                    | "ofRune"
-                                    | "fill"
-                                    | "generate"
+                                "fill" | "generate"
                             ))
                             || (owner == "Vector"
                                 && matches!(name.as_str(), "fill" | "generate"))
@@ -12393,7 +12381,7 @@ fn builtin_method_param_types(
             match (method, arg_len) {
                 ("add", 1) => Some(vec![args[0].clone()]),
                 ("addAll", 1) => Some(vec![receiver.clone()]),
-                ("contains", 1) => Some(vec![args[0].clone()]),
+                ("contains" | "indexOf", 1) => Some(vec![args[0].clone()]),
                 ("map", 1) => Some(vec![ir::Type::Function {
                     params: vec![args[0].clone()],
                     ret: Box::new(ir::Type::Unknown),
@@ -12459,7 +12447,8 @@ fn builtin_method_return_type(
             ("trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper", 0) => Some(ir::Type::Str),
             ("replaceFirstRegex" | "replaceAllRegex", 2) => Some(ir::Type::Str),
             ("isEmpty" | "nonEmpty", 0) | ("contains", 1) => Some(ir::Type::Bool),
-            ("size", 0) | ("indexOf" | "compareTo", 1) => Some(ir::Type::Int),
+            ("size", 0) | ("compareTo", 1) => Some(ir::Type::Int),
+            ("indexOf", 1) => Some(ir::Type::option(ir::Type::Int)),
             ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
             _ => None,
         };
@@ -12508,6 +12497,14 @@ fn builtin_method_return_type(
             if name == "Vector" && args.len() == 1 && method == "slice" && arg_len <= 2 =>
         {
             Some(receiver.clone())
+        }
+        ir::Type::Named { name, args }
+            if matches!(name.as_str(), "Vector" | "LinkedList" | "Array")
+                && args.len() == 1
+                && method == "indexOf"
+                && arg_len == 1 =>
+        {
+            Some(ir::Type::option(ir::Type::Int))
         }
         ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
             match (method, arg_len) {

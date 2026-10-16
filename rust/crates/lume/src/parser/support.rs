@@ -49,14 +49,6 @@ impl<'a> Parser<'a> {
         while self.match_token(TokenKind::Newline) {}
     }
 
-    pub(super) fn report_trailing_comma(&mut self, comma: Span, context: &'static str) {
-        self.diagnostics.push(Diagnostic::error(
-            "trailing_comma",
-            format!("trailing commas are not supported; remove the trailing comma from {context}"),
-            comma,
-        ));
-    }
-
     pub(super) fn consume(&mut self, kind: TokenKind, message: &'static str) -> Option<Span> {
         if self.match_token(kind) {
             Some(self.previous_span())

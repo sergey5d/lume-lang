@@ -2569,27 +2569,10 @@ fn parses_bracket_map_literal_as_map_construction() {
 }
 
 #[test]
-fn rejects_singleton_tuples_as_trailing_commas() {
-    for source in [
+fn allows_trailing_commas_in_delimited_forms() {
+    let cases = [
         "def main() Unit { value = (1,) }",
         "def main() Unit { value (Int,) = 1 }",
-        "def main() Unit { let (value,) = (1, 2) }",
-    ] {
-        let result = parse(source);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "trailing_comma"),
-            "expected trailing comma diagnostic for {source:?}, got {:#?}",
-            result.diagnostics
-        );
-    }
-}
-
-#[test]
-fn rejects_trailing_commas_in_non_literal_forms() {
-    let cases = [
         "class Box[T,] { value T }",
         "class Box[T when T with Eq[T],] { value T }",
         "def identity(value Int,) Int = value",
@@ -2606,18 +2589,18 @@ fn rejects_trailing_commas_in_non_literal_forms() {
         "use app/models/{User, Account,}",
         "interface First {}\ninterface Second {}\nclass Both with First, Second, {}",
         "def main() Unit { value { left Int, right Int, } = { left: 1, right: 2 } }",
-        "class Pair { left Int right Int new(left Int, right Int,) { this.left = left this.right = right } }",
+        "class Pair { left Int right Int new(left Int, right Int,) { this.left = left\nthis.right = right } }",
         "def main(values [[Int]]) Unit { value = values[0, 1,] }",
+        "def main() Unit { values = [1, 2,] }",
+        "def main() Unit { lookup = [\"left\": 1, \"right\": 2,] }",
+        "def main() Unit { point = { x: 10, y: 20, } }",
     ];
 
     for source in cases {
         let result = parse(source);
         assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "trailing_comma"),
-            "expected trailing comma diagnostic for {source:?}, got {:#?}",
+            result.diagnostics.is_empty(),
+            "expected trailing comma to parse for {source:?}, got {:#?}",
             result.diagnostics
         );
     }
@@ -2632,25 +2615,6 @@ fn parses_qualified_union_alternative_import_aliases() {
     let symbol = import.symbols.first().expect("imported symbol");
     assert_eq!(symbol.name, "ConnectionState.Ready");
     assert_eq!(symbol.alias.as_deref(), Some("ConnectionReady"));
-}
-
-#[test]
-fn rejects_trailing_commas_in_collection_and_brace_construction_literals() {
-    for source in [
-        "def main() Unit { values = [1, 2,] }",
-        "def main() Unit { lookup = [\"left\": 1, \"right\": 2,] }",
-        "def main() Unit { point = { x: 10, y: 20, } }",
-    ] {
-        let result = parse(source);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "trailing_comma"),
-            "expected trailing comma diagnostic for {source:?}, got {:#?}",
-            result.diagnostics
-        );
-    }
 }
 
 #[test]

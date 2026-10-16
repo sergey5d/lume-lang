@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# .*trailing commas are not supported.*
-
-def main() Unit {
-    value = (1,)
-}

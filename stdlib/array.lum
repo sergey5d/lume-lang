@@ -22,7 +22,7 @@ private interface ArrayApi[T] with Iterable[T] {
     def contains(e T) Bool
     def find(e T) Option[T]
 
-    def indexOf(e T) Int
+    def indexOf(value T) Option[Int]
 
     def zip[X](other Array[X]) Array[(T, X)]
     def zipWithIndex() Array[(T, Int)]

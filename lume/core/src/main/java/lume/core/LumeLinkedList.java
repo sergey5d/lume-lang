@@ -30,6 +30,11 @@ public final class LumeLinkedList<T> {
         return new LumeLinkedList<>(list);
     }
 
+    public Option<Long> indexOf(T value) {
+        var index = values.indexOf(value);
+        return index < 0 ? LumeRuntime.optionNone() : LumeRuntime.optionSome((long) index);
+    }
+
     public LumeLinkedList<T> add(T value) {
         values.addLast(value);
         return this;

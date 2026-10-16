@@ -12,6 +12,7 @@
 # linked previous 7
 # linked removed 9
 # linked error 3 2
+# linked index 1 true
 # linked first 8
 
 def main() Unit {
@@ -38,5 +39,6 @@ def main() Unit {
     println("linked removed " + (linked.removeAt(2) !))
     let Err { error as linkedError } = linked.removeAt(3) else return ()
     println("linked error " + linkedError.index + " " + linkedError.size)
+    println("linked index " + (linked.indexOf(10) ?? -1) + " " + linked.indexOf(99).isEmpty)
     println("linked first " + (linked.at(0) !))
 }

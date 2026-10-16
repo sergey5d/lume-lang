@@ -1,0 +1,44 @@
+# EXPECT:
+# Ada 2
+
+shape User {
+    name Str
+    scores [Int]
+}
+
+def describe(
+    user User,
+) Str =
+    user.name + " " + user.scores.size
+
+def main() Unit {
+    user = User {
+        name: "Ada",
+        scores: [
+            10,
+            20,
+        ],
+    }
+
+    labels = [
+        "primary": user.name,
+    ]
+
+    pair = (
+        labels["primary"]!,
+        user.scores.size,
+    )
+    let (
+        name,
+        size,
+    ) = pair
+
+    println(
+        describe(
+            User {
+                name,
+                scores: user.scores,
+            },
+        ),
+    )
+}

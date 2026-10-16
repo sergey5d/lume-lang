@@ -15,6 +15,7 @@
 # zip 2 b
 # zipIndex 4 3
 # at 3
+# indexOf 1 true
 # first 1
 # last 4
 # tail 2 4
@@ -66,6 +67,7 @@ def main() Unit {
     println("zip " + zipValue + " " + zipLabel)
     println("zipIndex " + indexedValue + " " + indexedPos)
     println("at " + (items.at(1) ?? 0))
+    println("indexOf " + (items.indexOf(3) ?? -1) + " " + items.indexOf(9).isEmpty)
     println("first " + first)
     println("last " + last)
     println("tail " + (tailItems.at(0) ?? 0) + " " + (tailItems.at(2) ?? 0))

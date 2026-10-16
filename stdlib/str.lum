@@ -16,7 +16,7 @@ interface Str with Comparable[Str] {
     def toLower() Str
     def toUpper() Str
     def contains(part Str) Bool
-    def indexOf(part Str) Int
+    def indexOf(part Str) Option[Int]
     def replaceFirstRegex(pattern Str, replacement Str) Str
     def replaceAllRegex(pattern Str, replacement Str) Str
 }

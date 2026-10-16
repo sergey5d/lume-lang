@@ -12,36 +12,6 @@ public final class LumeArray<T> {
         this.values = values;
     }
 
-    public static LumeArray<Long> ofInt(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, 0L);
-        return new LumeArray<>(values);
-    }
-
-    public static LumeArray<Double> ofFloat(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, 0.0);
-        return new LumeArray<>(values);
-    }
-
-    public static LumeArray<Boolean> ofBool(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, false);
-        return new LumeArray<>(values);
-    }
-
-    public static LumeArray<String> ofStr(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, "");
-        return new LumeArray<>(values);
-    }
-
-    public static LumeArray<Integer> ofRune(long length) {
-        var values = new Object[Math.toIntExact(length)];
-        Arrays.fill(values, 0);
-        return new LumeArray<>(values);
-    }
-
     public static <T> LumeArray<T> fill(long length, T value) {
         var values = new Object[Math.toIntExact(length)];
         Arrays.fill(values, value);
@@ -66,6 +36,11 @@ public final class LumeArray<T> {
 
     public long size() {
         return values.length;
+    }
+
+    public Option<Long> indexOf(T value) {
+        var index = Arrays.asList(values).indexOf(value);
+        return index < 0 ? LumeRuntime.optionNone() : LumeRuntime.optionSome((long) index);
     }
 
     public Option<T> at(long index) {

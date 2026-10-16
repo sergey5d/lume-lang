@@ -55,10 +55,8 @@ impl<'a> Parser<'a> {
                     if !self.match_token(TokenKind::Comma) {
                         break;
                     }
-                    let comma = self.previous_span();
                     self.skip_newlines();
                     if self.at(TokenKind::RBracket) {
-                        self.report_trailing_comma(comma, "generic condition list");
                         break;
                     }
                 }
@@ -85,10 +83,8 @@ impl<'a> Parser<'a> {
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RBracket) {
-                    self.report_trailing_comma(comma, "generic parameter list");
                     break;
                 }
             }
@@ -149,10 +145,8 @@ impl<'a> Parser<'a> {
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.report_trailing_comma(comma, "callable parameter list");
                     break;
                 }
             }
@@ -178,10 +172,8 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_type_ref_list(&mut self) -> Option<Vec<TypeRef>> {
         let mut refs = vec![self.parse_type_ref()?];
         while self.match_token(TokenKind::Comma) {
-            let comma = self.previous_span();
             self.skip_newlines();
             if self.at(TokenKind::LBrace) {
-                self.report_trailing_comma(comma, "interface list");
                 break;
             }
             refs.push(self.parse_type_ref()?);
@@ -309,10 +301,8 @@ impl<'a> Parser<'a> {
                 if !self.match_token(TokenKind::Comma) {
                     break;
                 }
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.report_trailing_comma(comma, "function type parameter list");
                     break;
                 }
             }
@@ -346,10 +336,8 @@ impl<'a> Parser<'a> {
         if !self.at(TokenKind::RParen) {
             fields.push(self.parse_tuple_type_field()?);
             while self.match_token(TokenKind::Comma) {
-                let comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.report_trailing_comma(comma, "tuple type");
                     break;
                 }
                 fields.push(self.parse_tuple_type_field()?);
@@ -446,10 +434,8 @@ impl<'a> Parser<'a> {
             if !self.at(TokenKind::RBracket) {
                 args.push(self.parse_type_ref()?);
                 while self.match_token(TokenKind::Comma) {
-                    let comma = self.previous_span();
                     self.skip_newlines();
                     if self.at(TokenKind::RBracket) {
-                        self.report_trailing_comma(comma, "type argument list");
                         break;
                     }
                     args.push(self.parse_type_ref()?);
@@ -476,10 +462,8 @@ impl<'a> Parser<'a> {
                 let separated_by_newline = self.at(TokenKind::Newline);
                 self.skip_newlines();
                 if self.match_token(TokenKind::Comma) {
-                    let comma = self.previous_span();
                     self.skip_newlines();
                     if self.at(TokenKind::RBrace) {
-                        self.report_trailing_comma(comma, "anonymous shape type");
                         break;
                     }
                     continue;

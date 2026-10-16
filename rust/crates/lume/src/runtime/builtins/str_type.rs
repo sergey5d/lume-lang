@@ -284,11 +284,11 @@ fn str_index_of(
     let Value::String(part) = part else {
         return Err(interpreter.runtime_error(span, "Str.indexOf argument must be Str"));
     };
-    let index = text
-        .find(part)
-        .map(|byte_index| text[..byte_index].chars().count() as i64)
-        .unwrap_or(-1);
-    Ok(Value::Int(index))
+    let Some(byte_index) = text.find(part) else {
+        return Ok(interpreter.option_none());
+    };
+    let index = text[..byte_index].chars().count() as i64;
+    Ok(interpreter.option_some(Value::Int(index)))
 }
 
 fn str_replace_first_regex(

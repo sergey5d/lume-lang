@@ -3,6 +3,7 @@
 # true true false false
 # [LuMe] [LuMe  ] [  LuMe] lume LUME
 # true false
+# 1 true
 # a# b22 a# b#
 
 def main() Unit {
@@ -20,6 +21,7 @@ def main() Unit {
         text.toUpper().trim()
     )
     println(text.contains("LuMe"), text.contains("missing"))
+    println("😀ab".indexOf("a") ?? -1, "😀ab".indexOf("missing").isEmpty)
 
     digits = "a1 b22"
     println(
