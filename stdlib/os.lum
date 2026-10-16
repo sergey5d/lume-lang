@@ -6,7 +6,7 @@ object OS with Printer {
     stdout Printer
     stderr Printer
 
-    def args [Str] = []
+    get args [Str] = []
 
     def print(value [Str] vararg) Unit = ()
     def println(value [Str] vararg) Unit = ()

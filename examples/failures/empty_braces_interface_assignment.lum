@@ -2,7 +2,7 @@
 # .*empty construction '\{\}' requires an expected concrete type.*
 
 interface Named {
-    def name Str
+    get name Str
 }
 
 def main(existing Named) Unit {

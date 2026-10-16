@@ -405,10 +405,23 @@ impl<'a> Parser<'a> {
                     self.consume(TokenKind::RParen, "expected ')' after pattern")?;
                     return Some(first);
                 }
+                let first_comma = self.previous_span();
                 self.skip_newlines();
                 if self.at(TokenKind::RParen) {
-                    self.consume(TokenKind::RParen, "expected ')' after tuple pattern")?;
-                    return Some(first);
+                    let end =
+                        self.consume(TokenKind::RParen, "expected ')' after tuple pattern")?;
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "singleton_tuple",
+                            "Lume has no singleton tuple patterns; '(pattern,)' is invalid",
+                            first_comma,
+                        )
+                        .with_help("remove the trailing comma or add a second tuple pattern"),
+                    );
+                    return Some(Pattern::Tuple {
+                        elements: vec![first],
+                        span: start.cover(end),
+                    });
                 }
                 let mut elements = vec![first];
                 loop {

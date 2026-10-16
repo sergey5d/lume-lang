@@ -2,7 +2,7 @@
   "name": "lume-syntax",
   "displayName": "Lume",
   "description": "Syntax highlighting, language configuration, and source formatting for Lume.",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "sergeyd",
   "license": "UNLICENSED",
   "main": "./extension.js",

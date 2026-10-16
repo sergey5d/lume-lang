@@ -19,14 +19,14 @@ private interface LinkedListApi[T] with Iterable[T] {
     def setAt(index Int, value T) Result[T, InvalidIndex]
     def insertAt(index Int, value T) Result[Unit, InvalidIndex]
     def removeAt(index Int) Result[T, InvalidIndex]
-    def first Option[T]
-    def last Option[T]
+    get first Option[T]
+    get last Option[T]
     def tail() LinkedList[T]
-    def isEmpty Bool
-    def nonEmpty Bool = !this.isEmpty
+    get isEmpty Bool
+    get nonEmpty Bool = !this.isEmpty
     def removeFirst() Option[T]
     def removeLast() Option[T]
-    def size Int
+    get size Int
     def forEach(f fn(T) Unit)
     def iterator() Iterator[T]
 

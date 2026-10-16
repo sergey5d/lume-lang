@@ -10,6 +10,7 @@ impl<'a> Parser<'a> {
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Annotation)
                 | TokenKind::Keyword(Keyword::Def)
+                | TokenKind::Keyword(Keyword::Get)
                 | TokenKind::Keyword(Keyword::Type)
                 | TokenKind::Keyword(Keyword::Class)
                 | TokenKind::Keyword(Keyword::Shape)
@@ -108,7 +109,10 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::Identifier) {
             return self.expect_identifier(message);
         }
-        if self.at_keyword(Keyword::Annotation) || self.at_keyword(Keyword::Case) {
+        if self.at_keyword(Keyword::Annotation)
+            || self.at_keyword(Keyword::Case)
+            || self.at_keyword(Keyword::Get)
+        {
             let token = self.current().clone();
             self.advance();
             return Some((token.lexeme, token.span));
@@ -674,6 +678,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Continue) => "CONTINUE",
             TokenKind::Keyword(Keyword::Annotation) => "ANNOTATION",
             TokenKind::Keyword(Keyword::Def) => "DEF",
+            TokenKind::Keyword(Keyword::Get) => "GET",
             TokenKind::Keyword(Keyword::Default) => "DEFAULT",
             TokenKind::Keyword(Keyword::Class) => "CLASS",
             TokenKind::Keyword(Keyword::Shape) => "SHAPE",

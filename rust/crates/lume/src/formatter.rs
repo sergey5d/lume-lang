@@ -259,7 +259,7 @@ fn should_write_horizontal_space(
     }
 
     if current.kind == TokenKind::LParen && can_end_callee(previous.kind) {
-        return had_space && is_parenthesized_getter_return(tokens, current_index);
+        return is_parenthesized_getter_return(tokens, current_index);
     }
 
     if current.kind == TokenKind::LBracket {
@@ -313,7 +313,7 @@ fn can_end_callee(kind: TokenKind) -> bool {
 fn is_parenthesized_getter_return(tokens: &[&Token], lparen_index: usize) -> bool {
     lparen_index >= 2
         && tokens[lparen_index - 1].kind == TokenKind::Identifier
-        && tokens[lparen_index - 2].kind == TokenKind::Keyword(Keyword::Def)
+        && tokens[lparen_index - 2].kind == TokenKind::Keyword(Keyword::Get)
 }
 
 fn nesting_after_leading_closers(
@@ -601,12 +601,12 @@ mod tests {
     #[test]
     fn normalizes_horizontal_spacing_without_changing_literals_or_comments() {
         let result = format(
-            "class Aggregator {\nprivate rollupMap [Str :  [Record]] = []\nprivate  recordMap [Str: Record] = []\ndef coordinates  (Int, Int) = ( 1, 2 )\ndef label() Str {\nmessage  =  \"keep  spaces\" # keep  comment spacing\nprintln( \"kind\", message )\nmessage\n}\n}\n",
+            "class Aggregator {\nprivate rollupMap [Str :  [Record]] = []\nprivate  recordMap [Str: Record] = []\nget coordinates  (Int, Int) = ( 1, 2 )\ndef label() Str {\nmessage  =  \"keep  spaces\" # keep  comment spacing\nprintln( \"kind\", message )\nmessage\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "class Aggregator {\n    private rollupMap [Str: [Record]] = []\n    private recordMap [Str: Record] = []\n    def coordinates (Int, Int) = (1, 2)\n    def label() Str {\n        message = \"keep  spaces\" # keep  comment spacing\n        println(\"kind\", message)\n        message\n    }\n}\n"
+            "class Aggregator {\n    private rollupMap [Str: [Record]] = []\n    private recordMap [Str: Record] = []\n    get coordinates (Int, Int) = (1, 2)\n    def label() Str {\n        message = \"keep  spaces\" # keep  comment spacing\n        println(\"kind\", message)\n        message\n    }\n}\n"
         );
     }
 

@@ -1728,7 +1728,7 @@ def main() Unit {
         r#"
 def main() Unit {
     value = object {
-        def label Str = "x"
+        get label Str = "x"
         def label() Str = this.label
     }
 }
@@ -1736,8 +1736,8 @@ def main() Unit {
         r#"
 def main() Unit {
     value = object {
-        def label Str = "x"
-        def label Str = "y"
+        get label Str = "x"
+        get label Str = "y"
     }
 }
 "#,
@@ -2571,8 +2571,6 @@ fn parses_bracket_map_literal_as_map_construction() {
 #[test]
 fn allows_trailing_commas_in_delimited_forms() {
     let cases = [
-        "def main() Unit { value = (1,) }",
-        "def main() Unit { value (Int,) = 1 }",
         "class Box[T,] { value T }",
         "class Box[T when T with Eq[T],] { value T }",
         "def identity(value Int,) Int = value",
@@ -2603,6 +2601,24 @@ fn allows_trailing_commas_in_delimited_forms() {
             "expected trailing comma to parse for {source:?}, got {:#?}",
             result.diagnostics
         );
+    }
+}
+
+#[test]
+fn rejects_singleton_tuple_syntax() {
+    for source in [
+        "def main() Unit { value = (1,) }",
+        "def main() Unit { value (Int,) = 1 }",
+        "def main(value Int) Unit { let (item,) = value }",
+    ] {
+        let result = parse(source);
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "expected singleton tuple diagnostic for {source:?}, got {:#?}",
+            result.diagnostics
+        );
+        assert_eq!(result.diagnostics[0].code, "singleton_tuple");
     }
 }
 
@@ -7021,18 +7037,18 @@ fn keeps_indexed_callable_invocation_as_value_indexing() {
 }
 
 #[test]
-fn parses_getter_methods_without_parameter_lists() {
+fn parses_getter_declarations_with_get_keyword() {
     let result = parse(
         r#"
 interface Sized {
-    def size Int
+    get size Int
 }
 
 class Box {
     values [Int]
 
-    def size Int = this.values.size()
-    def items [Int] = this.values
+    get size Int = this.values.size()
+    get items [Int] = this.values
 }
 "#,
     );
@@ -7071,11 +7087,11 @@ fn getters_accept_collection_function_and_anonymous_shape_return_types() {
     let result = parse(
         r#"
 interface Accessors {
-    def counts [Str: Int]
-    def rows [[Int]]
-    def optionalValues [Int?]
-    def callbacks [fn(Int) Int]
-    def position { x Int, y Int }
+    get counts [Str: Int]
+    get rows [[Int]]
+    get optionalValues [Int?]
+    get callbacks [fn(Int) Int]
+    get position { x Int, y Int }
 }
 
 class Values {
@@ -7084,11 +7100,11 @@ class Values {
     private storedOptionalValues [Int?] = []
     private storedCallbacks [fn(Int) Int] = []
 
-    def counts [Str: Int] = this.storedCounts
-    def rows [[Int]] = this.storedRows
-    def optionalValues [Int?] = this.storedOptionalValues
-    def callbacks [fn(Int) Int] = this.storedCallbacks
-    def position { x Int, y Int } = { x: 1, y: 2 }
+    get counts [Str: Int] = this.storedCounts
+    get rows [[Int]] = this.storedRows
+    get optionalValues [Int?] = this.storedOptionalValues
+    get callbacks [fn(Int) Int] = this.storedCallbacks
+    get position { x Int, y Int } = { x: 1, y: 2 }
 }
 "#,
     );
@@ -7146,11 +7162,11 @@ class Values {
 #[test]
 fn anonymous_shape_signatures_end_before_following_interface_members() {
     for (callable, getter) in [
-        ("def position { x Int, y Int }", true),
+        ("get position { x Int, y Int }", true),
         ("def position() { x Int, y Int }", false),
     ] {
         for (following, description) in [
-            ("def label Str", "getter"),
+            ("get label Str", "getter"),
             ("def label() Str", "method"),
             ("shape Metadata { value Str }", "nested declaration"),
         ] {
@@ -7194,7 +7210,7 @@ interface Positioned {{
         r#"
 interface Defaults {
     def noop() {}
-    def label Str
+    get label Str
 }
 "#,
     );
@@ -7211,20 +7227,20 @@ interface Defaults {
 }
 
 #[test]
-fn distinguishes_methods_from_parenthesized_getter_return_types_by_spacing() {
+fn distinguishes_methods_from_getters_by_keyword() {
     let result = parse(
         r#"
 interface Positioned {
-    def coordinates (Int, Int)
+    get coordinates (Int, Int)
 }
 
 class Accessors {
     def coordinates() (Int, Int) = (1, 2)
-    def coordinateValue (Int, Int) = (1, 2)
+    get coordinateValue (Int, Int) = (1, 2)
     def values() [Int] = [1]
-    def valueList [Int] = [1]
+    get valueList [Int] = [1]
     def callback() fn() Int = () => 41
-    def callbackValue fn() Int = () => 42
+    get callbackValue fn() Int = () => 42
 }
 "#,
     );
@@ -7293,8 +7309,8 @@ fn rejects_generic_getters_and_getters_without_return_types() {
     let result = parse(
         r#"
 class Invalid {
-    def generic[T] T = panic("no")
-    def missing = 1
+    get generic[T] T = panic("no")
+    get missing = 1
 }
 "#,
     );
@@ -7311,6 +7327,44 @@ class Invalid {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "getter_return_type_required"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_getter_parameter_lists() {
+    let result = parse(
+        r#"
+class Invalid {
+    get value() Int = 1
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "getter_parameter_list"),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn rejects_def_getter_syntax() {
+    let result = parse(
+        r#"
+class Invalid {
+    def label Str = "legacy"
+}
+"#,
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "getter_keyword_required"),
         "{:#?}",
         result.diagnostics
     );

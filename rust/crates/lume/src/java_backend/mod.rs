@@ -3635,12 +3635,12 @@ module demo/getters
 class Item {
     name Str
 
-    def label Str = this.name
-    def repeated Str = label + this.label
+    get label Str = this.name
+    get repeated Str = label + this.label
 }
 
 class Factory {
-    def creator fn(Int) Int = (value Int) => value + 1
+    get creator fn(Int) Int = (value Int) => value + 1
 }
 
 def read(item Item) Str = item.repeated
@@ -7571,7 +7571,7 @@ class User {}
 class HandlerService {
     stored [fn() Int]
 
-    def handlers [fn() Int] = stored
+    get handlers [fn() Int] = stored
 
     def echo[T](value T) T = value
 }

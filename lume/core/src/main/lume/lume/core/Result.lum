@@ -5,17 +5,17 @@ type Result[T, E] =
     | class Err { error E }
 
 ext Result[T, E] {
-    def isOk Bool = match this {
+    get isOk Bool = match this {
         case Ok { value: _ } => true
         case Err { error: _ } => false
     }
 
-    def isSuccess Bool = match this {
+    get isSuccess Bool = match this {
         case Ok { value: _ } => true
         case Err { error: _ } => false
     }
 
-    def isErr Bool = match this {
+    get isErr Bool = match this {
         case Ok { value: _ } => false
         case Err { error: _ } => true
     }

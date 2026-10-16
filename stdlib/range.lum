@@ -46,7 +46,7 @@ private class RangeIterator with Iterator[Int] {
         this.step = step
     }
 
-    def hasNext Bool {
+    get hasNext Bool {
         if this.step > 0 {
             return this.current < this.end
         }

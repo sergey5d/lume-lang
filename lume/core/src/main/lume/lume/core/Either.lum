@@ -5,17 +5,17 @@ type Either[L, R] =
     | class Right { value R }
 
 ext Either[L, R] {
-    def isLeft Bool = match this {
+    get isLeft Bool = match this {
         case Left { value: _ } => true
         case Right { value: _ } => false
     }
 
-    def isRight Bool = match this {
+    get isRight Bool = match this {
         case Left { value: _ } => false
         case Right { value: _ } => true
     }
 
-    def isSuccess Bool = match this {
+    get isSuccess Bool = match this {
         case Left { value: _ } => false
         case Right { value: _ } => true
     }

@@ -5,26 +5,26 @@
 # 42
 
 interface Named {
-    def label Str
+    get label Str
 }
 
 class Item with Named {
     name Str
 
-    def label Str = this.name
-    def repeated Str = label + " " + this.label
+    get label Str = this.name
+    get repeated Str = label + " " + this.label
 }
 
 shape Point {
     x Int
     y Int
 
-    def total Int = this.x + this.y
-    def coordinates (Int, Int) = (this.x, this.y)
+    get total Int = this.x + this.y
+    get coordinates (Int, Int) = (this.x, this.y)
 }
 
 class Factory {
-    def creator fn() Int = () => 42
+    get creator fn() Int = () => 42
 }
 
 def main() Unit {

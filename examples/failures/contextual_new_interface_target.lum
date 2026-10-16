@@ -2,7 +2,7 @@
 # .*cannot assign value of type '\{name Str\}' to binding 'value' of type 'Named'.*
 
 interface Named {
-    def name Str
+    get name Str
 }
 
 def main() Unit {

@@ -32,7 +32,7 @@ type SeekFrom =
     | object End {}
 
 interface Closeable {
-    def closed Bool
+    get closed Bool
     def close() Result[Unit, FileError]
 }
 
@@ -42,7 +42,7 @@ interface ByteReader {
 }
 
 interface Seekable {
-    def position Int
+    get position Int
     def seek(offset Int) Result[Int, FileError]
     def seek(offset Int, from SeekFrom) Result[Int, FileError]
 }
@@ -55,9 +55,9 @@ interface TextReader with Closeable {
 class FileStream with ByteReader, Seekable, Closeable {
     private new() {}
 
-    def path Str = panic("FileStream is provided by the active runtime")
-    def position Int = panic("FileStream is provided by the active runtime")
-    def closed Bool = panic("FileStream is provided by the active runtime")
+    get path Str = panic("FileStream is provided by the active runtime")
+    get position Int = panic("FileStream is provided by the active runtime")
+    get closed Bool = panic("FileStream is provided by the active runtime")
 
     def read(maxBytes Int) Result[[Byte], FileError] =
         panic("FileStream is provided by the active runtime")
@@ -78,8 +78,8 @@ class FileStream with ByteReader, Seekable, Closeable {
 class TextFileReader with TextReader {
     private new() {}
 
-    def path Str = panic("TextFileReader is provided by the active runtime")
-    def closed Bool = panic("TextFileReader is provided by the active runtime")
+    get path Str = panic("TextFileReader is provided by the active runtime")
+    get closed Bool = panic("TextFileReader is provided by the active runtime")
 
     def readLine() Result[Str?, FileError] =
         panic("TextFileReader is provided by the active runtime")

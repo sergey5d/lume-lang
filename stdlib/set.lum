@@ -15,9 +15,9 @@ private interface SetApi[T] with Iterable[T] {
     def forAll(f fn(T) Bool) Bool
     def forEach(f fn(T) Unit)
     def contains(value T) Bool
-    def isEmpty Bool
-    def nonEmpty Bool = !this.isEmpty
-    def size Int
+    get isEmpty Bool
+    get nonEmpty Bool = !this.isEmpty
+    get size Int
 
     def makeStr(separator Str) Str {
         var result Str = ""

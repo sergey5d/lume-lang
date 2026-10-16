@@ -174,7 +174,7 @@ private class JavalinHttpContext with HttpContext {
     def header(name Str) Option[Str] =
         JavalinRuntimeContext.header(this.raw, name)
 
-    def body Str =
+    get body Str =
         this.raw.body()
 }
 

@@ -402,7 +402,10 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
             let mut fields = Vec::new();
             while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-                if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
+                if self.at_keyword(Keyword::Def)
+                    || self.at_keyword(Keyword::Get)
+                    || self.starts_callable_decl()
+                {
                     self.error_at_current(
                         "union_variant_method",
                         "union variants declare data only; put shared behavior in 'ext UnionName { ... }'",
@@ -724,7 +727,7 @@ impl<'a> Parser<'a> {
                     }
                     members.push(TypeMember::Method(constructor));
                 }
-                TokenKind::Keyword(Keyword::Def) => {
+                TokenKind::Keyword(Keyword::Def) | TokenKind::Keyword(Keyword::Get) => {
                     let body_method_error = match kind {
                         TypeKind::Annotation => Some(format!(
                             "annotation '{}' cannot declare methods; annotations are data-only metadata shapes",
@@ -1076,15 +1079,17 @@ impl<'a> Parser<'a> {
         visibility: Visibility,
         allow_signature_only: bool,
     ) -> Option<MethodDecl> {
-        let start = if self.match_keyword(Keyword::Def) {
-            self.previous_span()
+        let (start, getter) = if self.match_keyword(Keyword::Def) {
+            (self.previous_span(), false)
+        } else if self.match_keyword(Keyword::Get) {
+            (self.previous_span(), true)
         } else {
             let span = self.current_span();
             self.error_at_current(
                 "missing_def",
-                "method declarations require 'def'; write `def name(...) ...`",
+                "method declarations require 'def'; getter declarations require 'get'",
             );
-            span
+            (span, false)
         };
         let (name, name_span) = self.parse_callable_name("expected method name")?;
         let generic_clause =
@@ -1102,11 +1107,31 @@ impl<'a> Parser<'a> {
         };
         let params_touch_head =
             self.at(TokenKind::LParen) && spans_touch(head_end, self.current_span());
-        let parenthesized_getter_return = self.at(TokenKind::LParen)
-            && !params_touch_head
-            && self.looks_like_parenthesized_getter_return(allow_signature_only);
-        let getter = !self.at(TokenKind::LParen) || parenthesized_getter_return;
-        if self.at(TokenKind::LParen) && !params_touch_head && !parenthesized_getter_return {
+        let legacy_getter_syntax = !getter && !self.at(TokenKind::LParen);
+        if legacy_getter_syntax {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "getter_keyword_required",
+                    format!("getter '{}' must use 'get', not 'def'", name),
+                    start.cover(name_span),
+                )
+                .with_help(format!("write `get {} Type = ...`", name)),
+            );
+        }
+        if getter && params_touch_head {
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "getter_parameter_list",
+                    format!("getter '{}' cannot declare a parameter list", name),
+                    self.current_span(),
+                )
+                .with_help(format!(
+                    "use `def {}(...)` for a method or `get {} Type` for a getter",
+                    name, name
+                )),
+            );
+        }
+        if !getter && self.at(TokenKind::LParen) && !params_touch_head {
             self.diagnostics.push(Diagnostic::error(
                 "callable_parameter_spacing",
                 if has_generic_clause {
@@ -1123,12 +1148,17 @@ impl<'a> Parser<'a> {
                 self.current_span(),
             ));
         }
-        let params = if getter {
+        let params = if getter && params_touch_head {
+            self.parse_param_list()?;
+            Vec::new()
+        } else if getter || legacy_getter_syntax {
             Vec::new()
         } else {
             self.parse_param_list()?
         };
-        let return_type = if self.callable_body_starts_here(allow_signature_only, getter) {
+        let return_type = if self
+            .callable_body_starts_here(allow_signature_only, getter || legacy_getter_syntax)
+        {
             None
         } else {
             self.parse_optional_return_type()
@@ -1137,7 +1167,7 @@ impl<'a> Parser<'a> {
             self.diagnostics.push(Diagnostic::error(
                 "getter_return_type_required",
                 format!(
-                    "getter '{}' requires an explicit return type; write `def {} Type = ...`",
+                    "getter '{}' requires an explicit return type; write `get {} Type = ...`",
                     name, name
                 ),
                 self.current_span(),
@@ -1180,33 +1210,6 @@ impl<'a> Parser<'a> {
             body,
             span: start.cover(end),
         })
-    }
-
-    fn looks_like_parenthesized_getter_return(&self, allow_signature_only: bool) -> bool {
-        let mut parser = Parser {
-            tokens: self.tokens,
-            index: self.index,
-            diagnostics: Vec::new(),
-            allow_trailing_block_call: self.allow_trailing_block_call,
-            type_path: self.type_path.clone(),
-            nested_items: Vec::new(),
-        };
-        let Some(return_type) = parser.parse_type_ref() else {
-            return false;
-        };
-        if !parser.diagnostics.is_empty()
-            || matches!(return_type, TypeRef::Tuple { ref fields, .. } if fields.is_empty())
-        {
-            return false;
-        }
-        if matches!(parser.current_kind(), TokenKind::Eq | TokenKind::LBrace) {
-            return true;
-        }
-        allow_signature_only
-            && matches!(
-                parser.current_kind(),
-                TokenKind::Newline | TokenKind::RBrace | TokenKind::Eof
-            )
     }
 
     pub(super) fn parse_field_decl(

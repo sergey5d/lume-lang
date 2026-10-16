@@ -6,12 +6,12 @@ type Option[T] with Iterable[T] =
     | object None {}
 
 ext Option[T] {
-    def isSet Bool = match this {
+    get isSet Bool = match this {
         case Some { value: _ } => true
         case Option.None => false
     }
 
-    def isEmpty Bool = !this.isSet
+    get isEmpty Bool = !this.isSet
 
     def orElse(fallback => Option[T]) Option[T] = match this {
         case Some { value } => Some(value)

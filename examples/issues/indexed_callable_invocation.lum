@@ -12,7 +12,7 @@ class User {}
 class HandlerService {
     stored [fn() Int]
 
-    def handlers [fn() Int] = stored
+    get handlers [fn() Int] = stored
 
     def echo[T](value T) T = value
 }

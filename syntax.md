@@ -2118,8 +2118,8 @@ return value, or introduce a named `shape` declaration.
 
 ## Functions and Methods
 
-`def` is required for top-level functions, local functions, and methods.
-Constructors are the exception: they begin with `new` and never use `def`.
+`def` declares top-level functions, local functions, and methods. `get` declares
+getters, and `new` declares constructors.
 
 ```txt
 def greet(name Str) Str = "hello, " + name
@@ -2171,43 +2171,41 @@ type always takes precedence.
 
 ### Getters
 
-A method declared without an adjacent `()` parameter list is a getter. In
-callable declarations, whitespace before `(` is meaningful: an adjacent `(`
-starts method parameters, while a separated parenthesized type is the getter's
-return type:
+Methods use `def` and getters use `get`. A method always has a parameter list,
+including an empty `()`, while a getter has no parameter list:
 
 ```txt
 def coordinates() (Int, Int) = (x, y)  # method returning a tuple
-def coordinates (Int, Int) = (x, y)    # getter returning a tuple
+get coordinates (Int, Int) = (x, y)    # getter returning a tuple
 
 def values() [Int] = items             # method returning a vector
-def values [Int] = items               # getter returning a vector
+get values [Int] = items               # getter returning a vector
 
 def callback() fn() Int = action       # method returning a function
-def callback fn() Int = action         # getter returning a function
+get callback fn() Int = action         # getter returning a function
 ```
 
 Getters use the ordinary type grammar, including bracket collection shorthand
 and anonymous shape types:
 
 ```txt
-def counts [Str: Int] = counters
-def rows [[Int]] = nestedRows
-def optionalValues [Int?] = values
-def callbacks [fn(Int) Int] = handlers
+get counts [Str: Int] = counters
+get rows [[Int]] = nestedRows
+get optionalValues [Int?] = values
+get callbacks [fn(Int) Int] = handlers
 
 interface Positioned {
-    def position { x Int, y Int }
+    get position { x Int, y Int }
 }
 ```
 
-Whitespace before a bracket also carries the normal declaration distinction. A
-bracket touching the callable name begins a generic clause; a separated bracket
-begins a getter return type:
+The keyword makes bracket-leading return types unambiguous. A bracket touching
+a method name begins a generic clause; after a getter name it is the return
+type:
 
 ```txt
 def map[T](value T) T = value          # generic method
-def values [Int] = items               # getter returning Vector[Int]
+get values [Int] = items               # getter returning Vector[Int]
 ```
 
 Function and method parameter lists must touch the callable name, or the final
@@ -2229,9 +2227,9 @@ class Account {
     name Str
     balance Int
 
-    def displayName Str = this.name
+    get displayName Str = this.name
 
-    def isPositive Bool {
+    get isPositive Bool {
         current = this.balance
         current > 0
     }
@@ -2245,11 +2243,12 @@ Inside the declaring type, a getter may also be read through the implicit
 receiver:
 
 ```txt
-def summary Str = displayName + ": " + this.balance.toStr()
+get summary Str = displayName + ": " + this.balance.toStr()
 ```
 
 Getter rules:
 
+- getters are declared with `get`; `def` always declares a method
 - getters require an explicit return type
 - getters have no parameter list and are accessed without parentheses
 - getters cannot declare type parameters or generic conditions
@@ -2273,7 +2272,7 @@ the value returned by the getter, so function-valued getters compose normally:
 
 ```txt
 class Factory {
-    def creator fn() Int = () => 42
+    get creator fn() Int = () => 42
 }
 
 answer = Factory().creator() # read `creator`, then call the returned function
@@ -3539,8 +3538,10 @@ Box[Int,]
 let (left, right,) = pair
 ```
 
-Lume has no singleton tuples. A trailing comma in `(value,)` or `(Type,)` does
-not introduce one; the parentheses retain their ordinary grouping meaning.
+Lume has no singleton tuples. `(value,)`, `(Type,)`, and singleton tuple
+patterns such as `(value,)` are errors. Remove the comma for ordinary grouping
+or add a second tuple element. Trailing commas remain valid in unambiguous
+parenthesized lists such as calls, callable parameter lists, and function types.
 
 An empty `[]` literal contains no elements that identify its collection family
 or type arguments. It therefore requires an immediate expected vector or map
@@ -3577,13 +3578,14 @@ Tuple literal:
 pair (Str, Int) = ("a", 1)
 ```
 
-Tuples always contain at least two elements. A trailing comma does not create a
-singleton tuple; parenthesized expressions and types retain grouping semantics:
+Tuples always contain at least two elements. A trailing comma is accepted only
+after at least two tuple elements:
 
 ```txt
-value = (1,)                 # same as 1
-value (Int,) = 1             # same as value Int = 1
-let (value,) = tuple         # invalid: this is a plain one-name let binding
+value = (1,)                 # invalid: Lume has no singleton tuples
+value (Int,) = 1             # invalid: Lume has no singleton tuple types
+let (value,) = tuple         # invalid: Lume has no singleton tuple patterns
+(1, 2,)                      # valid
 let (value, _, _) = tuple3   # valid full-arity extraction
 ```
 
@@ -5366,7 +5368,8 @@ Newline continuation:
   - `def name(...) { ... }` for block bodies, with implicit `Unit` when the return type is omitted
   - `def name(...) = { ... }` for block bodies whose return type is inferred when omitted
   - `def name(...) = expr` for expression bodies whose return type is inferred when omitted
-- Constructors are the only callable declarations without `def`; they begin with `new` and use the constructor body forms documented above.
+- Getter declarations begin with `get`, omit a parameter list, require a return type, and use the same block or expression body forms.
+- Constructor declarations begin with `new` and use the constructor body forms documented above.
 - Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
 - So this is valid:
 
@@ -5427,7 +5430,7 @@ Supported today:
 
 - `private` and `internal` on top-level `def` and immutable bindings
 - `private` and `internal` on top-level `annotation`, `interface`, `class`, `shape`, `object`, and `type` declarations
-- `private` and `internal` on fields, methods, and constructors, subject to the structural-field restriction below
+- `private` and `internal` on fields, methods, getters, and constructors, subject to the structural-field restriction below
 
 Default visibility is public. There is no `public` keyword.
 Use `internal` for declarations and members shared by files with the same

@@ -7,7 +7,7 @@ interface Annotated {
 }
 
 interface AnnotationValue {
-    def name Str
+    get name Str
     def field(name Str) Option[Any]
     def str(name Str) Option[Str]
 }
@@ -29,9 +29,9 @@ type TypeKind =
     | object AnonymousShape {}
 
 interface Type[A] with Annotated {
-    def name Option[Str]
-    def qualifiedName Option[Str]
-    def kind TypeKind
+    get name Option[Str]
+    get qualifiedName Option[Str]
+    get kind TypeKind
 
     def asClass() Option[ClassType[A]]
     def asShape() Option[ShapeType[A]]
@@ -42,61 +42,61 @@ interface Type[A] with Annotated {
 }
 
 interface ClassType[A] with Type[A] {
-    def fields [Field]
-    def methods [Method]
+    get fields [Field]
+    get methods [Method]
     def field(name Str) Option[Field]
     def method(name Str) Option[Method]
     def construct(args [Any] vararg) Result[A, ReflectionError]
 }
 
 interface ShapeType[A] with Type[A] {
-    def fields [Field]
-    def methods [Method]
+    get fields [Field]
+    get methods [Method]
     def construct(args [Any] vararg) Result[A, ReflectionError]
 }
 
 interface UnionType[A] with Type[A] {
-    def alternatives [UnionAlternative]
+    get alternatives [UnionAlternative]
     def alternative(name Str) Option[UnionAlternative]
-    def methods [Method]
+    get methods [Method]
 }
 
 interface InterfaceType[A] with Type[A] {
-    def methods [Method]
+    get methods [Method]
 }
 
 interface ObjectType[A] with Type[A] {
-    def fields [Field]
-    def methods [Method]
+    get fields [Field]
+    get methods [Method]
     def field(name Str) Option[Field]
     def method(name Str) Option[Method]
 }
 
 interface AnnotationType[A] with Type[A] {
-    def fields [Field]
+    get fields [Field]
 }
 
 interface Field with Annotated {
-    def name Str
-    def fieldType Type[_]
-    def isPrivate Bool
+    get name Str
+    get fieldType Type[_]
+    get isPrivate Bool
     def get(receiver Any) Result[Any, ReflectionError]
 }
 
 interface Method with Annotated {
-    def name Str
-    def params [Param]
-    def returnType Type[_]
+    get name Str
+    get params [Param]
+    get returnType Type[_]
     def call(receiver Any, args [Any] vararg) Result[Any, ReflectionError]
 }
 
 interface Param {
-    def name Str
-    def paramType Type[_]
+    get name Str
+    get paramType Type[_]
 }
 
 interface UnionAlternative with Annotated {
-    def name Str
-    def fields [Field]
+    get name Str
+    get fields [Field]
     def construct(args [Any] vararg) Result[Any, ReflectionError]
 }

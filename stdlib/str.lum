@@ -3,9 +3,9 @@
 # INTERPRETER
 
 interface Str with Comparable[Str] {
-    def size Int
-    def isEmpty Bool
-    def nonEmpty Bool
+    get size Int
+    get isEmpty Bool
+    get nonEmpty Bool
     def compareTo(other Str) Int
     def runeAt(index Int) Option[Rune]
     def split(separator Str) Vector[Str]

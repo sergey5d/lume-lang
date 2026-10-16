@@ -6056,7 +6056,7 @@ impl<'a> Checker<'a> {
                     self.add_error(
                         "getter_call_syntax",
                         format!(
-                            "getter '{}' is accessed without parentheses; write '{}.{}'",
+                            "getter '{}' is called with parentheses; write '{}.{}'",
                             name,
                             self.describe_member_path(receiver)
                                 .unwrap_or_else(|| "<value>".to_string()),
@@ -6077,7 +6077,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "getter_call_syntax",
                     format!(
-                        "getter '{}' is accessed without parentheses; write '{}'",
+                        "getter '{}' is called with parentheses; write '{}'",
                         name, name
                     ),
                     span,
@@ -19814,7 +19814,7 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Named {
-    def name Str
+    get name Str
 }
 
 class Success { message Str }
@@ -22516,21 +22516,21 @@ def reflection(method Method, receiver Any) Any = method.invoke(receiver)
         let program = parse_inline(
             r#"
 interface Named {
-    def label Str
+    get label Str
 }
 
 class Item with Named {
     name Str
 
-    def label Str = this.name
-    def repeated Str = label + this.label
+    get label Str = this.name
+    get repeated Str = label + this.label
 }
 
 shape Point {
     x Int
     y Int
 
-    def total Int = this.x + this.y
+    get total Int = this.x + this.y
 }
 
 def main() Unit {
@@ -22551,11 +22551,11 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Accessors {
-    def counts [Str: Int]
-    def rows [[Int]]
-    def optionalValues [Int?]
-    def callbacks [fn(Int) Int]
-    def position { x Int, y Int }
+    get counts [Str: Int]
+    get rows [[Int]]
+    get optionalValues [Int?]
+    get callbacks [fn(Int) Int]
+    get position { x Int, y Int }
 }
 
 class Values with Accessors {
@@ -22564,11 +22564,11 @@ class Values with Accessors {
     private storedOptionalValues [Int?] = []
     private storedCallbacks [fn(Int) Int] = []
 
-    def counts [Str: Int] = this.storedCounts
-    def rows [[Int]] = this.storedRows
-    def optionalValues [Int?] = this.storedOptionalValues
-    def callbacks [fn(Int) Int] = this.storedCallbacks
-    def position { x Int, y Int } = { x: 1, y: 2 }
+    get counts [Str: Int] = this.storedCounts
+    get rows [[Int]] = this.storedRows
+    get optionalValues [Int?] = this.storedOptionalValues
+    get callbacks [fn(Int) Int] = this.storedCallbacks
+    get position { x Int, y Int } = { x: 1, y: 2 }
 }
 
 def read(values Accessors) Unit {
@@ -22591,12 +22591,12 @@ def read(values Accessors) Unit {
             r#"
 interface Positioned {
     def position() { x Int, y Int }
-    def label Str
+    get label Str
 }
 
 class Located with Positioned {
     def position() { x Int, y Int } = { x: 3, y: 4 }
-    def label Str = "point"
+    get label Str = "point"
 }
 
 def coordinate(value Positioned) Int = value.position().x
@@ -22622,17 +22622,17 @@ class FieldAndMethod {
 
 class FieldAndGetter {
     value Int
-    def value Int = this.value
+    get value Int = this.value
 }
 
 class GetterAndMethod {
-    def status Str = "ready"
+    get status Str = "ready"
     def status(verbose Bool) Str = if verbose { "ready" } else { "" }
 }
 
 class RepeatedGetter {
-    def name Str = "first"
-    def name Str = "second"
+    get name Str = "first"
+    get name Str = "second"
 }
 "#,
         );
@@ -22838,7 +22838,7 @@ def main(formatter Formatter) Unit {
             r#"
 class Item {
     label Str
-    def status Str = "ready"
+    get status Str = "ready"
 }
 
 ext Item {
@@ -22862,7 +22862,7 @@ ext Item {
             r#"
 class Item {
     name Str
-    def label Str = this.name
+    get label Str = this.name
 }
 
 def read(item Item) Str = item.label()
@@ -22884,8 +22884,8 @@ def read(item Item) Str = item.label()
         let program = parse_inline(
             r#"
 class Factory {
-    def creator fn(Int) Int = (value Int) => value + 1
-    def implicitCall Int = creator(4)
+    get creator fn(Int) Int = (value Int) => value + 1
+    get implicitCall Int = creator(4)
 }
 
 def read(factory Factory) Int = factory.creator(5)
@@ -22969,12 +22969,12 @@ class Counter {
     var count Int
     values [Int]
 
-    def incremented Int {
+    get incremented Int {
         this.count += 1
         this.count
     }
 
-    def replaced Int {
+    get replaced Int {
         this.values[0] := 2
         this.values[0]
     }

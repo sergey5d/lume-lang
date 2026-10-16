@@ -5,22 +5,22 @@ type Option[T] with Iterable[T] =
     | object None {}
 
 ext Option[T] {
-    def isSet Bool = match this {
+    get isSet Bool = match this {
         case Some { value: _ } => true
         case None => false
     }
 
-    def isDefined Bool = match this {
+    get isDefined Bool = match this {
         case Some { value: _ } => true
         case None => false
     }
 
-    def isSuccess Bool = match this {
+    get isSuccess Bool = match this {
         case Some { value: _ } => true
         case None => false
     }
 
-    def isEmpty Bool = match this {
+    get isEmpty Bool = match this {
         case Some { value: _ } => false
         case None => true
     }

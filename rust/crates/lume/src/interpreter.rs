@@ -8590,8 +8590,8 @@ mod tests {
             class Counter {
                 value Int
 
-                def doubled Int = this.value * 2
-                def quadrupled Int = doubled * 2
+                get doubled Int = this.value * 2
+                get quadrupled Int = doubled * 2
             }
 
             def run() Int {
@@ -8611,8 +8611,8 @@ mod tests {
         let program = lower_inline(
             r#"
             class Factory {
-                def creator fn(Int) Int = (value Int) => value + 1
-                def implicitCall Int = creator(4)
+                get creator fn(Int) Int = (value Int) => value + 1
+                get implicitCall Int = creator(4)
             }
 
             def run() Int {

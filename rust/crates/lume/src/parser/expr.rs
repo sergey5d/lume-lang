@@ -676,6 +676,7 @@ impl<'a> Parser<'a> {
                 | Some(TokenKind::Keyword(Keyword::Internal))
                 | Some(TokenKind::Keyword(Keyword::Private))
                 | Some(TokenKind::Keyword(Keyword::Def))
+                | Some(TokenKind::Keyword(Keyword::Get))
         ) || self.starts_local_callable_decl_at(lookahead)
     }
 
@@ -712,7 +713,10 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
+            if self.at_keyword(Keyword::Def)
+                || self.at_keyword(Keyword::Get)
+                || self.starts_callable_decl()
+            {
                 let method = self.parse_method_decl(annotations, visibility, false)?;
                 if method.name == "new" {
                     self.diagnostics.push(Diagnostic::error(
@@ -959,7 +963,10 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            if self.at_keyword(Keyword::Def) || self.starts_callable_decl() {
+            if self.at_keyword(Keyword::Def)
+                || self.at_keyword(Keyword::Get)
+                || self.starts_callable_decl()
+            {
                 let method = self.parse_method_decl(annotations, visibility, false)?;
                 if method.name == "new" {
                     self.diagnostics.push(Diagnostic::error(
@@ -1989,6 +1996,7 @@ impl<'a> Parser<'a> {
             || self.at(TokenKind::Keyword(Keyword::Case))
             || self.at(TokenKind::Keyword(Keyword::Type))
             || self.at(TokenKind::Keyword(Keyword::When))
+            || self.at(TokenKind::Keyword(Keyword::Get))
         {
             let token = self.current().clone();
             self.advance();
@@ -2086,7 +2094,7 @@ impl<'a> Parser<'a> {
             return self.parse_removed_interface_led_expr();
         }
         match self.current_kind() {
-            TokenKind::Identifier => {
+            TokenKind::Identifier | TokenKind::Keyword(Keyword::Get) => {
                 let token = self.current().clone();
                 self.advance();
                 if token.lexeme == "_" {
@@ -2575,10 +2583,19 @@ impl<'a> Parser<'a> {
         let first = self.parse_expr()?;
         self.skip_newlines();
         if self.match_token(TokenKind::Comma) {
+            let first_comma = self.previous_span();
             let mut items = vec![first];
             self.skip_newlines();
             if self.at(TokenKind::RParen) {
                 let end = self.consume(TokenKind::RParen, "expected ')' after tuple literal")?;
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "singleton_tuple",
+                        "Lume has no singleton tuples; '(value,)' is invalid",
+                        first_comma,
+                    )
+                    .with_help("remove the trailing comma or add a second tuple element"),
+                );
                 return Some(Expr::Group {
                     inner: Box::new(items.pop()?),
                     span: start.cover(end),
