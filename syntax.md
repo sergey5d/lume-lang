@@ -624,6 +624,7 @@ OS.stderr.println("oops")
 for argument <- OS.args {
     println(argument)
 }
+path Str? = OS.env["PATH"]
 ```
 
 `OS.stdout` and `OS.stderr` implement `Printer`.
@@ -640,6 +641,10 @@ lume run app.lum alternateEntry -- first "two words"
 Each `OS.args` access returns a fresh vector, so mutating it does not change the
 process argument snapshot.
 
+`OS.env` is a `[Str: Str]` snapshot getter containing environment variables
+whose names and values can be represented as Lume strings. Each access returns
+a fresh map; mutating it does not modify the process environment.
+
 `Math.min` and `Math.max` select the smaller or larger of two values. Both
 arguments must be the same numeric type; overloads are available for `Int` and
 `Float`, and the result preserves that type:
@@ -648,6 +653,18 @@ arguments must be the same numeric type; overloads are available for `Int` and
 smaller Int = Math.min(8, 3)
 larger Float = Math.max(1.5, 2.25)
 ```
+
+Square root is available as a numeric member and always returns `Float`.
+`Float.log()` returns the natural logarithm:
+
+```txt
+rootFromInt Float = 9.sqrt()
+rootFromFloat Float = 2.25.sqrt()
+naturalLog Float = 1.0.log()
+```
+
+These methods follow IEEE-754 behavior: a negative square root or logarithm is
+NaN, and `0.0.log()` is negative infinity.
 
 `panic(...)` and `assert(...)` are prelude functions, not `OS` methods:
 

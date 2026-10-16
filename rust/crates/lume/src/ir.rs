@@ -585,6 +585,7 @@ pub enum Callee {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intrinsic {
     ProgramArgs,
+    ProgramEnv,
     Print,
     Println,
     Printf,

@@ -21,6 +21,8 @@ type JsonValue =
 
 ext JsonValue {
     def stringify() Str = Json.stringify(this)
+
+    def textContent() Str = Json.textContent(this)
 }
 
 object Json {
@@ -56,6 +58,9 @@ object Json {
         panic("Json is provided by the Rust runtime")
 
     def stringify(value Any) Str =
+        panic("Json is provided by the Rust runtime")
+
+    def textContent(value JsonValue) Str =
         panic("Json is provided by the Rust runtime")
 
     def decode[reified T](text Str) Result[T, Str] =

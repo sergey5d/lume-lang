@@ -5213,6 +5213,15 @@ impl<'a> FunctionLowerer<'a> {
             {
                 ir::Type::list(ir::Type::Str)
             }
+            Expr::Member { receiver, name, .. }
+                if name == "env"
+                    && matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "OS") =>
+            {
+                ir::Type::Named {
+                    name: "Map".to_string(),
+                    args: vec![ir::Type::Str, ir::Type::Str],
+                }
+            }
             Expr::Member { receiver, name, .. } => {
                 if name == "runtimeType" {
                     let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
@@ -7057,6 +7066,16 @@ impl<'a> FunctionLowerer<'a> {
             {
                 Some(ir::RValue::Call {
                     callee: ir::Callee::Intrinsic(ir::Intrinsic::ProgramArgs),
+                    args: Vec::new(),
+                    structural: false,
+                })
+            }
+            Expr::Member { receiver, name, .. }
+                if name == "env"
+                    && matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "OS") =>
+            {
+                Some(ir::RValue::Call {
+                    callee: ir::Callee::Intrinsic(ir::Intrinsic::ProgramEnv),
                     args: Vec::new(),
                     structural: false,
                 })

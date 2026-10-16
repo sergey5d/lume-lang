@@ -1,0 +1,12 @@
+module examples/numeric_math_members
+
+def main() Unit {
+    whole Int = 9
+    fraction Float = 2.25
+    one Float = 1.0
+
+    assert(whole.sqrt() == 3.0)
+    assert(fraction.sqrt() == 1.5)
+    assert(one.log() == 0.0)
+    assert(OS.env.size >= 0)
+}

@@ -4,8 +4,11 @@
 
 interface Int with Comparable[Int] {
     def compareTo(other Int) Int
+    def sqrt() Float
 }
 
 interface Float with Comparable[Float] {
     def compareTo(other Float) Int
+    def sqrt() Float
+    def log() Float
 }

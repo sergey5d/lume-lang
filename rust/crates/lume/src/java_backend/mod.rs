@@ -4951,6 +4951,11 @@ module demo/math
 def main() Unit {
     println(Math.min(-3, 8), Math.max(-3, 8))
     println(Math.min(1.25, 7.5), Math.max(1.25, 7.5))
+    whole Int = 9
+    fraction Float = 2.25
+    one Float = 1.0
+    println(whole.sqrt() == 3.0, fraction.sqrt() == 1.5, one.log() == 0.0)
+    println(OS.env.size >= 0)
 }
 "#,
         )
@@ -4966,6 +4971,10 @@ def main() Unit {
         assert!(module.contains("Math.max((-3L), 8L)"), "{module}");
         assert!(module.contains("Math.min(1.25, 7.5)"), "{module}");
         assert!(module.contains("Math.max(1.25, 7.5)"), "{module}");
+        assert!(module.contains("LumeRuntime.sqrt(whole)"), "{module}");
+        assert!(module.contains("LumeRuntime.sqrt(fraction)"), "{module}");
+        assert!(module.contains("LumeRuntime.log(one)"), "{module}");
+        assert!(module.contains("LumeRuntime.env().size()"), "{module}");
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated Java");
@@ -4983,7 +4992,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("Java stdout utf8"),
-            "-3 8\n1.25 7.5\n"
+            "-3 8\n1.25 7.5\ntrue true true\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);

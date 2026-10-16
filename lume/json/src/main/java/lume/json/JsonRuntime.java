@@ -122,6 +122,42 @@ public final class JsonRuntime {
         return render(encode(value));
     }
 
+    public static String textContent(JsonValue value) {
+        if (value instanceof JsonValue.JsonString json) {
+            return json.value().trim();
+        }
+        if (value instanceof JsonValue.JsonArray json) {
+            return joinText(json.values().asJava());
+        }
+        if (value instanceof JsonValue.JsonObject json) {
+            var parts = new ArrayList<JsonValue>();
+            for (var name : new String[] {"value", "text", "content"}) {
+                for (var field : json.fields().asJava()) {
+                    if (field.name().equals(name)) {
+                        parts.add(field.value());
+                    }
+                }
+            }
+            return joinText(parts);
+        }
+        return "";
+    }
+
+    private static String joinText(Iterable<JsonValue> values) {
+        var result = new StringBuilder();
+        for (var value : values) {
+            var text = textContent(value);
+            if (text.isBlank()) {
+                continue;
+            }
+            if (!result.isEmpty()) {
+                result.append("\n");
+            }
+            result.append(text);
+        }
+        return result.toString();
+    }
+
     public static <T> Result<T, String> decode(String text, LumeType targetType) {
         try {
             var parser = new Parser(text == null ? "" : text);
@@ -342,6 +378,7 @@ public final class JsonRuntime {
         }
         return switch (trimmed) {
             case "Any" -> value;
+            case "JsonValue" -> encode(value);
             case "Str" -> value == null ? "" : String.valueOf(value);
             case "Int", "Int64" -> toLong(value, trimmed);
             case "Rune" -> Math.toIntExact(toLong(value, trimmed));

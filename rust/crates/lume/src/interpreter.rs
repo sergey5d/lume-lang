@@ -4043,6 +4043,20 @@ impl<'a> Interpreter<'a> {
                         .collect(),
                 ))
             }
+            ir::Intrinsic::ProgramEnv => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(span, "OS.env expects no arguments"));
+                }
+                let entries = std::env::vars_os()
+                    .filter_map(|(key, value)| {
+                        Some((
+                            Value::String(key.into_string().ok()?),
+                            Value::String(value.into_string().ok()?),
+                        ))
+                    })
+                    .collect();
+                Ok(Value::map(entries))
+            }
             ir::Intrinsic::Print => self.invoke_print(false, args, span),
             ir::Intrinsic::Println => self.invoke_print(true, args, span),
             ir::Intrinsic::Printf => self.invoke_printf(args, span),
@@ -4656,6 +4670,12 @@ impl<'a> Interpreter<'a> {
                     .map(Value::String)
                     .map_err(|message| self.runtime_error(span, message))
             }
+            "textContent" => {
+                expect_runtime_arity(self, "Json.textContent", &args, 1, span)?;
+                self.json_text_content(&args[0])
+                    .map(Value::String)
+                    .map_err(|message| self.runtime_error(span, message))
+            }
             "decode" => {
                 expect_runtime_arity(self, "Json.decode", &args, 2, span)?;
                 let Value::String(text) = &args[0] else {
@@ -4946,6 +4966,64 @@ impl<'a> Interpreter<'a> {
                     .collect::<Result<Vec<_>, String>>()?;
                 Ok(format!("{{{}}}", rendered.join(",")))
             }
+            _ => Err("unknown JsonValue case".to_string()),
+        }
+    }
+
+    fn json_text_content(&self, value: &Value) -> Result<String, String> {
+        let Value::Aggregate(aggregate) = value else {
+            return Err("Json.textContent expected a JsonValue".to_string());
+        };
+        let aggregate = aggregate.borrow();
+        if aggregate.type_name != "JsonValue" {
+            return Err("Json.textContent expected a JsonValue".to_string());
+        }
+        match aggregate.case_name.as_deref() {
+            Some("JsonString") => match aggregate.fields.first() {
+                Some(Value::String(value)) => Ok(value.trim().to_string()),
+                _ => Err("invalid JsonString value".to_string()),
+            },
+            Some("JsonArray") => {
+                let Some(Value::List(values)) = aggregate.fields.first() else {
+                    return Err("invalid JsonArray value".to_string());
+                };
+                let parts = values
+                    .borrow()
+                    .iter()
+                    .map(|value| self.json_text_content(value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(parts
+                    .into_iter()
+                    .filter(|part| !part.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+            Some("JsonObject") => {
+                let Some(Value::List(fields)) = aggregate.fields.first() else {
+                    return Err("invalid JsonObject value".to_string());
+                };
+                let mut parts = Vec::new();
+                for name in ["value", "text", "content"] {
+                    for field in fields.borrow().iter() {
+                        let Value::Aggregate(field) = field else {
+                            return Err("invalid JsonObject field".to_string());
+                        };
+                        let field = field.borrow();
+                        let [Value::String(field_name), field_value] = field.fields.as_slice()
+                        else {
+                            return Err("invalid JsonObject field".to_string());
+                        };
+                        if field_name == name {
+                            let text = self.json_text_content(field_value)?;
+                            if !text.is_empty() {
+                                parts.push(text);
+                            }
+                        }
+                    }
+                }
+                Ok(parts.join("\n"))
+            }
+            Some("JsonNull" | "JsonBool" | "JsonNumber") => Ok(String::new()),
             _ => Err("unknown JsonValue case".to_string()),
         }
     }
@@ -5662,6 +5740,31 @@ impl<'a> Interpreter<'a> {
                     std::cmp::Ordering::Greater => 1,
                 };
                 Ok(Some(Value::Int(value)))
+            }
+            "sqrt" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("sqrt expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                match receiver {
+                    Value::Int(value) => Ok(Some(Value::Float((value as f64).sqrt()))),
+                    Value::Float(value) => Ok(Some(Value::Float(value.sqrt()))),
+                    _ => Ok(None),
+                }
+            }
+            "log" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("log expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                match receiver {
+                    Value::Float(value) => Ok(Some(Value::Float(value.ln()))),
+                    _ => Ok(None),
+                }
             }
             _ => Ok(None),
         }
@@ -8131,6 +8234,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn extracts_text_from_nested_json_values() {
+        let temp = repo_root().join("rust/target/interpreter-json-text-content-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+            module app
+
+            use lume/json/{Json, JsonValue}
+
+            def readRichText() Result[Str, Str] {
+                value JsonValue = try Json.decode[JsonValue](
+                    "{\"content\":[{\"value\":\" Rich text \"}]}"
+                )
+                Ok(Json.textContent(value))
+            }
+
+            def main() Unit {
+                println(readRichText()!)
+            }
+            "#,
+        )
+        .expect("write source");
+
+        let run = run_path(&source, None).expect("run source");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "Rich text\n");
+        let _ = fs::remove_dir_all(&temp);
+    }
+
     fn should_skip_example(src: &str) -> bool {
         for line in src.lines() {
             let trimmed = line.trim();
@@ -10552,6 +10688,37 @@ $name
             run.output,
             "2.0\n8\ntrue\ntrue\nbtc-usd\nBTC/USD\nBTC/USD\nBTC/USD\ntrue\n"
         );
+    }
+
+    #[test]
+    fn runs_numeric_math_members_and_environment_getter() {
+        let temp = repo_root().join("rust/target/interpreter-numeric-math-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+module app
+
+def main() Unit {
+    whole Int = 9
+    fraction Float = 2.25
+    one Float = 1.0
+
+    println(whole.sqrt() == 3.0)
+    println(fraction.sqrt() == 1.5)
+    println(one.log() == 0.0)
+    println(OS.env.size >= 0)
+}
+"#,
+        )
+        .expect("write source");
+
+        let run = run_path(&source, None).expect("run source");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "true\ntrue\ntrue\ntrue\n");
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]

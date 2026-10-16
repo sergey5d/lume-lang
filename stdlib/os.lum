@@ -7,6 +7,7 @@ object OS with Printer {
     stderr Printer
 
     get args [Str] = []
+    get env [Str: Str] = []
 
     def print(value [Str] vararg) Unit = ()
     def println(value [Str] vararg) Unit = ()

@@ -6275,6 +6275,12 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some("lume.core.LumeRuntime.args()".to_string())
             }
             core::Expr::Member { receiver, name, .. }
+                if name == "env"
+                    && matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "OS") =>
+            {
+                Some("lume.core.LumeRuntime.env()".to_string())
+            }
+            core::Expr::Member { receiver, name, .. }
                 if matches!(name.as_str(), "size" | "isEmpty" | "nonEmpty")
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
@@ -9218,13 +9224,12 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
-                if name == "compareTo"
-                    && let Some(call) = format_java_intrinsic_compare_to(
-                        receiver_ty.as_ref(),
-                        &receiver_expr,
-                        &args,
-                    )
-                {
+                if let Some(call) = format_java_intrinsic_member_call(
+                    receiver_ty.as_ref(),
+                    &receiver_expr,
+                    name,
+                    &args,
+                ) {
                     return Some(call);
                 }
                 let method = self.java_instance_method_name(receiver, name, bindings);
@@ -9433,6 +9438,9 @@ impl<'a> SourceBodyEmitter<'a> {
             ir::Intrinsic::ProgramArgs if emitted.is_empty() => {
                 Some("lume.core.LumeRuntime.args()".to_string())
             }
+            ir::Intrinsic::ProgramEnv if emitted.is_empty() => {
+                Some("lume.core.LumeRuntime.env()".to_string())
+            }
             ir::Intrinsic::Print => Some(format!(
                 "lume.core.LumeRuntime.print({})",
                 emitted.join(", ")
@@ -9610,13 +9618,12 @@ impl<'a> SourceBodyEmitter<'a> {
                 .collect::<Option<Vec<_>>>()?;
             emitted_args.extend(self.emit_source_reified_evidence(call, call.reified_arg_count)?);
             let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
-            if name == "compareTo"
-                && let Some(call) = format_java_intrinsic_compare_to(
-                    receiver_ty.as_ref(),
-                    &receiver_expr,
-                    &emitted_args,
-                )
-            {
+            if let Some(call) = format_java_intrinsic_member_call(
+                receiver_ty.as_ref(),
+                &receiver_expr,
+                name,
+                &emitted_args,
+            ) {
                 return Some(call);
             }
             return Some(format_java_instance_call(
@@ -9680,13 +9687,12 @@ impl<'a> SourceBodyEmitter<'a> {
                 emitted_args.push(value);
             }
             let receiver_expr = self.emit_receiver_expr(receiver, bindings)?;
-            if name == "compareTo"
-                && let Some(call) = format_java_intrinsic_compare_to(
-                    receiver_ty.as_ref(),
-                    &receiver_expr,
-                    &emitted_args,
-                )
-            {
+            if let Some(call) = format_java_intrinsic_member_call(
+                receiver_ty.as_ref(),
+                &receiver_expr,
+                name,
+                &emitted_args,
+            ) {
                 return Some(call);
             }
             return Some(format_java_instance_call(
@@ -9723,9 +9729,8 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             None
         })?;
-        if name == "compareTo"
-            && let Some(call) =
-                format_java_intrinsic_compare_to(receiver_ty.as_ref(), &receiver_expr, &args)
+        if let Some(call) =
+            format_java_intrinsic_member_call(receiver_ty.as_ref(), &receiver_expr, name, &args)
         {
             return Some(call);
         }
@@ -10095,6 +10100,17 @@ impl<'a> SourceBodyEmitter<'a> {
         ) {
             return Some(ir::Type::list(ir::Type::Str));
         }
+        if matches!(
+            expr,
+            core::Expr::Member { receiver, name, .. }
+                if name == "env"
+                    && matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "OS")
+        ) {
+            return Some(ir::Type::Named {
+                name: "Map".to_string(),
+                args: vec![ir::Type::Str, ir::Type::Str],
+            });
+        }
         if let Some(segments) = source_member_segments(expr) {
             let name = segments.join(".");
             if self.bundle.ir.types.iter().any(|ty| ty.name == name) {
@@ -10243,6 +10259,10 @@ impl<'a> SourceBodyEmitter<'a> {
             ir::Callee::Intrinsic(ir::Intrinsic::ProgramArgs) => {
                 Some(ir::Type::list(ir::Type::Str))
             }
+            ir::Callee::Intrinsic(ir::Intrinsic::ProgramEnv) => Some(ir::Type::Named {
+                name: "Map".to_string(),
+                args: vec![ir::Type::Str, ir::Type::Str],
+            }),
             ir::Callee::Intrinsic(
                 ir::Intrinsic::Print
                 | ir::Intrinsic::Println
@@ -11588,6 +11608,10 @@ impl<'a> JavaIrSupport<'a> {
                 ir::Callee::Intrinsic(ir::Intrinsic::ProgramArgs) => {
                     Some(ir::Type::list(ir::Type::Str))
                 }
+                ir::Callee::Intrinsic(ir::Intrinsic::ProgramEnv) => Some(ir::Type::Named {
+                    name: "Map".to_string(),
+                    args: vec![ir::Type::Str, ir::Type::Str],
+                }),
                 ir::Callee::Intrinsic(
                     ir::Intrinsic::Print
                     | ir::Intrinsic::Println
@@ -12664,21 +12688,34 @@ fn format_java_instance_call(receiver: &str, method: &str, args: &[String]) -> S
     format!("{receiver}.{method}({})", args.join(", "))
 }
 
-fn format_java_intrinsic_compare_to(
+fn format_java_intrinsic_member_call(
     receiver_ty: Option<&ir::Type>,
     receiver: &str,
+    method: &str,
     args: &[String],
 ) -> Option<String> {
+    let receiver_ty = receiver_ty?;
+    let is_int = type_is_named_or_primitive(receiver_ty, "Int", |ty| matches!(ty, ir::Type::Int));
+    let is_float =
+        type_is_named_or_primitive(receiver_ty, "Float", |ty| matches!(ty, ir::Type::Float));
+    if args.is_empty() && method == "sqrt" && (is_int || is_float) {
+        return Some(format!("lume.core.LumeRuntime.sqrt({receiver})"));
+    }
+    if args.is_empty() && method == "log" && is_float {
+        return Some(format!("lume.core.LumeRuntime.log({receiver})"));
+    }
+    if method != "compareTo" {
+        return None;
+    }
     let [other] = args else {
         return None;
     };
-    let receiver_ty = receiver_ty?;
-    if type_is_named_or_primitive(receiver_ty, "Int", |ty| matches!(ty, ir::Type::Int)) {
+    if is_int {
         return Some(format!(
             "((long) java.lang.Long.compare({receiver}, {other}))"
         ));
     }
-    if type_is_named_or_primitive(receiver_ty, "Float", |ty| matches!(ty, ir::Type::Float)) {
+    if is_float {
         return Some(format!(
             "((long) java.lang.Double.compare({receiver}, {other}))"
         ));

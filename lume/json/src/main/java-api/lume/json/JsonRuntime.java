@@ -48,6 +48,10 @@ public final class JsonRuntime {
         throw new UnsupportedOperationException("descriptor only");
     }
 
+    public static String textContent(JsonValue value) {
+        throw new UnsupportedOperationException("descriptor only");
+    }
+
     public static <T> Result<T, String> decode(String text, LumeType targetType) {
         throw new UnsupportedOperationException("descriptor only");
     }

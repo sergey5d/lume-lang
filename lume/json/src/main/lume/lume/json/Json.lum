@@ -23,6 +23,10 @@ type JsonValue =
 
 ext JsonValue {
     def stringify() Str = JsonRuntime.stringify(this)
+
+    # Extracts provider-style rich text from strings, nested arrays, and
+    # objects containing value, text, or content fields.
+    def textContent() Str = JsonRuntime.textContent(this)
 }
 
 object Json {

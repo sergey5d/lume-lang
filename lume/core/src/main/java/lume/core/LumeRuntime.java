@@ -23,6 +23,20 @@ public final class LumeRuntime {
         return LumeVector.from(Arrays.asList(arguments));
     }
 
+    public static LumeMap<String, String> env() {
+        var values = LumeMap.<String, String>empty();
+        System.getenv().forEach(values::set);
+        return values;
+    }
+
+    public static double sqrt(double value) {
+        return Math.sqrt(value);
+    }
+
+    public static double log(double value) {
+        return Math.log(value);
+    }
+
     public static LumeUnit print(Object... values) {
         System.out.print(join(values));
         return LumeUnit.INSTANCE;
