@@ -2,6 +2,7 @@ package lume.core;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.UnaryOperator;
 
 public final class LumeMap<K, V> {
@@ -72,6 +73,14 @@ public final class LumeMap<K, V> {
         return values.size();
     }
 
+    public boolean isEmpty() {
+        return values.isEmpty();
+    }
+
+    public boolean nonEmpty() {
+        return !values.isEmpty();
+    }
+
     public void clear() {
         values.clear();
     }
@@ -90,6 +99,14 @@ public final class LumeMap<K, V> {
 
     public LumeVector<V> values() {
         return LumeVector.from(values.values());
+    }
+
+    public <X> LumeVector<X> flatMap(BiFunction<? super K, ? super V, ?> mapper) {
+        var result = LumeVector.<X>empty();
+        for (var entry : values.entrySet()) {
+            result.addAll(mapper.apply(entry.getKey(), entry.getValue()));
+        }
+        return result;
     }
 
     public Map<K, V> asJava() {

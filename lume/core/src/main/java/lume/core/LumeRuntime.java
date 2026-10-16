@@ -37,6 +37,64 @@ public final class LumeRuntime {
         return Math.log(value);
     }
 
+    public static long abs(long value) {
+        return Math.abs(value);
+    }
+
+    public static double abs(double value) {
+        return Math.abs(value);
+    }
+
+    public static long pow(long value, long exponent) {
+        if (exponent < 0) {
+            throw new LumePanic("Int.pow exponent must be non-negative");
+        }
+        long result = 1;
+        long factor = value;
+        long remaining = exponent;
+        while (remaining != 0) {
+            if ((remaining & 1) != 0) {
+                result *= factor;
+            }
+            remaining >>>= 1;
+            if (remaining != 0) {
+                factor *= factor;
+            }
+        }
+        return result;
+    }
+
+    public static double pow(double value, long exponent) {
+        return Math.pow(value, exponent);
+    }
+
+    public static double pow(double value, double exponent) {
+        return Math.pow(value, exponent);
+    }
+
+    public static double floor(double value) {
+        return Math.floor(value);
+    }
+
+    public static double ceil(double value) {
+        return Math.ceil(value);
+    }
+
+    public static double round(double value) {
+        if (!Double.isFinite(value) || value == 0.0) {
+            return value;
+        }
+        return Math.copySign(Math.floor(Math.abs(value) + 0.5), value);
+    }
+
+    public static long toInt(double value) {
+        return (long) value;
+    }
+
+    public static double toFloat(long value) {
+        return (double) value;
+    }
+
     public static LumeUnit print(Object... values) {
         System.out.print(join(values));
         return LumeUnit.INSTANCE;
@@ -137,11 +195,31 @@ public final class LumeRuntime {
         return text.contains(part);
     }
 
+    public static Boolean stringStartsWith(String text, String prefix) {
+        return text.startsWith(prefix);
+    }
+
+    public static Boolean stringEndsWith(String text, String suffix) {
+        return text.endsWith(suffix);
+    }
+
     public static Option<Long> stringIndexOf(String text, String part) {
         int utf16Index = text.indexOf(part);
         return utf16Index < 0
             ? optionNone()
             : optionSome((long) text.codePointCount(0, utf16Index));
+    }
+
+    public static String stringReplaceFirst(String text, String target, String replacement) {
+        int index = text.indexOf(target);
+        if (index < 0) {
+            return text;
+        }
+        return text.substring(0, index) + replacement + text.substring(index + target.length());
+    }
+
+    public static String stringReplaceAll(String text, String target, String replacement) {
+        return text.replace(target, replacement);
     }
 
     public static String stringReplaceFirstRegex(String text, String pattern, String replacement) {
@@ -167,6 +245,26 @@ public final class LumeRuntime {
         }
         int offset = text.offsetByCodePoints(0, scalarIndex);
         return optionSome(text.codePointAt(offset));
+    }
+
+    public static String stringSlice(String text) {
+        return stringSlice(text, 0, stringSize(text));
+    }
+
+    public static String stringSlice(String text, long start) {
+        return stringSlice(text, start, stringSize(text));
+    }
+
+    public static String stringSlice(String text, long start, long end) {
+        long size = stringSize(text);
+        if (start < 0 || end < start || end > size) {
+            throw new LumePanic(
+                "Str.slice range " + start + ":" + end + " is out of bounds for size " + size
+            );
+        }
+        int startOffset = text.offsetByCodePoints(0, Math.toIntExact(start));
+        int endOffset = text.offsetByCodePoints(0, Math.toIntExact(end));
+        return text.substring(startOffset, endOffset);
     }
 
     public static Boolean extractSuccessIsSet(Object value) {

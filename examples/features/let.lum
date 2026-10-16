@@ -64,11 +64,11 @@ def main() Unit {
     prefix = sumPrefix([Some(1), Some(2), Some(3), None, Some(100)])
 
     println("some ${some ?? 0}")
-    println("none ${none.getError()}")
+    println("none ${none.expectErr()}")
     println("optSome ${optSome ?? 0}")
     println("optNone ${optNone.isEmpty}")
     println("pair ${pair.count}-${pair.label}")
     println("sum ${sum ?? 0}")
-    println("sumFail ${sumFail.getError()}")
+    println("sumFail ${sumFail.expectErr()}")
     println("prefix ${prefix}")
 }

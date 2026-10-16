@@ -8,6 +8,9 @@ interface Str with Comparable[Str] {
     get nonEmpty Bool
     def compareTo(other Str) Int
     def runeAt(index Int) Option[Rune]
+    def slice() Str
+    def slice(start Int) Str
+    def slice(start Int, end Int) Str
     def split(separator Str) Vector[Str]
     def splitRegex(pattern Str) Vector[Str]
     def trim() Str
@@ -16,7 +19,11 @@ interface Str with Comparable[Str] {
     def toLower() Str
     def toUpper() Str
     def contains(part Str) Bool
+    def startsWith(prefix Str) Bool
+    def endsWith(suffix Str) Bool
     def indexOf(part Str) Option[Int]
+    def replaceFirst(target Str, replacement Str) Str
+    def replaceAll(target Str, replacement Str) Str
     def replaceFirstRegex(pattern Str, replacement Str) Str
     def replaceAllRegex(pattern Str, replacement Str) Str
 }

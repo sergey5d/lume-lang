@@ -4703,7 +4703,7 @@ def increment(value Str) Result[Int, Str] {
 
 def main() Unit {
     println(increment("4") ?? 0)
-    println(increment("bad").getError())
+    println(increment("bad").expectErr())
 }
 "#,
         )
@@ -4955,6 +4955,11 @@ def main() Unit {
     fraction Float = 2.25
     one Float = 1.0
     println(whole.sqrt() == 3.0, fraction.sqrt() == 1.5, one.log() == 0.0)
+    println((-9).abs() == 9, (-2.25).abs() == 2.25)
+    println(3.pow(4) == 81, 2.0.pow(3) == 8.0, 9.0.pow(0.5) == 3.0)
+    println(2.75.floor() == 2.0, 2.25.ceil() == 3.0)
+    println(2.5.round() == 3.0, (-2.5).round() == -3.0)
+    println(whole.toFloat() == 9.0, fraction.toInt() == 2, (-2.25).toInt() == -2)
     println(OS.env.size >= 0)
 }
 "#,
@@ -4974,6 +4979,15 @@ def main() Unit {
         assert!(module.contains("LumeRuntime.sqrt(whole)"), "{module}");
         assert!(module.contains("LumeRuntime.sqrt(fraction)"), "{module}");
         assert!(module.contains("LumeRuntime.log(one)"), "{module}");
+        assert!(module.contains("LumeRuntime.abs((-9L))"), "{module}");
+        assert!(module.contains("LumeRuntime.abs((-2.25))"), "{module}");
+        assert!(module.contains("LumeRuntime.pow(3L, 4L)"), "{module}");
+        assert!(module.contains("LumeRuntime.pow(9.0, 0.5)"), "{module}");
+        assert!(module.contains("LumeRuntime.floor(2.75)"), "{module}");
+        assert!(module.contains("LumeRuntime.ceil(2.25)"), "{module}");
+        assert!(module.contains("LumeRuntime.round(2.5)"), "{module}");
+        assert!(module.contains("LumeRuntime.toFloat(whole)"), "{module}");
+        assert!(module.contains("LumeRuntime.toInt(fraction)"), "{module}");
         assert!(module.contains("LumeRuntime.env().size()"), "{module}");
 
         let mut sources = core_runtime_sources();
@@ -4992,7 +5006,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("Java stdout utf8"),
-            "-3 8\n1.25 7.5\ntrue true true\ntrue\n"
+            "-3 8\n1.25 7.5\ntrue true true\ntrue true\ntrue true true\ntrue true\ntrue true\ntrue true true\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -5171,7 +5185,7 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
                     "case Err<?, ?> __case",
                     "default <X> Result<X, E> map(Function<T, X> f)",
                     "default <X> Result<X, E> flatMap(Function<T, Result<X, E>> f)",
-                    "default E getError()",
+                    "default E expectErr()",
                 ],
             ),
             (
@@ -7145,8 +7159,15 @@ def main() Unit {
     contextual Box[Str] = new("world")
 
     println(set.isEmpty, set.nonEmpty)
+    println(map.isEmpty, map.nonEmpty)
     set.add("Ada")
-    println(set.isEmpty, set.nonEmpty, set.size, map.size, inferred.value, contextual.value)
+    set.addAll(["Ada", "Lin"])
+    copy Set[Str] = Set()
+    copy.addAll(set)
+    maybe Str? = ^"Sam"
+    copy.addAll(maybe)
+    map["one"] := 1
+    println(set.isEmpty, set.nonEmpty, set.size, copy.size, map.isEmpty, map.nonEmpty, map.size, inferred.value, contextual.value)
 }
 "#,
         )
@@ -7185,7 +7206,74 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true false\nfalse true 1 0 hello world\n"
+            "true false\ntrue false\nfalse true 2 3 false true 1 hello world\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_collection_flat_map_accepts_any_iterable_result() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java collection flatMap test because javac/java is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-collection-flat-map-iterable");
+        let source = temp.join("collection_flat_map.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/collectionflatmap
+
+def main() Unit {
+    vector [Int] = [1, 2].flatMap(value => Some(value))
+    setSource Set[Int] = Set()
+    setSource.add(1)
+    setSource.add(2)
+    set Set[Int] = setSource.flatMap(value => [value, value + 10])
+    map [Str: Int] = ["one": 1, "two": 2]
+    mapped [Int] = map.flatMap((key, value) => Some(value))
+    linked LinkedList[Int] = LinkedList(1, 2).flatMap(value => [value, value + 10])
+
+    println(vector.makeStr(","))
+    println(set.makeStr(","))
+    println(mapped.makeStr(","))
+    println(linked.makeStr(","))
+}
+"#,
+        )
+        .expect("write source");
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.collectionflatmap.CollectionflatmapMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "1,2\n1,11,2,12\n1,2\n1,11,2,12\n"
         );
 
         let _ = fs::remove_dir_all(temp);
@@ -7794,6 +7882,18 @@ def main() Unit {
     println("😀ab".indexOf("missing").isEmpty)
     println("a1 b22".replaceFirstRegex("\d+", "#"))
     println("a1 b22".replaceAllRegex("\d+", "#"))
+    sliceText Str = "a😀bc"
+    println(sliceText[:])
+    println(sliceText[:2])
+    println(sliceText[1:3])
+    println(sliceText[2:])
+    println(sliceText.slice(1, 3))
+    println(sliceText.startsWith("a😀"))
+    println(sliceText.endsWith("bc"))
+    println(sliceText.startsWith("😀"))
+    println(sliceText.endsWith("b"))
+    println("a.b.a".replaceFirst(".", "#"))
+    println("a.b.a".replaceAll(".", "#"))
 }
 "##,
         )
@@ -7821,6 +7921,11 @@ def main() Unit {
         assert!(module.contains("LumeRuntime.stringIndexOf"));
         assert!(module.contains("LumeRuntime.stringReplaceFirstRegex"));
         assert!(module.contains("LumeRuntime.stringReplaceAllRegex"));
+        assert!(module.contains("LumeRuntime.stringSlice"));
+        assert!(module.contains("LumeRuntime.stringStartsWith"));
+        assert!(module.contains("LumeRuntime.stringEndsWith"));
+        assert!(module.contains("LumeRuntime.stringReplaceFirst"));
+        assert!(module.contains("LumeRuntime.stringReplaceAll"));
         assert!(module.contains("LumeVector<String> parts"));
         assert!(module.contains("(\"\").isEmpty()"));
         assert!(module.contains("!(\"lume\").isEmpty()"));
@@ -7842,7 +7947,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n[LuMe]\n[LuMe  ]\n[  LuMe]\nlume\nLUME\ntrue\nfalse\n1\ntrue\na# b22\na# b#\n"
+            "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n[LuMe]\n[LuMe  ]\n[  LuMe]\nlume\nLUME\ntrue\nfalse\n1\ntrue\na# b22\na# b#\na😀bc\na😀\n😀b\nbc\n😀b\ntrue\ntrue\nfalse\nfalse\na#b.a\na#b#a\n"
         );
 
         let _ = fs::remove_dir_all(temp);

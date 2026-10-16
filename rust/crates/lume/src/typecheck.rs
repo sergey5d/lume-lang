@@ -1170,8 +1170,27 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
     }
 }
 
+fn is_builtin_primitive_type_name(name: &str) -> bool {
+    matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str")
+}
+
+fn is_intrinsic_static_primitive_method(type_name: &str, method_name: &str) -> bool {
+    matches!((type_name, method_name), ("Int" | "Float", "parse"))
+}
+
+fn primitive_implementation_diagnostic(name: &str, span: crate::source::Span) -> Diagnostic {
+    Diagnostic::error(
+        "invalid_primitive_implementation",
+        format!("primitive type '{name}' is closed and cannot be used as an implementation target"),
+        span,
+    )
+    .with_help(format!(
+        "remove 'with {name}'; only built-in runtime values can have type '{name}'"
+    ))
+}
+
 fn builtin_extension_type_sig(name: &str) -> Option<TypeSig> {
-    if !matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str") {
+    if !is_builtin_primitive_type_name(name) {
         return None;
     }
     Some(TypeSig {
@@ -1727,6 +1746,15 @@ impl<'a> Checker<'a> {
         }
         self.push_ast_type_params(&decl.type_params, &decl.type_conditions);
         self.validate_generic_clause(&decl.type_params, &decl.type_conditions);
+        for bound in &decl.with_bounds {
+            let Ty::Named(name, args) = self.ty_from_type_ref(bound) else {
+                continue;
+            };
+            if args.is_empty() && is_builtin_primitive_type_name(&name) {
+                self.diagnostics
+                    .push(primitive_implementation_diagnostic(&name, bound.span()));
+            }
+        }
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
@@ -1993,6 +2021,9 @@ impl<'a> Checker<'a> {
             let Ty::Named(interface_name, _) = bound else {
                 continue;
             };
+            if is_builtin_primitive_type_name(interface_name) {
+                continue;
+            }
             let Some(interface_sig) = self.lookup_any_type(interface_name) else {
                 continue;
             };
@@ -6463,6 +6494,27 @@ impl<'a> Checker<'a> {
                 format!("contextual 'new' target '{}' is not a declared type", name),
             );
         };
+        if is_builtin_primitive_type_name(&sig.name) {
+            let guidance = match sig.name.as_str() {
+                "Int" => {
+                    "use value.toInt() for Float input or Int.parse(text) for string input; contextual construction does not perform primitive conversions"
+                }
+                "Float" => {
+                    "use value.toFloat() for Int input or Float.parse(text) for string input; contextual construction does not perform primitive conversions"
+                }
+                "Str" => "use value.toStr() to convert a value to Str",
+                _ => {
+                    "use an explicit operation that produces the primitive value; primitive types are not construction targets"
+                }
+            };
+            return reject(
+                self,
+                format!(
+                    "primitive type '{}' is not constructible; {guidance}",
+                    sig.name
+                ),
+            );
+        }
         if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
             let guidance = if sig.kind == TypeKind::Interface {
                 format!(
@@ -6819,6 +6871,14 @@ impl<'a> Checker<'a> {
     }
 
     fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {
+        if let Ty::Named(name, args) = self.ty_from_type_ref(interface)
+            && args.is_empty()
+            && is_builtin_primitive_type_name(&name)
+        {
+            self.diagnostics
+                .push(primitive_implementation_diagnostic(&name, interface.span()));
+            return None;
+        }
         let TypeRef::Named { name, .. } = interface else {
             self.add_error(
                 "invalid_anonymous_interface",
@@ -8142,6 +8202,31 @@ impl<'a> Checker<'a> {
         let sig = &instantiated_sig;
 
         self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
+
+        if is_builtin_primitive_type_name(&sig.name) {
+            let help = match sig.name.as_str() {
+                "Int" => "use value.toInt() for Float input or Int.parse(text) for string input",
+                "Float" => {
+                    "use value.toFloat() for Int input or Float.parse(text) for string input"
+                }
+                "Str" => "use value.toStr() to convert a value to Str",
+                _ => {
+                    "use an explicit operation that produces the primitive value; primitive types are not constructors"
+                }
+            };
+            self.diagnostics.push(
+                Diagnostic::error(
+                    "invalid_primitive_conversion",
+                    format!(
+                        "cannot convert to primitive type '{}' with constructor syntax",
+                        sig.name
+                    ),
+                    span,
+                )
+                .with_help(help),
+            );
+            return ret;
+        }
 
         if sig.kind == TypeKind::Annotation {
             self.add_error(
@@ -10845,6 +10930,9 @@ impl<'a> Checker<'a> {
         }
         match receiver {
             Ty::Named(type_name, args) => {
+                if is_intrinsic_static_primitive_method(type_name, name) {
+                    return universal_member_type(name);
+                }
                 if let Some((owner_name, case_name)) = enum_case_view_parts(type_name) {
                     let owner = self.lookup_any_type(owner_name)?;
                     let subst = owner
@@ -10957,6 +11045,9 @@ impl<'a> Checker<'a> {
         }
         match receiver {
             Ty::Named(type_name, args) => {
+                if is_intrinsic_static_primitive_method(type_name, name) {
+                    return universal_method_sigs(name);
+                }
                 let Some(sig) = self.lookup_any_type(type_name) else {
                     let extension_methods =
                         self.extension_method_sigs_for_named_type(type_name, args, name);
@@ -12923,6 +13014,11 @@ impl<'a> Checker<'a> {
             );
             return;
         };
+        if is_builtin_primitive_type_name(&name) {
+            self.diagnostics
+                .push(primitive_implementation_diagnostic(&name, span));
+            return;
+        }
         let Some(sig) = self.lookup_any_type(&name) else {
             return;
         };
@@ -17799,6 +17895,122 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_get_as_a_contextual_local_name() {
+        let program = parse_inline(
+            r#"
+def identity(get Int) Int = get
+
+def main() Unit {
+    get = identity(41)
+    println(get)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_primitive_types_as_implementation_targets() {
+        let program = parse_inline(
+            r#"
+class FakeInt with Int {}
+shape FakeFloat with Float {}
+interface FakeStr with Str {}
+object FakeBool with Bool {}
+annotation FakeRune with Rune {}
+
+def invalid[T with Int](value T) Unit = ()
+
+def main() Unit {
+    fake = object with Str {}
+}
+"#,
+        );
+        let result = check_program(&program);
+        let diagnostics = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "invalid_primitive_implementation")
+            .collect::<Vec<_>>();
+        assert_eq!(diagnostics.len(), 7, "{:#?}", result.diagnostics);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.message.contains("is closed")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn primitive_constructor_error_recommends_conversion_apis() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    converted = Int(3.7)
+    contextual Int = new(3.7)
+}
+"#,
+        );
+        let result = check_program(&program);
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "invalid_primitive_conversion")
+            .expect("primitive construction should be rejected");
+        assert!(diagnostic.message.contains("cannot convert"));
+        assert!(
+            diagnostic
+                .helps
+                .iter()
+                .any(|help| help.contains("Int.parse"))
+        );
+        assert!(
+            diagnostic
+                .helps
+                .iter()
+                .all(|help| !help.contains("object with"))
+        );
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_contextual_construction"
+                    && diagnostic.message.contains("value.toInt()")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| !diagnostic.message.contains("object with Int")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn intrinsic_static_parse_is_not_an_instance_method() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    invalid = (1).parse("2")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "unknown_member"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

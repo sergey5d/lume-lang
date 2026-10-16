@@ -80,7 +80,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn expect_identifier(&mut self, message: &'static str) -> Option<(String, Span)> {
-        if self.at(TokenKind::Identifier) {
+        if self.at(TokenKind::Identifier) || self.at_keyword(Keyword::Get) {
             let token = self.current().clone();
             self.advance();
             Some((token.lexeme, token.span))
@@ -95,7 +95,10 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn expect_data_name(&mut self, message: &'static str) -> Option<(String, Span)> {
-        if self.at(TokenKind::Identifier) || self.at_keyword(Keyword::Type) {
+        if self.at(TokenKind::Identifier)
+            || self.at_keyword(Keyword::Get)
+            || self.at_keyword(Keyword::Type)
+        {
             let token = self.current().clone();
             self.advance();
             Some((token.lexeme, token.span))

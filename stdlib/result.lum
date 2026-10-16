@@ -13,8 +13,8 @@ ext Result[T, E] {
 
     get isErr Bool = !this.isOk
 
-    def getError() E = match this {
-        case Ok { value: _ } => panic("Result has no error value")
+    def expectErr() E = match this {
+        case Ok { value: _ } => panic("expected Result.Err")
         case Err { error } => error
     }
 

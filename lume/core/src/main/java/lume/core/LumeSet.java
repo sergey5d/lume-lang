@@ -28,9 +28,20 @@ public final class LumeSet<T> {
         return this;
     }
 
-    public LumeSet<T> addAll(LumeSet<T> other) {
-        values.addAll(other.values);
+    public LumeSet<T> addAll(Object source) {
+        var iterator = LumeIterator.<T>from(source);
+        while (iterator.hasNext()) {
+            values.add(iterator.next());
+        }
         return this;
+    }
+
+    public <X> LumeSet<X> flatMap(Function<? super T, ?> mapper) {
+        var result = LumeSet.<X>empty();
+        for (var value : values) {
+            result.addAll(mapper.apply(value));
+        }
+        return result;
     }
 
     public boolean contains(T value) {

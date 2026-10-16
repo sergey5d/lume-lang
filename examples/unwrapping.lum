@@ -41,7 +41,7 @@ def main() {
     resultErr = plusOneResult(Err("bad"))
 
     println("result ok ${resultOk ?? 0}")
-    println("result err ${resultErr.getError()}")
+    println("result err ${resultErr.expectErr()}")
 
     eitherRight = plusOneEither(Right(7))
     eitherLeft = plusOneEither(Left("nope"))

@@ -503,7 +503,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_plain_for_generator_binding(&mut self) -> Option<Binding> {
         const MESSAGE: &str = "for generator must bind a plain identifier or '_' before '<-'; use 'for let (...) <-' or 'for let { ... } <-' for irrefutable destructuring";
-        if !self.at(TokenKind::Identifier) {
+        if !self.at(TokenKind::Identifier) && !self.at_keyword(Keyword::Get) {
             self.error_at_current("invalid_for_generator", MESSAGE);
             return None;
         }
@@ -528,7 +528,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn is_binding_start(&self) -> bool {
-        self.at(TokenKind::Identifier)
+        self.at(TokenKind::Identifier) || self.at_keyword(Keyword::Get)
     }
 
     pub(super) fn parse_for_let_generator_head(&mut self) -> Option<ForBinding> {

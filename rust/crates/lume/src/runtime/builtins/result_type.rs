@@ -30,7 +30,7 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 result_map,
             ),
-            builtin_method(3, "getError", Vec::new(), result_get_error),
+            builtin_method(3, "expectErr", Vec::new(), result_expect_err),
             builtin_method(5, "orElse", vec![ir::Type::Unknown], result_or_else),
             builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
             builtin_method(
@@ -181,7 +181,7 @@ fn result_map_error(
     }
 }
 
-fn result_get_error(
+fn result_expect_err(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     _args: Vec<Value>,
@@ -191,7 +191,7 @@ fn result_get_error(
     if case_id == ERR_CASE {
         Ok(first_field.expect("Result.Err payload"))
     } else {
-        Err(interpreter.runtime_error(span, "Result has no error value"))
+        Err(interpreter.runtime_error(span, "expected Result.Err"))
     }
 }
 

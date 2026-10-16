@@ -57,7 +57,7 @@ public final class LumeLinkedList<T> {
         return result;
     }
 
-    public <X> LumeLinkedList<X> flatMap(Function<? super T, LumeLinkedList<X>> mapper) {
+    public <X> LumeLinkedList<X> flatMap(Function<? super T, ?> mapper) {
         var result = LumeLinkedList.<X>empty();
         for (var value : values) {
             result.addAll(mapper.apply(value));

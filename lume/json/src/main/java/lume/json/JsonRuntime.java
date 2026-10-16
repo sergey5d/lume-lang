@@ -271,7 +271,7 @@ public final class JsonRuntime {
         if (result.isOk()) {
             return LumeRuntime.extractSuccessValue(result);
         }
-        throw new IllegalStateException(result.getError().message());
+        throw new IllegalStateException(result.expectErr().message());
     }
 
     private static JsonValue encodeUnion(Object value) {

@@ -81,7 +81,7 @@ def main() Unit {
     okFromSome Result[Int, Str] = some.toResult(fallbackStr("toResult eager", "missing"))
     println("toResult ok ${okFromSome !}")
     errFromNone Result[Int, Str] = none.toResult(fallbackStr("toResult fallback", "missing"))
-    println("toResult err ${errFromNone.getError()}")
+    println("toResult err ${errFromNone.expectErr()}")
 
     rightFromSome Either[Str, Int] = some.toEither(fallbackStr("toEither eager", "missing"))
     println("toEither right ${rightFromSome.expectRight()}")
@@ -106,7 +106,7 @@ def main() Unit {
     mapErrorOk Result[Int, Str] = ok.mapError(error => fallbackStr("mapError eager", "mapped"))
     println("mapError ok ${mapErrorOk !}")
     mapErrorErr Result[Int, Str] = err.mapError(error => fallbackStr("mapError fallback", "mapped"))
-    println("mapError err ${mapErrorErr.getError()}")
+    println("mapError err ${mapErrorErr.expectErr()}")
 
     mapLeftRight Either[Str, Int] = right.mapLeft(error => fallbackStr("mapLeft eager", "mapped"))
     println("mapLeft right ${mapLeftRight.expectRight()}")

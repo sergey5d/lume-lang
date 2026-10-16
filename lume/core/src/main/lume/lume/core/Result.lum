@@ -50,8 +50,8 @@ ext Result[T, E] {
         case Err { error } => Left(error)
     }
 
-    def getError() E = match this {
-        case Ok { value: _ } => panic("Result has no error value")
+    def expectErr() E = match this {
+        case Ok { value: _ } => panic("expected Result.Err")
         case Err { error } => error
     }
 }

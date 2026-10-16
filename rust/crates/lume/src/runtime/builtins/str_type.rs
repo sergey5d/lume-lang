@@ -43,6 +43,33 @@ pub(super) fn define() -> RuntimeType {
                 vec![crate::ir::Type::Str, crate::ir::Type::Str],
                 str_replace_all_regex,
             ),
+            builtin_method(16, "slice", Vec::new(), str_slice),
+            builtin_method(17, "slice", vec![crate::ir::Type::Int], str_slice),
+            builtin_method(
+                18,
+                "slice",
+                vec![crate::ir::Type::Int, crate::ir::Type::Int],
+                str_slice,
+            ),
+            builtin_method(
+                19,
+                "startsWith",
+                vec![crate::ir::Type::Str],
+                str_starts_with,
+            ),
+            builtin_method(20, "endsWith", vec![crate::ir::Type::Str], str_ends_with),
+            builtin_method(
+                21,
+                "replaceFirst",
+                vec![crate::ir::Type::Str, crate::ir::Type::Str],
+                str_replace_first,
+            ),
+            builtin_method(
+                22,
+                "replaceAll",
+                vec![crate::ir::Type::Str, crate::ir::Type::Str],
+                str_replace_all,
+            ),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -91,6 +118,39 @@ fn str_size(
         return Err(interpreter.runtime_error(span, "Str.size expects 0 arguments"));
     }
     Ok(Value::Int(text.chars().count() as i64))
+}
+
+fn str_slice(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    let size = text.chars().count() as i64;
+    let (start, end) = match args.as_slice() {
+        [] => (0, size),
+        [start] => (start.as_int(interpreter, span, "Str.slice start")?, size),
+        [start, end] => (
+            start.as_int(interpreter, span, "Str.slice start")?,
+            end.as_int(interpreter, span, "Str.slice end")?,
+        ),
+        _ => return Err(interpreter.runtime_error(span, "Str.slice expects 0, 1, or 2 arguments")),
+    };
+    if start < 0 || end < start || end > size {
+        return Err(interpreter.runtime_error(
+            span,
+            format!("Str.slice range {start}:{end} is out of bounds for size {size}"),
+        ));
+    }
+    Ok(Value::String(
+        text.chars()
+            .skip(start as usize)
+            .take((end - start) as usize)
+            .collect(),
+    ))
 }
 
 fn str_is_empty(
@@ -269,6 +329,42 @@ fn str_contains(
     Ok(Value::Bool(text.contains(part)))
 }
 
+fn str_starts_with(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    let [prefix] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Str.startsWith expects 1 argument"));
+    };
+    let Value::String(prefix) = prefix else {
+        return Err(interpreter.runtime_error(span, "Str.startsWith argument must be Str"));
+    };
+    Ok(Value::Bool(text.starts_with(prefix)))
+}
+
+fn str_ends_with(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    let [suffix] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Str.endsWith expects 1 argument"));
+    };
+    let Value::String(suffix) = suffix else {
+        return Err(interpreter.runtime_error(span, "Str.endsWith argument must be Str"));
+    };
+    Ok(Value::Bool(text.ends_with(suffix)))
+}
+
 fn str_index_of(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
@@ -289,6 +385,56 @@ fn str_index_of(
     };
     let index = text[..byte_index].chars().count() as i64;
     Ok(interpreter.option_some(Value::Int(index)))
+}
+
+fn str_replace_first(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    str_replace_literal(interpreter, receiver, args, span, false)
+}
+
+fn str_replace_all(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    str_replace_literal(interpreter, receiver, args, span, true)
+}
+
+fn str_replace_literal(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+    replace_all: bool,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!();
+    };
+    let [target, replacement] = args.as_slice() else {
+        let method = if replace_all {
+            "replaceAll"
+        } else {
+            "replaceFirst"
+        };
+        return Err(interpreter.runtime_error(span, format!("Str.{method} expects 2 arguments")));
+    };
+    let Value::String(target) = target else {
+        return Err(interpreter.runtime_error(span, "Str replacement target must be Str"));
+    };
+    let Value::String(replacement) = replacement else {
+        return Err(interpreter.runtime_error(span, "Str replacement value must be Str"));
+    };
+    let result = if replace_all {
+        text.replace(target, replacement)
+    } else {
+        text.replacen(target, replacement, 1)
+    };
+    Ok(Value::String(result))
 }
 
 fn str_replace_first_regex(

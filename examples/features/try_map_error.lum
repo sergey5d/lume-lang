@@ -34,9 +34,9 @@ def loadEither(ok Bool) Either[Str, Int] {
 
 def main() Unit {
     println("option result " + (loadUser(true) !))
-    println("option mapped " + loadUser(false).getError())
+    println("option mapped " + loadUser(false).expectErr())
     println("result ok " + (loadRow(true) !))
-    println("result mapped " + loadRow(false).getError())
+    println("result mapped " + loadRow(false).expectErr())
     println("either ok " + loadEither(true).expectRight().toStr())
     println("either mapped " + loadEither(false).expectLeft())
 }

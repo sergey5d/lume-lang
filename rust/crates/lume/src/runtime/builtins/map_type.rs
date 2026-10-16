@@ -47,6 +47,8 @@ pub(super) fn define() -> RuntimeType {
             builtin_method(16, "clear", Vec::new(), map_clear),
             builtin_method(17, "values", Vec::new(), map_values),
             builtin_method(18, "keys", Vec::new(), map_keys),
+            builtin_method(19, "isEmpty", Vec::new(), map_is_empty),
+            builtin_method(20, "nonEmpty", Vec::new(), map_non_empty),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -412,4 +414,28 @@ fn map_size(
         return Err(interpreter.runtime_error(span, "Map.size expects 0 arguments"));
     }
     Ok(Value::Int(map_entries(&receiver).borrow().len() as i64))
+}
+
+fn map_is_empty(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Map.isEmpty expects 0 arguments"));
+    }
+    Ok(Value::Bool(map_entries(&receiver).borrow().is_empty()))
+}
+
+fn map_non_empty(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Map.nonEmpty expects 0 arguments"));
+    }
+    Ok(Value::Bool(!map_entries(&receiver).borrow().is_empty()))
 }

@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
                 let start = self.current_span();
                 self.parse_record_pattern(Vec::new(), start, depth)
             }
-            TokenKind::Identifier => {
+            TokenKind::Identifier | TokenKind::Keyword(Keyword::Get) => {
                 let (name, start) = self.expect_identifier("expected match pattern")?;
                 if !looks_like_constructor_pattern(&name)
                     && self.binding_type_starts_on_same_line(start)

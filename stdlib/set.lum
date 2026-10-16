@@ -7,7 +7,7 @@ private interface SetApi[T] with Iterable[T] {
     def addAll(values Iterable[T]) Set[T]
     def iterator() Iterator[T]
     def map[X](f fn(T) X) Set[X]
-    def flatMap[X](f fn(T) Set[X]) Set[X]
+    def flatMap[X](f fn(T) Iterable[X]) Set[X]
     def filter(f fn(T) Bool) Set[T]
     def fold[X](initial X, f fn(X, T) X) X
     def reduce(f fn(T, T) T) Option[T]

@@ -268,8 +268,11 @@ Common stdlib/prelude types:
 
 `Option[T]` implements `Iterable[T]`: `Some(value)` iterates once and `None`
 iterates zero times. Consequently, iterable APIs can consume options directly.
-For example, `Vector.flatMap[X](f fn(T) Iterable[X]) Vector[X]` accepts a
-callback returning either a `Vector[X]`, an `Option[X]`, or another iterable.
+The collection `flatMap` methods all accept callbacks returning `Iterable[X]`,
+so a callback may return a vector, set, linked list, option, or another iterable.
+The receiver determines the result container: `Vector.flatMap` returns a
+`Vector`, `LinkedList.flatMap` returns a `LinkedList`, `Set.flatMap` returns a
+deduplicated `Set`, and `Map.flatMap` returns a `Vector`.
 
 ## Any Type
 
@@ -579,6 +582,10 @@ Rules:
 - `Str.runeAt(index)` uses a zero-based Unicode-scalar index and returns `None`
   when `index` is negative or outside the string; use `runeAt(index) !` for
   assertive extraction
+- `Str.slice()`, `Str.slice(start)`, and `Str.slice(start, end)` use zero-based
+  Unicode-scalar indexes and return the selected half-open range; string slice
+  brackets use the same operation, for example `text[:5]`, `text[1:5]`,
+  `text[5:]`, and `text[:]`
 - `Str.isEmpty` reports whether the string contains no characters
 - `Str.nonEmpty` reports whether the string contains at least one character
 - `Str.trim()` removes leading and trailing whitespace
@@ -587,12 +594,16 @@ Rules:
   locale-sensitive
 - `Str.contains(part)` performs literal substring membership; `contains` is the
   common membership spelling for strings and collections
+- `Str.startsWith(prefix)` and `Str.endsWith(suffix)` perform literal,
+  case-sensitive prefix and suffix checks
 - `Str.indexOf(part)` returns the zero-based Unicode-scalar index of the first
   literal match as `Some(index)`, or `None` when no match exists
 - `Str.split(separator)` treats `separator` as literal text and returns a
   growable `Vector[Str]`
 - `Str.splitRegex(pattern)` explicitly interprets `pattern` as a regular
   expression and returns a growable `Vector[Str]`
+- `Str.replaceFirst(target, replacement)` and
+  `Str.replaceAll(target, replacement)` replace literal text
 - `Str.replaceFirstRegex(pattern, replacement)` and
   `Str.replaceAllRegex(pattern, replacement)` make regular-expression
   replacement explicit in the method name
@@ -665,6 +676,48 @@ naturalLog Float = 1.0.log()
 
 These methods follow IEEE-754 behavior: a negative square root or logarithm is
 NaN, and `0.0.log()` is negative infinity.
+
+Numeric magnitude, powers, and rounding are available as members:
+
+```txt
+positiveInt Int = (-7).abs()
+positiveFloat Float = (-2.5).abs()
+integerPower Int = 3.pow(4)
+floatPower Float = 9.0.pow(0.5)
+down Float = 2.75.floor()
+up Float = 2.25.ceil()
+nearest Float = 2.5.round()
+```
+
+`Int.pow(exponent)` requires a non-negative `Int` exponent. Its multiplication,
+like other `Int` arithmetic, wraps on overflow. `Float.pow` accepts an `Int` or
+`Float` exponent and follows IEEE-754 behavior. `floor`, `ceil`, and `round`
+return integral-valued `Float`s; halfway values round away from zero.
+
+Explicit numeric conversion uses member methods:
+
+```txt
+whole Int = 3.7.toInt()     # 3
+decimal Float = 3.toFloat() # 3.0
+```
+
+`Float.toInt()` truncates toward zero. NaN converts to `0`; values outside the
+signed 64-bit range, including infinities, clamp to `Int.MIN` or `Int.MAX`.
+`Int.toFloat()` converts to IEEE-754 binary64 and can lose precision for large
+integers. Primitive constructor syntax does not perform conversion, so
+`Int(3.7)` remains invalid.
+
+`Int.parse(text)` and `Float.parse(text)` parse complete strings and return an
+`Option` rather than panicking. Invalid input produces `None`:
+
+```txt
+whole Int? = Int.parse("42")
+decimal Float? = Float.parse("2.5")
+invalid Int? = Int.parse("forty-two") # None
+```
+
+These are intrinsic static methods. They do not make `parse` an instance
+method.
 
 `panic(...)` and `assert(...)` are prelude functions, not `OS` methods:
 
@@ -1126,22 +1179,25 @@ A dynamic index such as `pair[index]`, a negative index, or an out-of-bounds
 literal is rejected during compilation. Tuple indexed assignment is not
 supported because tuples are immutable.
 
-Vector slicing uses a half-open range: the start is included and the end is
-excluded. Either bound may be omitted:
+Vector and string slicing use a half-open range: the start is included and the
+end is excluded. Either bound may be omitted:
 
 ```txt
 prefix = values[:5]      # values.slice(0, 5)
 middle = values[1:5]     # values.slice(1, 5)
 suffix = values[5:]      # values.slice(5)
 copy = values[:]         # values.slice()
+text = "lume"
+prefixText = text[:2]    # text.slice(0, 2)
 ```
 
-`slice()`, `slice(start)`, and `slice(start, end)` return a fresh shallow
-`Vector` and evaluate the receiver once. Bounds must satisfy
-`0 <= start <= end <= values.size`; an invalid range panics. Slice brackets
-are available only on `Vector`; step syntax such as `values[1:5:2]` is not
+For a `Vector`, `slice()`, `slice(start)`, and `slice(start, end)` return a fresh
+shallow `Vector`. For a `Str`, they return a string selected by Unicode-scalar
+index. Both evaluate the receiver once. Bounds must satisfy
+`0 <= start <= end <= value.size`; an invalid range panics. Slice brackets are
+available on `Vector` and `Str`; step syntax such as `values[1:5:2]` is not
 supported. At expression start, `[]` remains the contextual empty vector/map
-literal; `[:]` is meaningful only after a `Vector` expression.
+literal; `[:]` is meaningful only after a sliceable expression.
 
 Shape composition and exact update:
 
@@ -2068,7 +2124,7 @@ keys [LookupKey: Int] = [LookupKey.Named("primary"): 1]
 `Map[K, V]` (normally written `[K: V]`) requires `K` to satisfy `Hashed[K]`.
 This makes semantic equality and compatible hashing part of the key type's
 public contract, regardless of the storage strategy used by a particular
-runtime.
+runtime. `Map.size`, `Map.isEmpty`, and `Map.nonEmpty` are read-only getters.
 
 ```txt
 shape Point {
@@ -3174,6 +3230,13 @@ greeter Greeter = object with Greeter {
 immutable fields and methods; `with` only adds the interfaces implemented by
 the synthesized nominal object.
 
+Built-in primitive types are closed runtime types. `Int`, `Float`, `Str`,
+`Bool`, and `Rune` cannot appear as implementation targets after `with`, either
+on a named declaration, an anonymous object, or a generic parameter. User code
+cannot synthesize values that impersonate primitives. Extension blocks such as
+`ext Int { ... }` remain valid because they add checked API surface without
+implementing or constructing the primitive type.
+
 An interface name followed directly by braces is not anonymous implementation
 syntax. `Greeter { ... }` is rejected because interfaces cannot be constructed.
 
@@ -4137,6 +4200,7 @@ transform the container first:
 
 - `Option[T].toResult(error)` converts absence into `Err(error)`.
 - `Result[T, E].mapError(f)` maps `Err(E)` into another error type.
+- `Result[T, E].expectErr()` extracts `E` and panics when the result is `Ok`.
 - `Either[L, R].mapLeft(f)` maps `Left(L)` into another left type.
 
 When the chain gets visually noisy, split before the mapping call:
@@ -5258,7 +5322,7 @@ Expression precedence, from highest to lowest:
 | Level | Forms | Associativity |
 | --- | --- | --- |
 | Primary | literals, groups, blocks, value-producing control flow | n/a |
-| Postfix | calls, member access, indexing, Vector slicing, `!` | left |
+| Postfix | calls, member access, indexing, slicing, `!` | left |
 | Unary | `-`, `!`, `^`, `try` | right |
 | Multiplicative | `*`, `/`, `%` | left |
 | Additive | `+`, `-` | left |

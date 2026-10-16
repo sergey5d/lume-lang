@@ -10548,6 +10548,18 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             params: vec![ir::Type::Int, ir::Type::Int],
             ret: Box::new(receiver.clone()),
         }),
+        ("Str", "slice") => Some(ir::Type::Function {
+            params: vec![ir::Type::Int, ir::Type::Int],
+            ret: Box::new(ir::Type::Str),
+        }),
+        ("Str", "startsWith" | "endsWith") => Some(ir::Type::Function {
+            params: vec![ir::Type::Str],
+            ret: Box::new(ir::Type::Bool),
+        }),
+        ("Str", "replaceFirst" | "replaceAll") => Some(ir::Type::Function {
+            params: vec![ir::Type::Str, ir::Type::Str],
+            ret: Box::new(ir::Type::Str),
+        }),
         ("Vector" | "LinkedList" | "Array", "setAt") => Some(ir::Type::Function {
             params: vec![ir::Type::Int, item.clone()],
             ret: Box::new(ir::Type::Named {

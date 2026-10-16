@@ -5766,6 +5766,98 @@ impl<'a> Interpreter<'a> {
                     _ => Ok(None),
                 }
             }
+            "abs" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("abs expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                match receiver {
+                    Value::Int(value) => Ok(Some(Value::Int(value.wrapping_abs()))),
+                    Value::Float(value) => Ok(Some(Value::Float(value.abs()))),
+                    _ => Ok(None),
+                }
+            }
+            "pow" => {
+                let [exponent] = args else {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("pow expects 1 argument, got {}", args.len()),
+                    ));
+                };
+                match (receiver, exponent) {
+                    (Value::Int(value), Value::Int(exponent)) => {
+                        if *exponent < 0 {
+                            return Err(
+                                self.runtime_error(span, "Int.pow exponent must be non-negative")
+                            );
+                        }
+                        let mut result = 1_i64;
+                        let mut factor = value;
+                        let mut remaining = *exponent as u64;
+                        while remaining != 0 {
+                            if remaining & 1 != 0 {
+                                result = result.wrapping_mul(factor);
+                            }
+                            remaining >>= 1;
+                            if remaining != 0 {
+                                factor = factor.wrapping_mul(factor);
+                            }
+                        }
+                        Ok(Some(Value::Int(result)))
+                    }
+                    (Value::Float(value), Value::Int(exponent)) => {
+                        Ok(Some(Value::Float(value.powf(*exponent as f64))))
+                    }
+                    (Value::Float(value), Value::Float(exponent)) => {
+                        Ok(Some(Value::Float(value.powf(*exponent))))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            "floor" | "ceil" | "round" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("{method} expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                let Value::Float(value) = receiver else {
+                    return Ok(None);
+                };
+                let value = match method {
+                    "floor" => value.floor(),
+                    "ceil" => value.ceil(),
+                    "round" => value.round(),
+                    _ => unreachable!(),
+                };
+                Ok(Some(Value::Float(value)))
+            }
+            "toInt" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("toInt expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                match receiver {
+                    Value::Float(value) => Ok(Some(Value::Int(value as i64))),
+                    _ => Ok(None),
+                }
+            }
+            "toFloat" => {
+                if !args.is_empty() {
+                    return Err(self.runtime_error(
+                        span,
+                        format!("toFloat expects 0 arguments, got {}", args.len()),
+                    ));
+                }
+                match receiver {
+                    Value::Int(value) => Ok(Some(Value::Float(value as f64))),
+                    _ => Ok(None),
+                }
+            }
             _ => Ok(None),
         }
     }
@@ -9431,15 +9523,20 @@ mod tests {
                 contextual Box[Str] = new("world")
 
                 println(set.isEmpty, set.nonEmpty)
+                println(map.isEmpty, map.nonEmpty)
                 set.add("Ada")
-                println(set.isEmpty, set.nonEmpty, set.size, map.size, inferred.value, contextual.value)
+                map["one"] := 1
+                println(set.isEmpty, set.nonEmpty, set.size, map.isEmpty, map.nonEmpty, map.size, inferred.value, contextual.value)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "true false\nfalse true 1 0 hello world\n");
+        assert_eq!(
+            run.output,
+            "true false\ntrue false\nfalse true 1 false true 1 hello world\n"
+        );
     }
 
     #[test]
@@ -10039,7 +10136,7 @@ mod tests {
                 OS.println("some", some ?? 0)
                 OS.println("none", none.isEmpty)
                 OS.println("ok", ok ?? 0)
-                OS.println("err", err.getError())
+                OS.println("err", err.expectErr())
             }
             "#,
         );
@@ -10103,7 +10200,7 @@ $name
     #[test]
     fn runs_string_rune_access_methods() {
         let program = lower_inline(
-            r#"
+            r##"
             def main() Unit {
                 word Str = "apple"
                 first Rune = word.runeAt(0)!
@@ -10115,13 +10212,28 @@ $name
                 OS.println(missing.isEmpty)
                 OS.println("😀a".size)
                 OS.println("😀a".runeAt(1)!)
+                text Str = "a😀bc"
+                OS.println(text[:])
+                OS.println(text[:2])
+                OS.println(text[1:3])
+                OS.println(text[2:])
+                OS.println(text.slice(1, 3))
+                OS.println(text.startsWith("a😀"))
+                OS.println(text.endsWith("bc"))
+                OS.println(text.startsWith("😀"))
+                OS.println(text.endsWith("b"))
+                OS.println("a.b.a".replaceFirst(".", "#"))
+                OS.println("a.b.a".replaceAll(".", "#"))
             }
-            "#,
+            "##,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "a\np\ntrue\n2\na\n");
+        assert_eq!(
+            run.output,
+            "a\np\ntrue\n2\na\na😀bc\na😀\n😀b\nbc\n😀b\ntrue\ntrue\nfalse\nfalse\na#b.a\na#b#a\n"
+        );
     }
 
     #[test]
@@ -10156,6 +10268,33 @@ $name
             run.output,
             "base 2 1\ngrown 5 5 true\nempty -1\nseen 2 false\nmore 4 true\n"
         );
+    }
+
+    #[test]
+    fn collection_flat_map_accepts_any_iterable_result() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                vector [Int] = [1, 2].flatMap(value => Some(value))
+                setSource Set[Int] = Set()
+                setSource.add(1)
+                setSource.add(2)
+                set Set[Int] = setSource.flatMap(value => [value, value + 10])
+                map [Str: Int] = ["one": 1, "two": 2]
+                mapped [Int] = map.flatMap((key, value) => Some(value))
+                linked LinkedList[Int] = LinkedList(1, 2).flatMap(value => [value, value + 10])
+
+                println(vector.makeStr(","))
+                println(set.makeStr(","))
+                println(mapped.makeStr(","))
+                println(linked.makeStr(","))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "1,2\n1,11,2,12\n1,2\n1,11,2,12\n");
     }
 
     #[test]
@@ -10709,6 +10848,18 @@ def main() Unit {
     println(whole.sqrt() == 3.0)
     println(fraction.sqrt() == 1.5)
     println(one.log() == 0.0)
+    println((-9).abs() == 9)
+    println((-2.25).abs() == 2.25)
+    println(3.pow(4) == 81)
+    println(2.0.pow(3) == 8.0)
+    println(9.0.pow(0.5) == 3.0)
+    println(2.75.floor() == 2.0)
+    println(2.25.ceil() == 3.0)
+    println(2.5.round() == 3.0)
+    println((-2.5).round() == -3.0)
+    println(whole.toFloat() == 9.0)
+    println(fraction.toInt() == 2)
+    println((-2.25).toInt() == -2)
     println(OS.env.size >= 0)
 }
 "#,
@@ -10717,7 +10868,10 @@ def main() Unit {
 
         let run = run_path(&source, None).expect("run source");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "true\ntrue\ntrue\ntrue\n");
+        assert_eq!(
+            run.output,
+            "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+        );
         let _ = fs::remove_dir_all(&temp);
     }
 

@@ -9084,14 +9084,18 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. }
-                if matches!(name.as_str(), "contains" | "indexOf")
-                    && args.len() == 1
+                if matches!(
+                    name.as_str(),
+                    "contains" | "startsWith" | "endsWith" | "indexOf"
+                ) && args.len() == 1
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
-                let helper = if name == "contains" {
-                    "stringContains"
-                } else {
-                    "stringIndexOf"
+                let helper = match name.as_str() {
+                    "contains" => "stringContains",
+                    "startsWith" => "stringStartsWith",
+                    "endsWith" => "stringEndsWith",
+                    "indexOf" => "stringIndexOf",
+                    _ => unreachable!(),
                 };
                 Some(format!(
                     "lume.core.LumeRuntime.{helper}({}, {})",
@@ -9100,14 +9104,18 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. }
-                if matches!(name.as_str(), "replaceFirstRegex" | "replaceAllRegex")
-                    && args.len() == 2
+                if matches!(
+                    name.as_str(),
+                    "replaceFirst" | "replaceAll" | "replaceFirstRegex" | "replaceAllRegex"
+                ) && args.len() == 2
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
-                let helper = if name == "replaceFirstRegex" {
-                    "stringReplaceFirstRegex"
-                } else {
-                    "stringReplaceAllRegex"
+                let helper = match name.as_str() {
+                    "replaceFirst" => "stringReplaceFirst",
+                    "replaceAll" => "stringReplaceAll",
+                    "replaceFirstRegex" => "stringReplaceFirstRegex",
+                    "replaceAllRegex" => "stringReplaceAllRegex",
+                    _ => unreachable!(),
                 };
                 Some(format!(
                     "lume.core.LumeRuntime.{helper}({}, {}, {})",
@@ -9125,6 +9133,25 @@ impl<'a> SourceBodyEmitter<'a> {
                     "lume.core.LumeRuntime.stringRuneAt({}, {})",
                     self.emit_receiver_expr(receiver, bindings)?,
                     self.emit_call_arg(&args[0], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
+                if name == "slice"
+                    && args.len() <= 2
+                    && self.is_java_string_receiver(receiver, bindings) =>
+            {
+                let receiver = self.emit_receiver_expr(receiver, bindings)?;
+                let args = args
+                    .iter()
+                    .map(|arg| self.emit_call_arg(arg, bindings))
+                    .collect::<Option<Vec<_>>>()?;
+                let suffix = if args.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {}", args.join(", "))
+                };
+                Some(format!(
+                    "lume.core.LumeRuntime.stringSlice({receiver}{suffix})"
                 ))
             }
             core::Expr::Member { receiver, name, .. }
@@ -12382,10 +12409,12 @@ fn builtin_method_param_types(
 ) -> Option<Vec<ir::Type>> {
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
-            ("split" | "splitRegex" | "contains" | "indexOf" | "compareTo", 1) => {
-                Some(vec![ir::Type::Str])
-            }
-            ("replaceFirstRegex" | "replaceAllRegex", 2) => {
+            (
+                "split" | "splitRegex" | "contains" | "startsWith" | "endsWith" | "indexOf"
+                | "compareTo",
+                1,
+            ) => Some(vec![ir::Type::Str]),
+            ("replaceFirst" | "replaceAll" | "replaceFirstRegex" | "replaceAllRegex", 2) => {
                 Some(vec![ir::Type::Str, ir::Type::Str])
             }
             (
@@ -12394,6 +12423,9 @@ fn builtin_method_param_types(
                 0,
             ) => Some(Vec::new()),
             ("runeAt", 1) => Some(vec![ir::Type::Int]),
+            ("slice", 0) => Some(Vec::new()),
+            ("slice", 1) => Some(vec![ir::Type::Int]),
+            ("slice", 2) => Some(vec![ir::Type::Int, ir::Type::Int]),
             _ => None,
         };
     }
@@ -12404,16 +12436,21 @@ fn builtin_method_param_types(
         {
             match (method, arg_len) {
                 ("add", 1) => Some(vec![args[0].clone()]),
-                ("addAll", 1) => Some(vec![receiver.clone()]),
+                // Lume's Iterable is broader than java.lang.Iterable (for example Option).
+                // The checker has already validated the element type, so let the runtime
+                // adapter consume the erased source through LumeIterator.
+                ("addAll", 1) => Some(vec![ir::Type::Unknown]),
                 ("contains" | "indexOf", 1) => Some(vec![args[0].clone()]),
                 ("map", 1) => Some(vec![ir::Type::Function {
                     params: vec![args[0].clone()],
                     ret: Box::new(ir::Type::Unknown),
                 }]),
-                ("flatMap", 1) if name == "Vector" => Some(vec![ir::Type::Function {
-                    params: vec![args[0].clone()],
-                    ret: Box::new(ir::Type::Unknown),
-                }]),
+                ("flatMap", 1) if matches!(name.as_str(), "Vector" | "LinkedList" | "Set") => {
+                    Some(vec![ir::Type::Function {
+                        params: vec![args[0].clone()],
+                        ret: Box::new(ir::Type::Unknown),
+                    }])
+                }
                 ("flatten", 0) if name == "Vector" => Some(Vec::new()),
                 ("filter", 1) => Some(vec![ir::Type::Function {
                     params: vec![args[0].clone()],
@@ -12451,8 +12488,13 @@ fn builtin_method_param_types(
         }
         ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
             match (method, arg_len) {
+                ("isEmpty" | "nonEmpty", 0) => Some(Vec::new()),
                 ("get" | "remove" | "contains", 1) => Some(vec![args[0].clone()]),
                 ("put", 2) => Some(vec![args[0].clone(), args[1].clone()]),
+                ("flatMap", 1) => Some(vec![ir::Type::Function {
+                    params: vec![args[0].clone(), args[1].clone()],
+                    ret: Box::new(ir::Type::Unknown),
+                }]),
                 _ => None,
             }
         }
@@ -12469,11 +12511,16 @@ fn builtin_method_return_type(
         return match (method, arg_len) {
             ("split" | "splitRegex", 1) => Some(ir::Type::list(ir::Type::Str)),
             ("trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper", 0) => Some(ir::Type::Str),
-            ("replaceFirstRegex" | "replaceAllRegex", 2) => Some(ir::Type::Str),
-            ("isEmpty" | "nonEmpty", 0) | ("contains", 1) => Some(ir::Type::Bool),
+            ("replaceFirst" | "replaceAll" | "replaceFirstRegex" | "replaceAllRegex", 2) => {
+                Some(ir::Type::Str)
+            }
+            ("isEmpty" | "nonEmpty", 0) | ("contains" | "startsWith" | "endsWith", 1) => {
+                Some(ir::Type::Bool)
+            }
             ("size", 0) | ("compareTo", 1) => Some(ir::Type::Int),
             ("indexOf", 1) => Some(ir::Type::option(ir::Type::Int)),
             ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
+            ("slice", 0..=2) => Some(ir::Type::Str),
             _ => None,
         };
     }
@@ -12549,6 +12596,22 @@ fn builtin_method_return_type(
             }
         }
         ir::Type::Named { name, args }
+            if name == "LinkedList" && args.len() == 1 && method == "flatMap" && arg_len == 1 =>
+        {
+            Some(ir::Type::Named {
+                name: "LinkedList".to_string(),
+                args: vec![ir::Type::Unknown],
+            })
+        }
+        ir::Type::Named { name, args }
+            if name == "Set" && args.len() == 1 && method == "flatMap" && arg_len == 1 =>
+        {
+            Some(ir::Type::Named {
+                name: "Set".to_string(),
+                args: vec![ir::Type::Unknown],
+            })
+        }
+        ir::Type::Named { name, args }
             if matches!(name.as_str(), "Vector" | "LinkedList")
                 && args.len() == 1
                 && method == "zipWithIndex"
@@ -12566,7 +12629,9 @@ fn builtin_method_return_type(
                     args: vec![args[1].clone()],
                 }),
                 ("put", 2) => Some(receiver.clone()),
+                ("flatMap", 1) => Some(ir::Type::list(ir::Type::Unknown)),
                 ("contains", 1) => Some(ir::Type::Bool),
+                ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
                 ("size", 0) => Some(ir::Type::Int),
                 ("entries", 0) => Some(ir::Type::list(ir::Type::Tuple(vec![
                     args[0].clone(),
@@ -12703,6 +12768,24 @@ fn format_java_intrinsic_member_call(
     }
     if args.is_empty() && method == "log" && is_float {
         return Some(format!("lume.core.LumeRuntime.log({receiver})"));
+    }
+    if args.is_empty() && method == "abs" && (is_int || is_float) {
+        return Some(format!("lume.core.LumeRuntime.abs({receiver})"));
+    }
+    if args.len() == 1 && method == "pow" && (is_int || is_float) {
+        return Some(format!(
+            "lume.core.LumeRuntime.pow({receiver}, {})",
+            args[0]
+        ));
+    }
+    if args.is_empty() && matches!(method, "floor" | "ceil" | "round") && is_float {
+        return Some(format!("lume.core.LumeRuntime.{method}({receiver})"));
+    }
+    if args.is_empty() && method == "toInt" && is_float {
+        return Some(format!("lume.core.LumeRuntime.toInt({receiver})"));
+    }
+    if args.is_empty() && method == "toFloat" && is_int {
+        return Some(format!("lume.core.LumeRuntime.toFloat({receiver})"));
     }
     if method != "compareTo" {
         return None;
@@ -13330,7 +13413,7 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
         | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
         ("Vector" | "LinkedList" | "Array", "first" | "last") => Some(ir::Type::option(item)),
         ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
-        ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Vector" | "LinkedList" | "Set" | "Map", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Type", "name" | "qualifiedName")
         | (
             "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"

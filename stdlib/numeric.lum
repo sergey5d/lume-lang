@@ -3,12 +3,26 @@
 # INTERPRETER
 
 interface Int with Comparable[Int] {
+    # Intrinsic static API: Int.parse(value)
+    def parse(value Str) Option[Int]
     def compareTo(other Int) Int
+    def abs() Int
+    def pow(exponent Int) Int
     def sqrt() Float
+    def toFloat() Float
 }
 
 interface Float with Comparable[Float] {
+    # Intrinsic static API: Float.parse(value)
+    def parse(value Str) Option[Float]
     def compareTo(other Float) Int
+    def abs() Float
+    def pow(exponent Int) Float
+    def pow(exponent Float) Float
+    def floor() Float
+    def ceil() Float
+    def round() Float
     def sqrt() Float
     def log() Float
+    def toInt() Int
 }
