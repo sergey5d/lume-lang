@@ -1174,10 +1174,6 @@ fn is_builtin_primitive_type_name(name: &str) -> bool {
     matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str")
 }
 
-fn is_intrinsic_static_primitive_method(type_name: &str, method_name: &str) -> bool {
-    matches!((type_name, method_name), ("Int" | "Float", "parse"))
-}
-
 fn primitive_implementation_diagnostic(name: &str, span: crate::source::Span) -> Diagnostic {
     Diagnostic::error(
         "invalid_primitive_implementation",
@@ -7143,46 +7139,6 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Ty::Unknown);
                 Some(Ty::Named(collection.to_string(), vec![item_ty]))
             }
-            ("Int", "parse") => {
-                if args.len() != 1 {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!("Int.parse expects 1 argument, got {}", args.len()),
-                        span,
-                    );
-                }
-                if let Some(arg) = args.first() {
-                    let ty = self.check_expr(&arg.value);
-                    self.require_assignable(
-                        &ty,
-                        &Ty::str(),
-                        arg.span,
-                        "invalid_argument_type",
-                        format!("Int.parse expects Str argument, got '{}'", ty.describe()),
-                    );
-                }
-                Some(Ty::option(Ty::int()))
-            }
-            ("Float", "parse") => {
-                if args.len() != 1 {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!("Float.parse expects 1 argument, got {}", args.len()),
-                        span,
-                    );
-                }
-                if let Some(arg) = args.first() {
-                    let ty = self.check_expr(&arg.value);
-                    self.require_assignable(
-                        &ty,
-                        &Ty::str(),
-                        arg.span,
-                        "invalid_argument_type",
-                        format!("Float.parse expects Str argument, got '{}'", ty.describe()),
-                    );
-                }
-                Some(Ty::option(Ty::float()))
-            }
             ("Option", "when") => {
                 if args.len() != 2 {
                     self.add_error(
@@ -10930,9 +10886,6 @@ impl<'a> Checker<'a> {
         }
         match receiver {
             Ty::Named(type_name, args) => {
-                if is_intrinsic_static_primitive_method(type_name, name) {
-                    return universal_member_type(name);
-                }
                 if let Some((owner_name, case_name)) = enum_case_view_parts(type_name) {
                     let owner = self.lookup_any_type(owner_name)?;
                     let subst = owner
@@ -11045,9 +10998,6 @@ impl<'a> Checker<'a> {
         }
         match receiver {
             Ty::Named(type_name, args) => {
-                if is_intrinsic_static_primitive_method(type_name, name) {
-                    return universal_method_sigs(name);
-                }
                 let Some(sig) = self.lookup_any_type(type_name) else {
                     let extension_methods =
                         self.extension_method_sigs_for_named_type(type_name, args, name);
@@ -17890,6 +17840,45 @@ def main() Unit {
 def main() Unit {
     whole Option[Int] = Int.parse("7")
     decimal Option[Float] = Float.parse("1.2")
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn numeric_static_api_is_declared_on_same_named_objects() {
+        let ambient = default_inline_ambient();
+        for name in ["Int", "Float"] {
+            let primitive = ambient
+                .types
+                .get(name)
+                .unwrap_or_else(|| panic!("missing primitive interface {name}"));
+            assert!(
+                !primitive.methods.contains_key("parse"),
+                "{name}.parse must not be an instance method"
+            );
+
+            let static_object = ambient
+                .objects
+                .get(name)
+                .unwrap_or_else(|| panic!("missing same-named object {name}"));
+            assert!(static_object.methods.contains_key("parse"));
+            assert!(static_object.methods.contains_key("MIN"));
+            assert!(static_object.methods.contains_key("MAX"));
+        }
+    }
+
+    #[test]
+    fn allows_intrinsic_numeric_limit_members() {
+        let program = parse_inline(
+            r#"
+def main() Unit {
+    smallestInt Int = Int.MIN
+    largestInt Int = Int.MAX
+    mostNegativeFloat Float = Float.MIN
+    largestFloat Float = Float.MAX
 }
 "#,
         );

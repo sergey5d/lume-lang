@@ -2220,6 +2220,10 @@ impl<'a> Parser<'a> {
                     .parse_expression_brace_body()
                     .map(ExpressionBraceBody::into_expr)
             }),
+            TokenKind::Keyword(Keyword::Do) => {
+                self.diagnose_reserved_do();
+                None
+            }
             _ => {
                 self.error_at_current("expected_expression", "expected expression");
                 None

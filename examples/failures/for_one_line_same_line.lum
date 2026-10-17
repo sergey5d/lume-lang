@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# for requires a '\{ \.\.\. \}' block body; one-line for forms are not supported
+# expected 'do' or a '\{ \.\.\. \}' block after for header
 
 def main() Int {
     values [Int] = [1, 2, 3]

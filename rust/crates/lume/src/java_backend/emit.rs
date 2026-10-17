@@ -2240,6 +2240,13 @@ impl<'a> SourceBodyEmitter<'a> {
                             binding_types.insert(binding.name.clone(), local_ty);
                             continue;
                         }
+                        if self.emit_control_flow_extract_or_binding(
+                            out, value, &java_name, &local_ty, indent, bindings, loop_depth,
+                        )? {
+                            bindings.insert(binding.name.clone(), java_name);
+                            binding_types.insert(binding.name.clone(), local_ty);
+                            continue;
+                        }
                         out.push_str(indent);
                         out.push_str(&self.names.value_type(&local_ty));
                         out.push(' ');
@@ -2861,6 +2868,96 @@ impl<'a> SourceBodyEmitter<'a> {
         )?;
         out.push_str(indent);
         out.push_str("}\n");
+        Some(true)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_control_flow_extract_or_binding(
+        &self,
+        out: &mut String,
+        value: &core::Expr,
+        java_name: &str,
+        target_ty: &ir::Type,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        loop_depth: usize,
+    ) -> Option<bool> {
+        let core::Expr::ExtractOr {
+            value: wrapped,
+            fallback,
+            span,
+        } = value
+        else {
+            return Some(false);
+        };
+        if !matches!(
+            fallback.as_ref(),
+            core::Expr::Return { .. } | core::Expr::Break { .. } | core::Expr::Continue { .. }
+        ) {
+            return Some(false);
+        }
+
+        let wrapped_ty = self.expr_type(wrapped, bindings)?;
+        let (case_type, accessor) = match &wrapped_ty {
+            ir::Type::Named { name, .. } if name == "Option" => {
+                ("lume.core.Option.Some<?>".to_string(), "value")
+            }
+            ir::Type::Named { name, .. } if name == "Result" => {
+                ("lume.core.Result.Ok<?, ?>".to_string(), "value")
+            }
+            ir::Type::Named { name, .. } if name == "Either" => {
+                ("lume.core.Either.Right<?, ?>".to_string(), "value")
+            }
+            _ => return None,
+        };
+        let source = self.synthetic_name("extractOrSource", "extractOrSource", span.start);
+        out.push_str(indent);
+        out.push_str("var ");
+        out.push_str(&source);
+        out.push_str(" = ");
+        out.push_str(&self.emit_expr(wrapped, bindings)?);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str("if (!(");
+        out.push_str(&source);
+        out.push_str(" instanceof ");
+        out.push_str(&case_type);
+        out.push_str(")) {\n");
+        out.push_str(indent);
+        out.push_str("    ");
+        match fallback.as_ref() {
+            core::Expr::Return { value, .. } => {
+                out.push_str("return");
+                if let Some(value) = value {
+                    out.push(' ');
+                    out.push_str(&self.emit_expr_against(
+                        value,
+                        bindings,
+                        &self.function.return_ty,
+                    )?);
+                }
+                out.push_str(";\n");
+            }
+            core::Expr::Break { .. } if loop_depth > 0 => out.push_str("break;\n"),
+            core::Expr::Continue { .. } if loop_depth > 0 => out.push_str("continue;\n"),
+            core::Expr::Break { .. } | core::Expr::Continue { .. } => return None,
+            _ => unreachable!(),
+        }
+        out.push_str(indent);
+        out.push_str("}\n");
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(target_ty));
+        out.push(' ');
+        out.push_str(java_name);
+        out.push_str(" = (");
+        out.push_str(&self.names.value_type(target_ty));
+        out.push_str(") ((");
+        out.push_str(&case_type);
+        out.push_str(") ");
+        out.push_str(&source);
+        out.push_str(").");
+        out.push_str(accessor);
+        out.push_str("();\n");
         Some(true)
     }
 
@@ -3984,7 +4081,7 @@ impl<'a> SourceBodyEmitter<'a> {
         used_locals: &mut HashSet<ir::LocalId>,
         loop_depth: usize,
     ) -> Option<()> {
-        let [generator] = statement.bindings.as_slice() else {
+        let Some((generator, remaining_generators)) = statement.bindings.split_first() else {
             return None;
         };
         if !generator.values.is_empty() {
@@ -4013,7 +4110,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     .map(|local| local.ty.clone())
             })?;
         let iterable = self.emit_expr(iterable_source, bindings)?;
-        let iterator = self.synthetic_name("iterator", "iterator", statement.span.start);
+        let iterator = self.synthetic_name("iterator", "iterator", generator.span.start);
 
         out.push_str(indent);
         out.push_str("lume.core.LumeIterator<?> ");
@@ -4123,16 +4220,34 @@ impl<'a> SourceBodyEmitter<'a> {
             owner: self.owner,
             synthetic_names: Rc::clone(&self.synthetic_names),
         };
-        body_emitter.emit_statement_block(
-            out,
-            &statement.body,
-            &format!("{indent}    "),
-            &mut body_bindings,
-            &mut body_types,
-            used_locals,
-            false,
-            loop_depth + 1,
-        )?;
+        let nested_indent = format!("{indent}    ");
+        if remaining_generators.is_empty() {
+            body_emitter.emit_statement_block(
+                out,
+                &statement.body,
+                &nested_indent,
+                &mut body_bindings,
+                &mut body_types,
+                used_locals,
+                false,
+                loop_depth + 1,
+            )?;
+        } else {
+            let nested = core::ForStmt {
+                bindings: remaining_generators.to_vec(),
+                body: statement.body.clone(),
+                span: statement.span,
+            };
+            body_emitter.emit_for_statement(
+                out,
+                &nested,
+                &nested_indent,
+                &body_bindings,
+                &body_types,
+                used_locals,
+                loop_depth + 1,
+            )?;
+        }
         out.push_str(indent);
         out.push_str("}\n");
         Some(())
@@ -6045,6 +6160,9 @@ impl<'a> SourceBodyEmitter<'a> {
     }
 
     fn emit_expr(&self, expr: &core::Expr, bindings: &HashMap<String, String>) -> Option<String> {
+        if let Some(limit) = java_numeric_limit(expr) {
+            return Some(limit.to_string());
+        }
         match expr {
             core::Expr::Identifier { name, .. } if name == "this" => Some("this".to_string()),
             core::Expr::Identifier { name, .. } if self.enum_case(name).is_some() => {
@@ -10109,6 +10227,9 @@ impl<'a> SourceBodyEmitter<'a> {
     }
 
     fn expr_type(&self, expr: &core::Expr, bindings: &HashMap<String, String>) -> Option<ir::Type> {
+        if let Some(ty) = java_numeric_limit_type(expr) {
+            return Some(ty);
+        }
         if matches!(expr, core::Expr::Identifier { name, .. } if name == "this") {
             return self.owner.map(|owner| ir::Type::Named {
                 name: owner.name.clone(),
@@ -13221,6 +13342,42 @@ fn java_constant(constant: &ir::Constant) -> String {
                 .join(", ");
             format!("lume.core.LumeVector.of({items})")
         }
+    }
+}
+
+fn java_numeric_limit(expr: &core::Expr) -> Option<&'static str> {
+    let core::Expr::Member { receiver, name, .. } = expr else {
+        return None;
+    };
+    let core::Expr::Identifier {
+        name: type_name, ..
+    } = receiver.as_ref()
+    else {
+        return None;
+    };
+    match (type_name.as_str(), name.as_str()) {
+        ("Int", "MIN") => Some("Long.MIN_VALUE"),
+        ("Int", "MAX") => Some("Long.MAX_VALUE"),
+        ("Float", "MIN") => Some("-Double.MAX_VALUE"),
+        ("Float", "MAX") => Some("Double.MAX_VALUE"),
+        _ => None,
+    }
+}
+
+fn java_numeric_limit_type(expr: &core::Expr) -> Option<ir::Type> {
+    let core::Expr::Member { receiver, name, .. } = expr else {
+        return None;
+    };
+    let core::Expr::Identifier {
+        name: type_name, ..
+    } = receiver.as_ref()
+    else {
+        return None;
+    };
+    match (type_name.as_str(), name.as_str()) {
+        ("Int", "MIN" | "MAX") => Some(ir::Type::Int),
+        ("Float", "MIN" | "MAX") => Some(ir::Type::Float),
+        _ => None,
     }
 }
 

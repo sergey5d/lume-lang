@@ -85,7 +85,9 @@ impl<'a> Parser<'a> {
             self.advance();
             Some((token.lexeme, token.span))
         } else {
-            self.error_at_current("expected_identifier", message);
+            if !self.diagnose_reserved_do() {
+                self.error_at_current("expected_identifier", message);
+            }
             None
         }
     }
@@ -103,7 +105,9 @@ impl<'a> Parser<'a> {
             self.advance();
             Some((token.lexeme, token.span))
         } else {
-            self.error_at_current("expected_identifier", message);
+            if !self.diagnose_reserved_do() {
+                self.error_at_current("expected_identifier", message);
+            }
             None
         }
     }
@@ -134,12 +138,22 @@ impl<'a> Parser<'a> {
             TokenKind::Percent => "%",
             TokenKind::Caret => "^",
             _ => {
-                self.error_at_current("expected_identifier", message);
+                if !self.diagnose_reserved_do() {
+                    self.error_at_current("expected_identifier", message);
+                }
                 return None;
             }
         };
         self.advance();
         Some((name.to_string(), token.span))
+    }
+
+    pub(super) fn diagnose_reserved_do(&mut self) -> bool {
+        if !self.at_keyword(Keyword::Do) {
+            return false;
+        }
+        self.error_at_current("reserved_keyword", "do is a keyword");
+        true
     }
 
     pub(super) fn starts_callable_decl(&self) -> bool {
@@ -677,6 +691,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Reified) => "REIFIED",
             TokenKind::Keyword(Keyword::Fn) => "FN",
             TokenKind::Keyword(Keyword::For) => "FOR",
+            TokenKind::Keyword(Keyword::Do) => "DO",
             TokenKind::Keyword(Keyword::Yield) => "YIELD",
             TokenKind::Keyword(Keyword::Continue) => "CONTINUE",
             TokenKind::Keyword(Keyword::Annotation) => "ANNOTATION",

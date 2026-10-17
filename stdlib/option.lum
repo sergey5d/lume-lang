@@ -8,38 +8,38 @@ type Option[T] with Iterable[T] =
 ext Option[T] {
     get isSet Bool = match this {
         case Some { value: _ } => true
-        case Option.None => false
+        case None => false
     }
 
     get isEmpty Bool = !this.isSet
 
     def orElse(fallback => Option[T]) Option[T] = match this {
         case Some { value } => Some(value)
-        case Option.None => fallback
+        case None => fallback
     }
 
     def toResult[E](error => E) Result[T, E] = match this {
         case Some { value } => Ok(value)
-        case Option.None => Err(error)
+        case None => Err(error)
     }
 
     def toEither[L](left => L) Either[L, T] = match this {
         case Some { value } => Right(value)
-        case Option.None => Left(left)
+        case None => Left(left)
     }
 
     def map[X](f fn(T) X) Option[X] = match this {
         case Some { value } => Some(f(value))
-        case Option.None => None
+        case None => None
     }
 
     def flatMap[X](f fn(T) Option[X]) Option[X] = match this {
         case Some { value } => f(value)
-        case Option.None => None
+        case None => None
     }
 
     def iterator() Iterator[T] = match this {
         case Some { value } => [value].iterator()
-        case Option.None => Vector[T]().iterator()
+        case None => Vector[T]().iterator()
     }
 }

@@ -1,0 +1,32 @@
+# EXPECT:
+# single 1
+# single 2
+# positive 2
+# block 3
+# grouped 11
+# grouped 21
+# grouped 12
+# grouped 22
+# shorthand 4
+
+def main() Unit {
+    for item <- [1, 2] do println("single", item)
+
+    for item <- [-1, 2] do
+        if item > 0 {
+            println("positive", item)
+        }
+
+    for item <- [3] do {
+        println("block", item)
+    }
+
+    for {
+        left <- [1, 2]
+        right <- [10, 20]
+    } do println("grouped", left + right)
+
+    for item <- [4] {
+        println("shorthand", item)
+    }
+}

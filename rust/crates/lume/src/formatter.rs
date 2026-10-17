@@ -60,6 +60,7 @@ struct OpenDelimiter {
     kind: DelimiterKind,
     opened_line: usize,
     suspended_by_brace_depth: Option<usize>,
+    carries_continuation: bool,
 }
 
 fn format_valid_source(source: &str, tokens: &[Token]) -> String {
@@ -145,12 +146,22 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
         });
         let continuation = has_active_delimiter
             || (!starts_with_closer && (continuation_pending || starts_continuation));
+        let carries_delimiter_continuation = delimiters.iter().any(|delimiter| {
+            delimiter.carries_continuation
+                && delimiter
+                    .suspended_by_brace_depth
+                    .is_none_or(|depth| brace_depth < depth)
+        });
 
         let carried_continuations = brace_continuations
             .iter()
             .filter(|carried| **carried)
             .count();
-        for _ in 0..line_brace_depth + carried_continuations + usize::from(continuation) {
+        for _ in 0..line_brace_depth
+            + carried_continuations
+            + usize::from(carries_delimiter_continuation)
+            + usize::from(continuation)
+        {
             output.push_str(INDENT);
         }
         output.push_str(&body);
@@ -366,12 +377,14 @@ fn update_nesting(
                 kind: DelimiterKind::Parenthesis,
                 opened_line: line,
                 suspended_by_brace_depth: None,
+                carries_continuation: carry_continuation,
             }),
             TokenKind::RParen => pop_delimiter(delimiters, DelimiterKind::Parenthesis),
             TokenKind::LBracket => delimiters.push(OpenDelimiter {
                 kind: DelimiterKind::Bracket,
                 opened_line: line,
                 suspended_by_brace_depth: None,
+                carries_continuation: carry_continuation,
             }),
             TokenKind::RBracket => pop_delimiter(delimiters, DelimiterKind::Bracket),
             _ => {}
@@ -409,6 +422,13 @@ fn line_requests_continuation(tokens: &[&Token]) -> bool {
     let Some(last) = tokens.last() else {
         return false;
     };
+    if tokens
+        .first()
+        .is_some_and(|token| token.kind == TokenKind::Keyword(crate::Keyword::Use))
+        && last.kind == TokenKind::Star
+    {
+        return false;
+    }
     ends_with_continuation(last.kind) && !ends_with_braced_lambda_head(tokens)
 }
 
@@ -464,6 +484,7 @@ fn ends_with_continuation(kind: TokenKind) -> bool {
             | TokenKind::OrOr
             | TokenKind::Pipe
             | TokenKind::Keyword(crate::Keyword::As)
+            | TokenKind::Keyword(crate::Keyword::Do)
             | TokenKind::Keyword(crate::Keyword::Else)
             | TokenKind::Keyword(crate::Keyword::Is)
             | TokenKind::Keyword(crate::Keyword::When)
@@ -583,6 +604,42 @@ mod tests {
         assert_eq!(
             result.text,
             "def readString(path Str) Result[Str, Str] =\n    File.readText(path).mapError { err =>\n        fileErrorMessage(err)\n    }\n"
+        );
+    }
+
+    #[test]
+    fn formats_import_wildcards_multiline_calls_and_grouped_for() {
+        let result = format(
+            "use Models/*\nuse runtime/EventRuntime\n\nprivate def category(value Str?) Bool =\nEventRuntime.containsRegex(\nvalue ?? \"\",\nraw\"(?i)crypto\"\n)\n\ndef pairs(left [Int], right [Int]) Unit {\nfor {\nitem <- left\nother <- right\n} do {\nprintln(item, other)\n}\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "use Models/*\nuse runtime/EventRuntime\n\nprivate def category(value Str?) Bool =\n    EventRuntime.containsRegex(\n        value ?? \"\",\n        raw\"(?i)crypto\"\n    )\n\ndef pairs(left [Int], right [Int]) Unit {\n    for {\n        item <- left\n        other <- right\n    } do {\n        println(item, other)\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn formats_single_statement_grouped_for_body_without_extending_its_scope() {
+        let result = format(
+            "def pairs(left [Int], right [Int]) Unit {\nfor {\nsource <- left\ntarget <- right\n} do\nif source != target {\nprintln(source, target)\n}\nprintln(\"done\")\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def pairs(left [Int], right [Int]) Unit {\n    for {\n        source <- left\n        target <- right\n    } do\n        if source != target {\n            println(source, target)\n        }\n    println(\"done\")\n}\n"
+        );
+    }
+
+    #[test]
+    fn formats_single_generator_do_bodies() {
+        let result = format(
+            "def visit(values [Int]) Unit {\nfor value <- values do\nprintln(value)\nfor value <- values do {\nprintln(value)\n}\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def visit(values [Int]) Unit {\n    for value <- values do\n        println(value)\n    for value <- values do {\n        println(value)\n    }\n}\n"
         );
     }
 

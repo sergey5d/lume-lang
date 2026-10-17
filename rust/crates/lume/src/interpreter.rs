@@ -10022,6 +10022,28 @@ mod tests {
     }
 
     #[test]
+    fn runs_grouped_imperative_for_generators() {
+        let program = lower_inline(
+            r#"
+            def main() Int {
+                var total Int = 0
+                for {
+                    left <- [1, 2]
+                    right <- [10, 20]
+                } do if left < right {
+                    total += left + right
+                }
+                total
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("66"));
+    }
+
+    #[test]
     fn evaluates_or_pattern_guard_once_per_written_case() {
         let program = lower_inline(
             r#"
@@ -10873,6 +10895,28 @@ def main() Unit {
             "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
         );
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn runs_intrinsic_numeric_limit_members() {
+        let program = lower_inline(
+            r#"
+            def main() Unit {
+                println(Int.MIN)
+                println(Int.MAX)
+                println(Float.MIN < 0.0)
+                println(Float.MAX > 0.0)
+                println(Float.MIN == -Float.MAX)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(
+            run.output,
+            "-9223372036854775808\n9223372036854775807\ntrue\ntrue\ntrue\n"
+        );
     }
 
     #[test]

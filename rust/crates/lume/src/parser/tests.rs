@@ -224,6 +224,146 @@ def run(limit Int) Int {
 }
 
 #[test]
+fn parses_grouped_imperative_for_generators() {
+    let result = parse(
+        r#"
+def run(leftValues [Int], rightValues [Int]) Int {
+    var total Int = 0
+    for {
+        left <- leftValues
+        right <- rightValues
+    } do {
+        total += left + right
+    }
+    total
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block body");
+    };
+    let Stmt::For(loop_stmt) = &block.statements[1] else {
+        panic!("expected grouped for statement");
+    };
+    assert_eq!(loop_stmt.bindings.len(), 2);
+}
+
+#[test]
+fn rejects_grouped_imperative_for_without_do() {
+    let result = parse(
+        r#"
+def run(values [Int]) Unit {
+    for {
+        value <- values
+    } {
+        println(value)
+    }
+}
+"#,
+    );
+    assert!(
+        result.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "grouped_for_body_required"
+                && diagnostic.message == "expected 'do' or 'yield' after grouped for header"
+        }),
+        "{:#?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn parses_single_generator_do_bodies_and_block_shorthand() {
+    for source in [
+        r#"
+def run(values [Int]) Unit {
+    for value <- values do println(value)
+}
+"#,
+        r#"
+def run(values [Int]) Unit {
+    for value <- values do
+        if value > 0 {
+            println(value)
+        }
+}
+"#,
+        r#"
+def run(values [Int]) Unit {
+    for value <- values do {
+        println(value)
+    }
+}
+"#,
+        r#"
+def run(values [Int]) Unit {
+    for value <- values {
+        println(value)
+    }
+}
+"#,
+    ] {
+        let result = parse(source);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let program = result.program.expect("program");
+        let Item::Function(function) = &program.items[0] else {
+            panic!("expected function");
+        };
+        let CallableBody::Block(block) = &function.body else {
+            panic!("expected function block");
+        };
+        let Stmt::For(loop_stmt) = &block.statements[0] else {
+            panic!("expected for statement");
+        };
+        assert_eq!(loop_stmt.bindings.len(), 1);
+        assert_eq!(loop_stmt.body.statements.len(), 1);
+    }
+}
+
+#[test]
+fn parses_grouped_for_with_single_statement_do_body() {
+    for source in [
+        r#"
+def run(values [Int]) Unit {
+    for {
+        value <- values
+    } do println(value)
+}
+"#,
+        r#"
+def run(values [Int]) Unit {
+    for {
+        value <- values
+    } do
+        if value > 0 {
+            println(value)
+        } else {
+            println(0)
+        }
+}
+"#,
+    ] {
+        let result = parse(source);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let program = result.program.expect("program");
+        let Item::Function(function) = &program.items[0] else {
+            panic!("expected function");
+        };
+        let CallableBody::Block(block) = &function.body else {
+            panic!("expected function block");
+        };
+        let Stmt::For(loop_stmt) = &block.statements[0] else {
+            panic!("expected grouped for");
+        };
+        assert_eq!(loop_stmt.body.statements.len(), 1);
+    }
+}
+
+#[test]
 fn parses_while_let_extraction_condition() {
     let result = parse(
         r#"
@@ -2043,6 +2183,24 @@ def main() Unit {
     assert!(result.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "expected_expression" || diagnostic.code == "unexpected_token"
     }));
+}
+
+#[test]
+fn do_is_reserved_and_reports_a_keyword_diagnostic() {
+    for source in [
+        "def main() Unit {\n    do = 1\n}\n",
+        "def example(do Int) Unit = ()\n",
+        "class Example {\n    do Int\n}\n",
+    ] {
+        let result = parse(source);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "reserved_keyword" && diagnostic.message == "do is a keyword"
+            }),
+            "expected reserved-keyword diagnostic, got {:#?}",
+            result.diagnostics
+        );
+    }
 }
 
 #[test]
@@ -7080,6 +7238,69 @@ class Box {
         getters[1].return_type,
         Some(TypeRef::Named { ref name, ref args, .. }) if name == "Vector" && args.len() == 1
     ));
+}
+
+#[test]
+fn treats_get_as_an_identifier_outside_member_declaration_starts() {
+    let result = parse(
+        r#"
+class Box {
+    def get() Int = 1
+}
+
+def identity(get Int) Int = get
+
+def main() Unit {
+    get = Box()
+    value = get.get()
+    match Some(value) {
+        case Some(get) => println(get)
+        case None => ()
+    }
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+}
+
+#[test]
+fn rejects_get_as_a_field_name_with_a_focused_diagnostic() {
+    let result = parse(
+        r#"
+class ClassField {
+    get Int = 1
+}
+
+interface InterfaceField {
+    get Int
+}
+
+object ObjectField {
+    get Int = 1
+}
+
+class MutableField {
+    var get Int = 1
+}
+
+ext ClassField {
+    get Int = 1
+}
+"#,
+    );
+    let diagnostics = result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "get_field_name")
+        .collect::<Vec<_>>();
+    assert_eq!(result.diagnostics.len(), 5, "{:#?}", result.diagnostics);
+    assert_eq!(diagnostics.len(), 5, "{:#?}", result.diagnostics);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.message
+                == "get starts a getter; a field cannot be named get")
+    );
 }
 
 #[test]

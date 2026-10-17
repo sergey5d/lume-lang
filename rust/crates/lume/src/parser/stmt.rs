@@ -665,32 +665,59 @@ impl<'a> Parser<'a> {
             }
             return None;
         }
-        let binding = if self.match_keyword(Keyword::Let) {
-            self.parse_for_let_generator_head()?
+        let grouped =
+            self.at(TokenKind::LBrace) && !self.is_headless_record_pattern_assignment_start();
+        let bindings = if grouped {
+            self.advance();
+            self.parse_for_binding_block()?
+        } else if self.match_keyword(Keyword::Let) {
+            vec![self.parse_for_let_generator_head()?]
         } else {
             let binding = self.parse_plain_for_generator_binding()?;
             let target_span = binding.span;
             self.consume_for_generator_arrow()?;
             let iterable = self.parse_expr_without_trailing_block_call()?;
-            ForBinding {
+            vec![ForBinding {
                 span: target_span.cover(iterable.span()),
                 bindings: vec![binding],
                 destructure: None,
                 pattern: None,
                 iterable: Some(iterable),
                 values: Vec::new(),
-            }
+            }]
         };
-        if !self.at(TokenKind::LBrace) {
+        self.skip_newlines();
+        let has_do = self.match_keyword(Keyword::Do);
+        if grouped {
+            if !has_do {
+                self.error_at_current(
+                    "grouped_for_body_required",
+                    "expected 'do' or 'yield' after grouped for header",
+                );
+            }
+        }
+        if has_do {
+            self.skip_newlines();
+        }
+        if !grouped && !has_do && !self.at(TokenKind::LBrace) {
             self.error_at_current(
-                "unexpected_token",
-                "for requires a '{ ... }' block body; one-line for forms are not supported",
+                "for_body_required",
+                "expected 'do' or a '{ ... }' block after for header",
             );
             return None;
         }
-        let body = self.parse_block()?;
+        let body = if self.at(TokenKind::LBrace) {
+            self.parse_block()?
+        } else {
+            let statement = self.parse_stmt()?;
+            let span = statement.span();
+            Block {
+                statements: vec![statement],
+                span,
+            }
+        };
         Some(ForStmt {
-            bindings: vec![binding],
+            bindings,
             body: body.clone(),
             span: start.cover(body.span),
         })

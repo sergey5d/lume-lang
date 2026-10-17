@@ -3724,6 +3724,44 @@ def sum(items [Int]) Int {
     }
 
     #[test]
+    fn readable_java_nests_grouped_for_generators() {
+        let temp = temp_path("lume-java-readable-grouped-for-loop");
+        let source = temp.join("grouped_for_loop.lum");
+        let out = temp.join("generated");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/grouped_for_loop
+
+def products(left [Int], right [Int]) [Int] {
+    result [Int] = []
+    for {
+        x <- left
+        y <- right
+    } do result.add(x * y)
+    result
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let module =
+            fs::read_to_string(out.join("demo/grouped_for_loop/Grouped_for_loopModule.java"))
+                .expect("read module Java");
+        assert_eq!(module.matches("LumeIterator<?> __iterator").count(), 2);
+        assert_eq!(module.matches("while (__iterator").count(), 2);
+        assert!(module.contains("Long x ="), "{module}");
+        assert!(module.contains("Long y ="), "{module}");
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn java_range_defaults_to_positive_direction() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Range Java test because a JDK tool is unavailable");
@@ -4631,6 +4669,11 @@ def fallback(label Str, value Int) Int {
     value
 }
 
+def increment(value Int?) Int? {
+    present = value ?? return None
+    Some(present + 1)
+}
+
 def main() Unit {
     some Int? = Some(5)
     none Int? = None
@@ -4641,6 +4684,8 @@ def main() Unit {
     println(none ?? fallback("none fallback", 11))
     println(ok ?? fallback("ok fallback", 12))
     println(left ?? fallback("left fallback", 13))
+    println(increment(Some(4))!)
+    println(increment(None).isEmpty)
 }
 "#,
         )
@@ -4674,7 +4719,7 @@ def main() Unit {
             );
             assert_eq!(
                 String::from_utf8(output.stdout).expect("Java stdout utf8"),
-                "5\nnone fallback\n11\n7\nleft fallback\n13\n"
+                "5\nnone fallback\n11\n7\nleft fallback\n13\n5\ntrue\n"
             );
         }
 
@@ -4960,6 +5005,8 @@ def main() Unit {
     println(2.75.floor() == 2.0, 2.25.ceil() == 3.0)
     println(2.5.round() == 3.0, (-2.5).round() == -3.0)
     println(whole.toFloat() == 9.0, fraction.toInt() == 2, (-2.25).toInt() == -2)
+    println(Int.MIN, Int.MAX)
+    println(Float.MIN < 0.0, Float.MAX > 0.0, Float.MIN == -Float.MAX)
     println(OS.env.size >= 0)
 }
 "#,
@@ -4988,6 +5035,10 @@ def main() Unit {
         assert!(module.contains("LumeRuntime.round(2.5)"), "{module}");
         assert!(module.contains("LumeRuntime.toFloat(whole)"), "{module}");
         assert!(module.contains("LumeRuntime.toInt(fraction)"), "{module}");
+        assert!(module.contains("Long.MIN_VALUE"), "{module}");
+        assert!(module.contains("Long.MAX_VALUE"), "{module}");
+        assert!(module.contains("-Double.MAX_VALUE"), "{module}");
+        assert!(module.contains("Double.MAX_VALUE"), "{module}");
         assert!(module.contains("LumeRuntime.env().size()"), "{module}");
 
         let mut sources = core_runtime_sources();
@@ -5006,7 +5057,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("Java stdout utf8"),
-            "-3 8\n1.25 7.5\ntrue true true\ntrue true\ntrue true true\ntrue true\ntrue true\ntrue true true\ntrue\n"
+            "-3 8\n1.25 7.5\ntrue true true\ntrue true\ntrue true true\ntrue true\ntrue true\ntrue true true\n-9223372036854775808 9223372036854775807\ntrue true true\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);

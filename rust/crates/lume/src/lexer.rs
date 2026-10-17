@@ -14,6 +14,7 @@ pub enum Keyword {
     Defer,
     Def,
     Default,
+    Do,
     Else,
     Ext,
     False,
@@ -373,6 +374,7 @@ impl<'a> Lexer<'a> {
             "defer" => TokenKind::Keyword(Keyword::Defer),
             "def" => TokenKind::Keyword(Keyword::Def),
             "default" => TokenKind::Keyword(Keyword::Default),
+            "do" => TokenKind::Keyword(Keyword::Do),
             "else" => TokenKind::Keyword(Keyword::Else),
             "ext" => TokenKind::Keyword(Keyword::Ext),
             "false" => TokenKind::Keyword(Keyword::False),
@@ -708,13 +710,14 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\ndefaulted = default {}\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\ndefaulted = default {}\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Annotation)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Default)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Do)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Ext)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Fn)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Get)));

@@ -1164,14 +1164,22 @@ impl<'a> Parser<'a> {
             self.parse_optional_return_type()
         };
         if getter && return_type.is_none() {
-            self.diagnostics.push(Diagnostic::error(
-                "getter_return_type_required",
-                format!(
-                    "getter '{}' requires an explicit return type; write `get {} Type = ...`",
-                    name, name
-                ),
-                self.current_span(),
-            ));
+            if name.chars().next().is_some_and(char::is_uppercase) {
+                self.diagnostics.push(Diagnostic::error(
+                    "get_field_name",
+                    "get starts a getter; a field cannot be named get",
+                    start,
+                ));
+            } else {
+                self.diagnostics.push(Diagnostic::error(
+                    "getter_return_type_required",
+                    format!(
+                        "getter '{}' requires an explicit return type; write `get {} Type = ...`",
+                        name, name
+                    ),
+                    self.current_span(),
+                ));
+            }
         }
         if getter && (!generic_clause.params.is_empty() || !generic_clause.conditions.is_empty()) {
             self.diagnostics.push(Diagnostic::error(
@@ -1219,7 +1227,14 @@ impl<'a> Parser<'a> {
     ) -> Option<FieldDecl> {
         let start = self.current_span();
         let mutable = self.match_keyword(Keyword::Var);
-        let (name, _) = self.expect_data_name("expected field name")?;
+        let (name, name_span) = self.expect_data_name("expected field name")?;
+        if name == "get" {
+            self.diagnostics.push(Diagnostic::error(
+                "get_field_name",
+                "get starts a getter; a field cannot be named get",
+                name_span,
+            ));
+        }
 
         let ty = if self.can_start_type_ref() {
             Some(self.parse_type_ref()?)

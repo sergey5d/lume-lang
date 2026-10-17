@@ -2,6 +2,24 @@
 
 This file describes the language syntax that is available now.
 
+## Reserved Keywords
+
+The lexer reserves these words for language grammar:
+
+```txt
+annotation  as        break     case       class      continue
+defer       def       default   do         else       ext
+false       fn        for       get        if         interface
+internal    is        let       match      module     object
+override    private   reified   return     shape      true
+try         type      use       var        vararg     when
+while       with      yield
+```
+
+They are not ordinary identifiers. A grammar rule may explicitly reuse a
+keyword spelling in a limited name position; otherwise using one as a name is
+an error. In particular, `do` introduces an explicit imperative `for` body.
+
 ## Built-In Data Types
 
 Primitive types:
@@ -506,12 +524,12 @@ println(typeOf[User].kind)
 
 classType ClassType[User] = typeOf[User].asClass() !
 fields = classType.fields
-let Some { value as nameField } = classType.field("name") else panic("expected name field")
+let Some(nameField) = classType.field("name") else panic("expected name field")
 println(nameField.fieldType.name !)
 println(nameField.isPrivate)
 
 unionType UnionType[Status] = typeOf[Status].asUnion() !
-let Some { value as pending } = unionType.alternative("Pending") else panic("expected Pending alternative")
+let Some(pending) = unionType.alternative("Pending") else panic("expected Pending alternative")
 println(pending.name)
 constructedAlternative Result[Any, ReflectionError] = pending.construct()
 ```
@@ -524,7 +542,7 @@ constructed Result[User, ReflectionError] = classType.construct("Ada", 42)
 user User = constructed !
 nameValue Result[Any, ReflectionError] = nameField.get(user)
 
-let Some { value as greetMethod } = classType.method("greet") else panic("expected greet method")
+let Some(greetMethod) = classType.method("greet") else panic("expected greet method")
 greeting Result[Any, ReflectionError] = greetMethod.call(user)
 ```
 
@@ -701,6 +719,19 @@ whole Int = 3.7.toInt()     # 3
 decimal Float = 3.toFloat() # 3.0
 ```
 
+The finite numeric bounds are available as intrinsic type members:
+
+```txt
+smallestInt Int = Int.MIN
+largestInt Int = Int.MAX
+mostNegativeFloat Float = Float.MIN
+largestFloat Float = Float.MAX
+```
+
+`Int.MIN` and `Int.MAX` are the signed 64-bit bounds. `Float.MIN` and
+`Float.MAX` are respectively the most negative and most positive finite
+IEEE-754 binary64 values; neither constant denotes infinity.
+
 `Float.toInt()` truncates toward zero. NaN converts to `0`; values outside the
 signed 64-bit range, including infinities, clamp to `Int.MIN` or `Int.MAX`.
 `Int.toFloat()` converts to IEEE-754 binary64 and can lose precision for large
@@ -716,8 +747,9 @@ decimal Float? = Float.parse("2.5")
 invalid Int? = Int.parse("forty-two") # None
 ```
 
-These are intrinsic static methods. They do not make `parse` an instance
-method.
+These methods are declared on the same-named `object Int` and `object Float`
+declarations. They are not members of numeric instances, so `5.parse("3")` is
+invalid.
 
 `panic(...)` and `assert(...)` are prelude functions, not `OS` methods:
 
@@ -1700,10 +1732,11 @@ explicitly; `user User = new { ... }` obtains it from the expected type. Bare
 `{ ... }` remains structural shape construction even when the expected type is
 a class, so that spelling is rejected rather than invoking the constructor.
 
-Braces are also the field construction form for declared-union payload alternatives:
+Single-payload declared-union alternatives conventionally use parenthesized
+construction:
 
 ```txt
-maybe = Some { value: 5 }
+maybe = Some(5)
 ```
 
 Object alternatives are values, not calls. Their names may be bare or qualified:
@@ -2257,6 +2290,18 @@ get values [Int] = items               # getter returning a vector
 def callback() fn() Int = action       # method returning a function
 get callback fn() Int = action         # getter returning a function
 ```
+
+`get` is contextual:
+
+- At the start of a member declaration inside a class, interface, object, or
+  `ext` block, `get` always starts a getter.
+- `def get(...)` remains a method named `get`, because the declaration starts
+  with `def`.
+- A field cannot be named `get`. A field-shaped declaration such as
+  `get Int = 1` reports `get starts a getter; a field cannot be named get`.
+- Everywhere else, including locals, parameters, method names after `def`,
+  member access after `.`, and pattern bindings, `get` is an ordinary
+  identifier.
 
 Getters use the ordinary type grammar, including bracket collection shorthand
 and anonymous shape types:
@@ -3121,12 +3166,11 @@ The same nesting rule applies to `while` conditions, `for` iterables, and
 `match` scrutinees.
 
 Trailing brace call syntax on non-constructor calls is only for lambda arguments.
-Constructor braces fill constructor inputs by field name, so declared-union
-payloads use braces and unary payload shorthand uses parentheses:
+Constructor braces fill constructor inputs by field name. Unary payloads use
+the concise parenthesized form:
 
 ```txt
 maybeOrder = Some(Order { id: 7 })
-namedMaybeOrder = Some { value: Order { id: 7 } }
 ```
 
 Use an explicit lambda when mapping with a `match`:
@@ -3758,7 +3802,7 @@ if value > 0 {
 Pattern-test form:
 
 ```txt
-if let Some { value as item } = maybeValue {
+if let Some(item) = maybeValue {
     println(item)
 }
 ```
@@ -3858,7 +3902,7 @@ asks you to use plain `let` instead.
 When the payload needs more destructuring, prefer doing that on the next line inside the branch:
 
 ```txt
-if let Some { value as pair } = maybePair {
+if let Some(pair) = maybePair {
     let (x, y) = pair
     println(x)
     println(y)
@@ -3967,7 +4011,7 @@ fallback for recoverable refutable binding.
 The fallback may either exit control flow or supply values for the bindings:
 
 ```txt
-let Some { value as item } = maybeValue else {
+let Some(item) = maybeValue else {
     return Err("missing")
 }
 
@@ -3983,7 +4027,7 @@ let item <- maybeValue else {
 ```
 
 This is equivalent to:
-- `let Some { value as item } = maybeValue else { ... }` for `Option[T]`
+- `let Some(item) = maybeValue else { ... }` for `Option[T]`
 - `let Ok { value as item } = maybeResult else { ... }` for `Result[T, E]`
 - `let Right { value as item } = maybeEither else { ... }` for `Either[L, R]`
 
@@ -4050,8 +4094,8 @@ Grouped refutable bindings share one fallback:
 
 ```txt
 let {
-    Some { value as left } = maybeLeft
-    Some { value as right } = maybeRight
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
 } else {
     return Err("missing")
 }
@@ -4143,7 +4187,7 @@ let item <- maybe          # error: '<-' extraction requires else
 For assertive extraction, write an explicit `panic(...)` fallback:
 
 ```txt
-let Some { value as item } = maybeValue else panic("expected Some")
+let Some(item) = maybeValue else panic("expected Some")
 let item <- maybeValue else panic("expected value")
 ```
 
@@ -4151,8 +4195,8 @@ Grouped assertive extraction uses the same `let { ... } else` form:
 
 ```txt
 let {
-    Some { value as left } = maybeLeft
-    Some { value as right } = maybeRight
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
 } else panic("expected both values")
 ```
 
@@ -4260,17 +4304,34 @@ iterable comprehensions; `Option`, `Result`, and `Either` comprehensions have no
 - `try` propagates the original failure.
 - `??` discards/replaces the failure with an explicit fallback.
 
-The prefix optional-wrapping operator `^` is an exact shorthand for `Some`:
+`Some(value)` is the canonical spelling for constructing a present optional:
+
+```txt
+optional Int? = Some(5)
+```
+
+`Some` is still an ordinary single-field union alternative, so the general
+named-field construction form remains valid:
+
+```txt
+sameOptional Int? = Some { value: 5 }
+```
+
+The prefix optional-wrapping operator `^` is an exact shorthand for
+`Some(value)`:
 
 ```txt
 optional Int? = ^5
 inferred = ^"ready" # Option[Str]
 ```
 
-In a pattern, the same spelling performs the corresponding `Some` match:
+Patterns have the same three layers. `Some(value)` is canonical, the record
+form exposes the general named-field rule, and `^value` is shorthand:
 
 ```txt
-let ^value = optional else return
+let Some(canonicalValue) = optional else return
+let Some { value as recordValue } = optional else return
+let ^shortValue = optional else return
 ```
 
 It always constructs `Option`; it never selects `Ok` or `Right` from the
@@ -4338,13 +4399,13 @@ statements or as a grouped `let` block with `else`:
 ```txt
 left = try maybeLeft
 
-let Some { value as right } = maybeRight else {
+let Some(right) = maybeRight else {
     return Err("missing")
 }
 
 let {
-    Some { value as left } = maybeLeft
-    Some { value as right } = maybeRight
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
 } else {
     return Err("missing")
 }
@@ -4354,8 +4415,8 @@ let {
 
 ```txt
 if let {
-    Some { value as left } = maybeLeft
-    Some { value as right } = maybeRight
+    Some(left) = maybeLeft
+    Some(right) = maybeRight
 } {
     println(left + right)
 }
@@ -4392,7 +4453,7 @@ an extraction clause must be grouped explicitly. Newlines after `&&` do not
 change clause recognition:
 
 ```txt
-if let Some { value as left } = maybeLeft && let Ok { value as right } = compute() && right > left {
+if let Some(left) = maybeLeft && let Ok { value as right } = compute() && right > left {
     println(left + right)
 }
 
@@ -4477,7 +4538,7 @@ Refutable logic goes in the loop body:
 
 ```txt
 for maybeItem <- items {
-    let Some { value as item } = maybeItem else {
+    let Some(item) = maybeItem else {
         continue
     }
     println(item)
@@ -4489,11 +4550,38 @@ These generator heads are invalid:
 ```txt
 for (x, y) <- pairs { ... }
 for { name, age } <- users { ... }
-for Some { value as item } <- values { ... }
-for let Some { value as item } <- values { ... }
+for Some(item) <- values { ... }
+for let Some(item) <- values { ... }
 for let worker Worker <- values { ... }
 for item Int <- items { ... }
 ```
+
+`do` executes one statement or a block without collecting its result. It is
+available after a single-generator header:
+
+```txt
+for item <- items do process(item)
+
+for item <- items do
+    if let result <- assess(item) {
+        results.add(result)
+    }
+```
+
+The traditional braced loop remains shorthand for an explicit `do` block:
+
+```txt
+for item <- items {
+    process(item)
+}
+
+for item <- items do {
+    process(item)
+}
+```
+
+After a single-generator header, `do` may be omitted only when the body is a
+brace-delimited block. A single unbraced statement always requires `do`.
 
 Yield form:
 
@@ -4543,6 +4631,60 @@ items = for {
     doubled + y
 }
 ```
+
+The same grouped generator head can drive an imperative loop. Its generators
+are nested in source order, and the body runs for each resulting combination:
+
+```txt
+for {
+    left <- leftValues
+    right <- rightValues
+} do {
+    println(left, right)
+}
+```
+
+`do` and `yield` are available after either header form. A grouped header must
+use one of them; adjacent header and body braces without an introducer are
+invalid:
+
+```txt
+for { item <- items } do process(item)
+values = for { item <- items } yield transform(item)
+
+for { item <- items } { process(item) } # invalid: expected do or yield
+```
+
+`do` accepts either one complete statement or a block. An `if`, including its
+`else` branch, is one statement, and a newline after `do` is only layout:
+
+```txt
+for {
+    source <- left
+    target <- right
+} do if let result <- assess(source, target) {
+    store(result)
+} else {
+    reportMissing(source, target)
+}
+```
+
+This is equivalent to placing the `if` on the next line after `do`. For more
+than one statement per iteration, use an explicit block:
+
+```txt
+for {
+    source <- left
+    target <- right
+} do {
+    process(source, target)
+    recordAttempt(source, target)
+}
+```
+
+The single statement is the entire loop body; indentation does not extend its
+scope. `do` does not create a lambda, so `return`, `break`, and `continue` keep
+their ordinary control-flow meaning.
 
 `yield` also accepts a same-line expression:
 
@@ -4631,6 +4773,7 @@ Mental model:
 
 ```txt
 for      = pulls values from iterables; in yield form, also from lifted success values
+do       = executes one statement or block for each generated value
 let      = destructures irrefutable values, or exits early with `else`
 match    = handles refutable cases
 yield    = produces values
@@ -4707,7 +4850,7 @@ while running && let candidate <- current.next && candidate.value == expected {
 Both refutable pattern forms are supported:
 
 ```txt
-while let Some { value as item } = nextItem() {
+while let Some(item) = nextItem() {
     consume(item)
 }
 
@@ -4865,7 +5008,7 @@ Supported pattern families:
 - zero-payload cases and singletons: `None`, `Pending`, `Ready`
 - optional payload shorthand: `^value`, equivalent to `Some(value)`
 - unary named-data patterns: `Some(x)`, `Box(item)`
-- named-field record patterns: `User { name }`, `Some { value }`
+- named-field record patterns: `User { name }`, `Ok { value }`
 - unheaded record patterns for statically known values: `{ name, age }`
 - type patterns: `item Worker`, `_ Other`
 
@@ -4963,10 +5106,10 @@ match profile {
 
 ```
 
-For declared unions, alternative-specific payload fields require the alternative head, for example
-`Some { value }`, because the payload is not present on every alternative. Interface
-values do not provide a concrete record layout and therefore require a type or
-case pattern before record fields can be matched.
+For declared unions, alternative-specific payload fields require the
+alternative head because the payload is not present on every alternative.
+Interface values do not provide a concrete record layout and therefore require
+a type or case pattern before record fields can be matched.
 
 Parentheses provide unary named-data extraction only:
 
@@ -5086,11 +5229,11 @@ closed.
 Field aliases remain available inside record patterns, for example
 `let { location as home } = user`.
 
-Conceptually, `Some(x)` is `Some { value as x }`, and `Some(User { name })`
-is `Some { value: User { name } }`. The type or case must have exactly one
-extractable field. Classes and shapes count visible data fields; union alternatives
-count their payload fields; constructor parameters
-never participate in matching.
+The parenthesized form requires exactly one extractable field. Classes and
+shapes count visible data fields; union alternatives count their payload
+fields; constructor parameters never participate in matching. The Option
+spelling discussion above shows how this concise form relates to record
+patterns and `^`.
 
 Named data with multiple fields uses braces and fields are selected by name:
 

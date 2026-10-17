@@ -5208,6 +5208,17 @@ impl<'a> FunctionLowerer<'a> {
                 ..
             } => self.infer_call_type(callee, args, *style, overrides),
             Expr::Member { receiver, name, .. }
+                if intrinsic_numeric_limit(receiver, name).is_some() =>
+            {
+                match intrinsic_numeric_limit(receiver, name)
+                    .expect("numeric limit guard guarantees a constant")
+                {
+                    ir::Constant::Int(_) => ir::Type::Int,
+                    ir::Constant::Float(_) => ir::Type::Float,
+                    _ => unreachable!(),
+                }
+            }
+            Expr::Member { receiver, name, .. }
                 if name == "args"
                     && matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "OS") =>
             {
@@ -6669,6 +6680,11 @@ impl<'a> FunctionLowerer<'a> {
             {
                 return Some(self.lower_callable_reference_rvalue(expr, expected));
             }
+        }
+        if let Expr::Member { receiver, name, .. } = expr
+            && let Some(constant) = intrinsic_numeric_limit(receiver, name)
+        {
+            return Some(ir::RValue::Use(ir::Operand::Const(constant)));
         }
         if let Some(path) = expr_path(expr) {
             let path = self.canonical_enum_case_path(&path);
@@ -8715,12 +8731,6 @@ impl<'a> FunctionLowerer<'a> {
                     ("Vector", "from") | ("Set", "from")
                 ) {
                     return Some(vec!["values".to_string()]);
-                }
-                if matches!(
-                    (owner.as_str(), member.as_str()),
-                    ("Int", "parse") | ("Float", "parse")
-                ) {
-                    return Some(vec!["text".to_string()]);
                 }
                 if let Some(params) =
                     self.method_param_names_for_kind(owner, ast::TypeKind::Object, member, args)
@@ -11390,6 +11400,22 @@ fn lower_param_default_constant(initializer: &ast::Expr) -> Option<ir::Constant>
         ast::Expr::Group { inner, .. } => lower_param_default_constant(inner),
         ast::Expr::Identifier { name, .. } if name == "None" => Some(ir::Constant::OptionNone),
         other => lower_field_initializer_constant(Some(other)),
+    }
+}
+
+fn intrinsic_numeric_limit(receiver: &Expr, name: &str) -> Option<ir::Constant> {
+    let Expr::Identifier {
+        name: type_name, ..
+    } = receiver
+    else {
+        return None;
+    };
+    match (type_name.as_str(), name) {
+        ("Int", "MIN") => Some(ir::Constant::Int(i64::MIN)),
+        ("Int", "MAX") => Some(ir::Constant::Int(i64::MAX)),
+        ("Float", "MIN") => Some(ir::Constant::Float(f64::MIN)),
+        ("Float", "MAX") => Some(ir::Constant::Float(f64::MAX)),
+        _ => None,
     }
 }
 
