@@ -55,6 +55,14 @@ public final class LumeVector<T> implements Iterable<T> {
         return values.size();
     }
 
+    public boolean isEmpty() {
+        return values.isEmpty();
+    }
+
+    public boolean nonEmpty() {
+        return !values.isEmpty();
+    }
+
     private static int checkedFactoryLength(long length, String operation) {
         if (length < 0) {
             throw new LumePanic(operation + " length must be non-negative");
