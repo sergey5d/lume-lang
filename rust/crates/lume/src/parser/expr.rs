@@ -2040,9 +2040,7 @@ impl<'a> Parser<'a> {
                         span,
                     },
                 });
-            } else if (self.at(TokenKind::Identifier) || self.at_keyword(Keyword::Type))
-                && self.at_next(TokenKind::Eq)
-            {
+            } else if self.at_data_name() && self.at_next(TokenKind::Eq) {
                 let (name, name_span) = self.expect_data_name("expected named argument")?;
                 self.consume(TokenKind::Eq, "expected '=' after argument name")?;
                 let value = self.parse_expr()?;

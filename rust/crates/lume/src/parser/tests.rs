@@ -7170,6 +7170,8 @@ def identity(get Int) Int = get
 def main() Unit {
     get = Box()
     value = get.get()
+    positional = identity(5)
+    named = identity(get = 6)
     match Some(value) {
         case Some(get) => println(get)
         case None => ()

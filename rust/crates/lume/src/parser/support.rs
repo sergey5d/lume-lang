@@ -97,10 +97,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn expect_data_name(&mut self, message: &'static str) -> Option<(String, Span)> {
-        if self.at(TokenKind::Identifier)
-            || self.at_keyword(Keyword::Get)
-            || self.at_keyword(Keyword::Type)
-        {
+        if self.at_data_name() {
             let token = self.current().clone();
             self.advance();
             Some((token.lexeme, token.span))
@@ -110,6 +107,12 @@ impl<'a> Parser<'a> {
             }
             None
         }
+    }
+
+    pub(super) fn at_data_name(&self) -> bool {
+        self.at(TokenKind::Identifier)
+            || self.at_keyword(Keyword::Get)
+            || self.at_keyword(Keyword::Type)
     }
 
     pub(super) fn parse_callable_name(&mut self, message: &'static str) -> Option<(String, Span)> {

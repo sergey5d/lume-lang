@@ -1234,14 +1234,14 @@ literal; `[:]` is meaningful only after a sliceable expression.
 Shape copying and composition use field spreads:
 
 ```txt
-updated Amount = {
+updated = Amount {
     ...value
     age: 42
     name: "Bob"
 }
 
 patch = { age: 43 }
-updated2 Amount = {
+updated2 = Amount {
     ...value
     override ...patch
 }
@@ -1260,6 +1260,15 @@ cleared Batch = {
 Here `items` is checked as `[Int]` and `position` receives the concrete `Point`
 target from `Batch`. Without an expected shape target, spread construction
 infers a fresh anonymous shape from the resulting fields.
+
+The first spread never implicitly selects the result type. Name the target when
+the result must retain a named shape; omit it when a fresh anonymous schema is
+intended:
+
+```txt
+named = Event { ...event, gender: 5 } # Event
+anonymous = { ...event, gender: 5 }  # inferred anonymous shape
+```
 
 ```txt
 copy = { ...value }
@@ -2282,9 +2291,9 @@ get callback fn() Int = action         # getter returning a function
   with `def`.
 - A field cannot be named `get`. A field-shaped declaration such as
   `get Int = 1` reports `get starts a getter; a field cannot be named get`.
-- Everywhere else, including locals, parameters, method names after `def`,
-  member access after `.`, and pattern bindings, `get` is an ordinary
-  identifier.
+- Everywhere else, including locals, parameters, named argument labels, method
+  names after `def`, member access after `.`, and pattern bindings, `get` is an
+  ordinary identifier.
 
 Getters use the ordinary type grammar, including bracket collection shorthand
 and anonymous shape types:
@@ -5452,7 +5461,6 @@ Expression precedence, from highest to lowest:
 | Unary | `-`, `!`, `^`, `try` | right |
 | Multiplicative | `*`, `/`, `%` | left |
 | Additive | `+`, `-` | left |
-| Shape update | `with` | left |
 | Comparison | `<`, `<=`, `>`, `>=` | non-associative |
 | Type test | `is`, `is not` | non-associative |
 | Equality | `==`, `!=` | non-associative |
@@ -5489,18 +5497,6 @@ value = match flag {
 
 value = 1 + if flag { 2 } else { 3 }
 ```
-
-The shape-update level means:
-
-```txt
-a + b with p       # (a + b) with p
-a with p + q       # a with (p + q)
-a with p == q      # (a with p) == q
-a with b with c    # (a with b) with c
-```
-
-Use parentheses to override these groupings, including when a patch is another
-shape-update expression: `a with (b with c)`.
 
 Examples:
 

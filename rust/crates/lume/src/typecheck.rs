@@ -17701,6 +17701,7 @@ def identity(get Int) Int = get
 
 def main() Unit {
     get = identity(41)
+    named Int = identity(get = 42)
     println(get)
 }
 "#,

@@ -11275,6 +11275,24 @@ def main() Unit {
     }
 
     #[test]
+    fn runs_get_as_a_named_argument() {
+        let program = lower_inline(
+            r#"
+            def echo(get Int) Int = get
+
+            def main() Unit {
+                println(echo(5))
+                println(echo(get = 6))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "5\n6\n");
+    }
+
+    #[test]
     fn fails_assert_runtime_call_with_message() {
         let program = lower_inline(
             r#"
