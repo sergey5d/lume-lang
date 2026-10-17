@@ -7518,7 +7518,7 @@ def main() Unit {
     projected Point = Point { ...first }
     contextual Point = { ...first }
     forced Point = new { ...first }
-    updated = first with { x: 4 }
+    updated Point = { ...first, x: 4 }
     println(projected == concrete)
     println(contextual == concrete)
     println(forced == concrete)

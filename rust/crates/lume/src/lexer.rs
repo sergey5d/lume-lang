@@ -438,7 +438,7 @@ impl<'a> Lexer<'a> {
             ':' if self.take('<') => {
                 self.error(
                     "removed_shape_update_operator",
-                    "shape update operator ':<' was removed; use 'value with patch'",
+                    "shape update operator ':<' was removed; use '{ ...value, field: replacement }'",
                     start,
                     self.mark(),
                 );
@@ -710,7 +710,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = value with { amount: 1 }\ndefaulted = default {}\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = { ...value, amount: 1 }\ndefaulted = default {}\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -815,7 +815,9 @@ mod tests {
         let result = lex(&source("updated = value :< { amount: 1 }"));
         assert!(result.diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "removed_shape_update_operator"
-                && diagnostic.message.contains("use 'value with patch'")
+                && diagnostic
+                    .message
+                    .contains("use '{ ...value, field: replacement }'")
         }));
     }
 

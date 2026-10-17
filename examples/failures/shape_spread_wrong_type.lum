@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*field 'amount' in shape 'Amount' expects 'Int' but got 'Str'.*
+
+shape Amount {
+    amount Int
+}
+
+def main() Unit {
+    value = Amount(10)
+    updated Amount = { ...value, amount: "bad" }
+}

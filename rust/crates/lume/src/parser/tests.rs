@@ -2931,99 +2931,14 @@ fn rejects_equals_in_named_shape_literal_fields() {
 }
 
 #[test]
-fn parses_with_shape_update_fields() {
-    match parse_expr_only("value with { amount: 42, label: value.label }") {
-        Expr::RecordUpdate { patch, .. } => match *patch {
-            Expr::RecordLiteral { fields, .. } => {
-                assert_eq!(fields.len(), 2);
-                assert_eq!(fields[0].name.as_deref(), Some("amount"));
-                assert_eq!(fields[1].name.as_deref(), Some("label"));
-            }
-            other => panic!("expected shape patch literal, got {other:#?}"),
-        },
-        other => panic!("expected shape update, got {other:#?}"),
-    }
-}
-
-#[test]
-fn contextual_construction_after_with_reaches_shape_update_parser() {
-    for source in [
-        "value with new { amount: 42 }",
-        "value with new(42)",
-        "value with default { amount: 42 }",
-        "value with (new { amount: 42 })",
-    ] {
-        assert!(
-            matches!(parse_expr_only(source), Expr::RecordUpdate { .. }),
-            "{source}"
-        );
-    }
-}
-
-#[test]
-fn parses_with_at_shape_update_precedence() {
-    assert!(matches!(
-        parse_expr_only("a + b with p"),
-        Expr::RecordUpdate { receiver, patch, .. }
-            if matches!(*receiver, Expr::Binary { op: BinaryOp::Add, .. })
-                && matches!(*patch, Expr::Identifier { ref name, .. } if name == "p")
-    ));
-
-    assert!(matches!(
-        parse_expr_only("a with p + q"),
-        Expr::RecordUpdate { receiver, patch, .. }
-            if matches!(*receiver, Expr::Identifier { ref name, .. } if name == "a")
-                && matches!(*patch, Expr::Binary { op: BinaryOp::Add, .. })
-    ));
-
-    assert!(matches!(
-        parse_expr_only("a with p == q"),
-        Expr::Binary { left, op: BinaryOp::Eq, right, .. }
-            if matches!(*left, Expr::RecordUpdate { .. })
-                && matches!(*right, Expr::Identifier { ref name, .. } if name == "q")
-    ));
-
-    assert!(matches!(
-        parse_expr_only("a with b with c"),
-        Expr::RecordUpdate { receiver, patch, .. }
-            if matches!(*receiver, Expr::RecordUpdate { .. })
-                && matches!(*patch, Expr::Identifier { ref name, .. } if name == "c")
-    ));
-}
-
-#[test]
-fn parses_newline_separated_shape_update_fields() {
-    match parse_expr_only(
-        r#"
-value with {
-    amount: 42
-    label: value.label,
-    count: 3
-}
-"#,
-    ) {
-        Expr::RecordUpdate { patch, .. } => match *patch {
-            Expr::RecordLiteral { fields, .. } => {
-                assert_eq!(fields.len(), 3);
-                assert_eq!(fields[0].name.as_deref(), Some("amount"));
-                assert_eq!(fields[1].name.as_deref(), Some("label"));
-                assert_eq!(fields[2].name.as_deref(), Some("count"));
-            }
-            other => panic!("expected shape patch literal, got {other:#?}"),
-        },
-        other => panic!("expected shape update, got {other:#?}"),
-    }
-}
-
-#[test]
-fn rejects_same_line_shape_update_fields_without_separator() {
-    let result = parse(r#"def run(value Amount) Unit = value with { amount: 42 label: "x" }"#);
+fn rejects_removed_shape_update_syntax_with_a_migration_diagnostic() {
+    let result = parse("def run(value Amount) Unit = value with { amount: 42 }");
     assert!(
         result.diagnostics.iter().any(|diag| {
-            diag.code == "unexpected_token"
+            diag.code == "removed_shape_update"
                 && diag
                     .message
-                    .contains("expected ',' or newline between brace entries")
+                    .contains("use '{ ...value, field: replacement }'")
         }),
         "{:#?}",
         result.diagnostics
@@ -6276,8 +6191,10 @@ def main() Unit {
     leadingSize Int = "haha"
         .size()
     user = { name: "Ada", age: 41 }
-    updated = user with
-        { age: 42 }
+    updated = {
+        ...user
+        age: 42
+    }
     named = { name: "Ada" }
     located = { location: "Tampa" }
     merged = {
@@ -6431,22 +6348,22 @@ def main() Unit {
         leading_operator.diagnostics
     );
 
-    let leading_shape_update = parse(
+    let leading_with = parse(
         r#"
 def main() Unit {
     user = { age: 41 }
     updated = user
-        with { age: 42 }
+        with Printable
 }
 "#,
     );
     assert!(
-        leading_shape_update
+        leading_with
             .diagnostics
             .iter()
             .any(|diag| diag.code == "expected_expression"),
         "{:#?}",
-        leading_shape_update.diagnostics
+        leading_with.diagnostics
     );
 }
 

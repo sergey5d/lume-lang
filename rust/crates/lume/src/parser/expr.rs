@@ -1251,7 +1251,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_comparison_expr(&mut self) -> Option<Expr> {
         self.parse_non_associative(
-            |parser| parser.parse_shape_update_expr(),
+            |parser| parser.parse_removed_shape_update_expr(),
             &[
                 (TokenKind::Less, BinaryOp::Less),
                 (TokenKind::LessEq, BinaryOp::LessEq),
@@ -1263,17 +1263,17 @@ impl<'a> Parser<'a> {
         )
     }
 
-    pub(super) fn parse_shape_update_expr(&mut self) -> Option<Expr> {
-        let mut expr = self.parse_term_expr()?;
+    fn parse_removed_shape_update_expr(&mut self) -> Option<Expr> {
+        let expr = self.parse_term_expr()?;
         while self.match_keyword(Keyword::With) {
+            let start = self.previous_span();
             self.skip_newlines();
             let patch = self.parse_term_expr()?;
-            let span = expr.span().cover(patch.span());
-            expr = Expr::RecordUpdate {
-                receiver: Box::new(expr),
-                patch: Box::new(patch),
-                span,
-            };
+            self.diagnostics.push(Diagnostic::error(
+                "removed_shape_update",
+                "shape update syntax 'value with { ... }' was removed; use '{ ...value, field: replacement }'",
+                start.cover(patch.span()),
+            ));
         }
         Some(expr)
     }

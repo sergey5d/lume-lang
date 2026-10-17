@@ -639,10 +639,6 @@ pub enum RValue {
         fields: Vec<NamedOperand>,
         methods: Vec<AnonymousObjectMethod>,
     },
-    RecordUpdate {
-        base: Operand,
-        patch: Operand,
-    },
     Construct {
         ty: Type,
         fields: Vec<NamedOperand>,

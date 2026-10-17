@@ -646,12 +646,12 @@ mod tests {
     #[test]
     fn inline_record_argument_does_not_consume_lambda_indentation() {
         let result = format(
-            "def main() Unit {\nargs { verbose Bool, help Bool }=\nOS.args.fold({verbose: false, help : false}, (acc, arg) => {\nif arg == \"--verbose\" {\nacc with {verbose: true}\n} else if arg == \"--help\" {\nacc with {help: true}\n} else {\nacc\n}\n})\n}\n",
+            "def main() Unit {\nargs { verbose Bool, help Bool }=\nOS.args.fold({verbose: false, help : false}, (acc, arg) => {\nif arg == \"--verbose\" {\n{...acc, verbose: true}\n} else if arg == \"--help\" {\n{...acc, help: true}\n} else {\nacc\n}\n})\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() Unit {\n    args { verbose Bool, help Bool } =\n        OS.args.fold({ verbose: false, help: false }, (acc, arg) => {\n            if arg == \"--verbose\" {\n                acc with { verbose: true }\n            } else if arg == \"--help\" {\n                acc with { help: true }\n            } else {\n                acc\n            }\n        })\n}\n"
+            "def main() Unit {\n    args { verbose Bool, help Bool } =\n        OS.args.fold({ verbose: false, help: false }, (acc, arg) => {\n            if arg == \"--verbose\" {\n                { ...acc, verbose: true }\n            } else if arg == \"--help\" {\n                { ...acc, help: true }\n            } else {\n                acc\n            }\n        })\n}\n"
         );
     }
 

@@ -2407,12 +2407,6 @@ impl<'a> Resolver<'a> {
                 self.resolve_expr(receiver);
                 self.resolve_expr(index);
             }
-            Expr::RecordUpdate {
-                receiver, patch, ..
-            } => {
-                self.resolve_expr(receiver);
-                self.resolve_expr(patch);
-            }
             Expr::RecordLiteral { fields, values, .. } => {
                 let mut seen = HashMap::new();
                 for field in fields {

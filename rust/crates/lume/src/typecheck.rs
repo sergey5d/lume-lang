@@ -2808,12 +2808,6 @@ impl<'a> Checker<'a> {
                 self.check_field_initializer_expr(receiver, owner, initialized_fields);
                 self.check_field_initializer_expr(index, owner, initialized_fields);
             }
-            Expr::RecordUpdate {
-                receiver, patch, ..
-            } => {
-                self.check_field_initializer_expr(receiver, owner, initialized_fields);
-                self.check_field_initializer_expr(patch, owner, initialized_fields);
-            }
             Expr::RecordLiteral { fields, values, .. } => {
                 for field in fields {
                     self.check_field_initializer_expr(&field.value, owner, initialized_fields);
@@ -3107,152 +3101,6 @@ impl<'a> Checker<'a> {
                 self.local_functions_allowed = previous;
                 result
             }
-        }
-    }
-
-    fn check_record_update(&mut self, base: &Ty, patch: &Expr, span: crate::source::Span) {
-        let Some(base_fields) = self.record_update_shape_fields(base, "base", span) else {
-            self.check_expr(patch);
-            return;
-        };
-        if let Some((default_initialize, uses_brace_syntax, patch_span)) =
-            shape_update_contextual_patch(patch)
-        {
-            let construction = if default_initialize {
-                "default { ... }"
-            } else if uses_brace_syntax {
-                "new { ... }"
-            } else {
-                "new(...)"
-            };
-            self.add_error(
-                "invalid_shape_update",
-                format!(
-                    "shape update patch cannot use {construction}; use a plain shape patch such as 'value with {{ field: replacement }}'"
-                ),
-                patch_span,
-            );
-            return;
-        }
-        let patch_ty = if let Some(fields) = shape_update_literal_fields(patch) {
-            let mut patch_context = base_fields.clone();
-            for name in fields.iter().filter_map(|field| field.name.as_ref()) {
-                if !patch_context
-                    .iter()
-                    .any(|(expected_name, _)| expected_name == name)
-                {
-                    patch_context.push((name.clone(), Ty::Unknown));
-                }
-            }
-            self.check_expr_against(patch, &Ty::Record(patch_context))
-        } else {
-            self.check_expr(patch)
-        };
-        let Some(patch_fields) = self.record_update_shape_fields(&patch_ty, "patch", patch.span())
-        else {
-            return;
-        };
-        self.check_record_update_fields(&base_fields, &patch_fields, patch.span());
-    }
-
-    fn record_update_shape_fields(
-        &mut self,
-        ty: &Ty,
-        role: &str,
-        span: crate::source::Span,
-    ) -> Option<Vec<(String, Ty)>> {
-        match ty {
-            Ty::Record(fields) => Some(fields.clone()),
-            Ty::Named(name, args) => {
-                let Some(sig) = self.lookup_any_type(name) else {
-                    self.add_error(
-                        "invalid_shape_update",
-                        format!(
-                            "shape update {role} must be a named or anonymous shape, got '{}'",
-                            ty.describe()
-                        ),
-                        span,
-                    );
-                    return None;
-                };
-                if sig.kind == TypeKind::Class {
-                    self.add_error(
-                        "invalid_shape_update",
-                        format!(
-                            "shape update does not support class value '{}'; define an explicit copy or update method on the class",
-                            ty.describe()
-                        ),
-                        span,
-                    );
-                    return None;
-                }
-                if sig.kind != TypeKind::Record {
-                    self.add_error(
-                        "invalid_shape_update",
-                        format!(
-                            "shape update {role} must be a named or anonymous shape, got '{}'",
-                            ty.describe()
-                        ),
-                        span,
-                    );
-                    return None;
-                }
-                let subst = sig
-                    .type_params
-                    .iter()
-                    .cloned()
-                    .zip(args.iter().cloned())
-                    .collect::<HashMap<_, _>>();
-                Some(
-                    sig.fields
-                        .iter()
-                        .filter(|field| self.can_access_field(&sig, field))
-                        .map(|field| (field.name.clone(), substitute_type(&field.ty, &subst)))
-                        .collect(),
-                )
-            }
-            Ty::Unknown => None,
-            _ => {
-                self.add_error(
-                    "invalid_shape_update",
-                    format!(
-                        "shape update {role} must be a named or anonymous shape, got '{}'",
-                        ty.describe()
-                    ),
-                    span,
-                );
-                None
-            }
-        }
-    }
-
-    fn check_record_update_fields(
-        &mut self,
-        fields: &[(String, Ty)],
-        updates: &[(String, Ty)],
-        span: crate::source::Span,
-    ) {
-        for (name, actual) in updates {
-            let Some((_, expected)) = fields.iter().find(|(field, _)| field == name) else {
-                self.add_error(
-                    "invalid_shape_update",
-                    format!("update field '{}' does not exist on left-hand shape", name),
-                    span,
-                );
-                continue;
-            };
-            self.require_assignable(
-                actual,
-                expected,
-                span,
-                "invalid_shape_update",
-                format!(
-                    "update field '{}' expects '{}', got '{}'",
-                    name,
-                    expected.describe(),
-                    actual.describe()
-                ),
-            );
         }
     }
 
@@ -5387,15 +5235,6 @@ impl<'a> Checker<'a> {
                     );
                 }
                 self.index_result_type(&receiver_ty)
-            }
-            Expr::RecordUpdate {
-                receiver,
-                patch,
-                span,
-            } => {
-                let base = self.check_expr(receiver);
-                self.check_record_update(&base, patch, *span);
-                base
             }
             Expr::RecordLiteral { fields, values, .. } => {
                 if let Ty::Named(name, _) = expected
@@ -11758,9 +11597,6 @@ impl<'a> Checker<'a> {
                 .unwrap_or(Ty::Unknown)
             }
             Expr::ContextualNew { .. } | Expr::AnonymousObject { .. } => Ty::Unknown,
-            Expr::RecordUpdate { receiver, .. } => {
-                self.probe_expr_type_with_locals(receiver, locals)
-            }
             Expr::Try { value, .. } => {
                 self.unwrap_inner_type(&self.probe_expr_type_with_locals(value, locals))
             }
@@ -13942,27 +13778,6 @@ fn block_tail_expr(block: &Block) -> Option<&Expr> {
     }
 }
 
-fn shape_update_literal_fields(expr: &Expr) -> Option<&[crate::ast::CallArg]> {
-    match expr {
-        Expr::Group { inner, .. } => shape_update_literal_fields(inner),
-        Expr::RecordLiteral { fields, .. } => Some(fields),
-        _ => None,
-    }
-}
-
-fn shape_update_contextual_patch(expr: &Expr) -> Option<(bool, bool, crate::source::Span)> {
-    match expr {
-        Expr::Group { inner, .. } => shape_update_contextual_patch(inner),
-        Expr::ContextualNew {
-            uses_brace_syntax,
-            default_initialize,
-            span,
-            ..
-        } => Some((*default_initialize, *uses_brace_syntax, *span)),
-        _ => None,
-    }
-}
-
 fn constructor_body_delegates(body: &CallableBody) -> bool {
     match body {
         CallableBody::Expr(expr) => is_constructor_delegation_expr(expr),
@@ -14178,10 +13993,6 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
             receiver, index, ..
         } => loop_control_targeting_current_loop_in_expr(receiver)
             .or_else(|| loop_control_targeting_current_loop_in_expr(index)),
-        Expr::RecordUpdate {
-            receiver, patch, ..
-        } => loop_control_targeting_current_loop_in_expr(receiver)
-            .or_else(|| loop_control_targeting_current_loop_in_expr(patch)),
         Expr::RecordLiteral { fields, values, .. } => fields
             .iter()
             .find_map(|field| loop_control_targeting_current_loop_in_expr(&field.value))
@@ -14328,10 +14139,6 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
             receiver, index, ..
         } => lazy_arg_forbidden_control_flow_span(receiver)
             .or_else(|| lazy_arg_forbidden_control_flow_span(index)),
-        Expr::RecordUpdate {
-            receiver, patch, ..
-        } => lazy_arg_forbidden_control_flow_span(receiver)
-            .or_else(|| lazy_arg_forbidden_control_flow_span(patch)),
         Expr::RecordLiteral { fields, values, .. } => fields
             .iter()
             .find_map(|field| lazy_arg_forbidden_control_flow_span(&field.value))
@@ -18839,7 +18646,7 @@ def main() Unit {
             r#"
 def main() Unit {
     base = { name: "Ada", age: 10 }
-    aged = base with { age: 42 }
+    aged = { ...base, age: 42 }
     updated = { ...aged, city: "Tampa" }
     name Str = updated.name
     age Int = updated.age
@@ -18852,7 +18659,7 @@ def main() Unit {
     }
 
     #[test]
-    fn allows_with_updates_for_named_shapes() {
+    fn allows_spread_copy_for_named_shapes() {
         let program = parse_inline(
             r#"
 shape Amount {
@@ -18861,7 +18668,7 @@ shape Amount {
 
 def main() Unit {
     original = Amount(10)
-    updated = original with { value: 42 }
+    updated Amount = { ...original, value: 42 }
     value Int = updated.value
 }
 "#,
@@ -18871,7 +18678,7 @@ def main() Unit {
     }
 
     #[test]
-    fn shape_update_literals_receive_field_types_from_the_base() {
+    fn shape_spread_literals_receive_field_types_from_the_target() {
         let program = parse_inline(
             r#"
 shape Point {
@@ -18886,7 +18693,8 @@ shape Batch {
 
 def main() Unit {
     original = Batch([1, 2], Point(3, 4))
-    updated = original with {
+    updated Batch = {
+        ...original
         items: []
         position: new(0, 0)
     }
@@ -18897,48 +18705,6 @@ def main() Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn rejects_contextual_construction_as_shape_update_patch() {
-        let program = parse_inline(
-            r#"
-shape Batch {
-    items [Int]
-}
-
-def main() Unit {
-    batch = Batch([1])
-    forced = batch with new { items: [] }
-    positional = batch with new([])
-    defaulted = batch with default { items: [] }
-    grouped = batch with (new { items: [2] })
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert_eq!(
-            result
-                .diagnostics
-                .iter()
-                .filter(|diagnostic| diagnostic.code == "invalid_shape_update")
-                .count(),
-            4,
-            "{:#?}",
-            result.diagnostics
-        );
-        for construction in ["new { ... }", "new(...)", "default { ... }"] {
-            assert!(
-                result.diagnostics.iter().any(|diagnostic| {
-                    diagnostic.code == "invalid_shape_update"
-                        && diagnostic
-                            .message
-                            .contains(&format!("cannot use {construction}"))
-                }),
-                "{:#?}",
-                result.diagnostics
-            );
-        }
     }
 
     #[test]
@@ -18968,42 +18734,6 @@ def main() Unit {
             "{:#?}",
             result.diagnostics
         );
-    }
-
-    #[test]
-    fn rejects_with_updates_for_class_targets_and_patches() {
-        let program = parse_inline(
-            r#"
-class Amount {
-    value Int
-}
-
-class AmountPatch {
-    value Int
-}
-
-shape ShapeAmount {
-    value Int
-}
-
-def main() Unit {
-    original = Amount(10)
-    invalidTarget = original with { value: 42 }
-
-    shapeValue = ShapeAmount(10)
-    invalidPatch = shapeValue with AmountPatch(42)
-}
-"#,
-        );
-        let result = check_program(&program);
-        for class_name in ["Amount", "AmountPatch"] {
-            assert!(result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "invalid_shape_update"
-                    && diagnostic
-                        .message
-                        .contains(&format!("does not support class value '{class_name}'"))
-            }));
-        }
     }
 
     #[test]

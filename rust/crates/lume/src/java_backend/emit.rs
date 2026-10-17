@@ -6372,11 +6372,6 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("lume.core.LumeVector.of({})", items.join(", ")))
                 }
             }
-            core::Expr::RecordUpdate {
-                receiver,
-                patch,
-                span,
-            } => self.emit_record_update(receiver, patch, *span, bindings),
             core::Expr::Spread { value, .. } => self.emit_expr(value, bindings),
             core::Expr::Member { receiver, name, .. } if name == "runtimeType" => Some(format!(
                 "lume.core.LumeRuntime.runtimeTypeOf({})",
@@ -7617,97 +7612,6 @@ impl<'a> SourceBodyEmitter<'a> {
                 self.emit_expr(expr, bindings)
             }
         }
-    }
-
-    fn emit_record_update(
-        &self,
-        receiver: &core::Expr,
-        patch: &core::Expr,
-        span: crate::source::Span,
-        bindings: &HashMap<String, String>,
-    ) -> Option<String> {
-        let core::Expr::RecordLiteral { fields: patch, .. } = patch else {
-            return None;
-        };
-        let receiver_ty = self.expr_type(receiver, bindings)?;
-        let receiver_expr = self.emit_expr(receiver, bindings)?;
-        let receiver_local = self.synthetic_name("shapeUpdate", "shape", span.start);
-        let mut update_bindings = bindings.clone();
-        update_bindings.insert(receiver_local.clone(), receiver_local.clone());
-
-        let construction = match &receiver_ty {
-            ir::Type::Named { name, args } => {
-                let ty = self
-                    .bundle
-                    .ir
-                    .types
-                    .iter()
-                    .find(|ty| ty.name == *name && ty.kind == TypeKind::Record)?;
-                let substitution = ty
-                    .type_params
-                    .iter()
-                    .cloned()
-                    .zip(args.iter().cloned())
-                    .collect::<HashMap<_, _>>();
-                let values = ty
-                    .fields
-                    .iter()
-                    .filter(|field| field.visibility != Visibility::Private)
-                    .map(|field| {
-                        if let Some(replacement) = patch
-                            .iter()
-                            .find(|candidate| candidate.name.as_deref() == Some(&field.name))
-                        {
-                            self.emit_expr_against(
-                                &replacement.value,
-                                &update_bindings,
-                                &substitute_java_emit_type(&field.ty, &substitution),
-                            )
-                        } else {
-                            Some(format!(
-                                "{receiver_local}.{}()",
-                                java_member_name(&field.name)
-                            ))
-                        }
-                    })
-                    .collect::<Option<Vec<_>>>()?;
-                let generic = (!args.is_empty()).then_some("<>").unwrap_or("");
-                format!(
-                    "new {}{generic}({})",
-                    self.names.named_type(name),
-                    values.join(", ")
-                )
-            }
-            ir::Type::Record(fields) => {
-                let mut parts = Vec::with_capacity(fields.len() * 2);
-                for field in fields {
-                    parts.push(java_string_literal(&field.name));
-                    if let Some(replacement) = patch
-                        .iter()
-                        .find(|candidate| candidate.name.as_deref() == Some(&field.name))
-                    {
-                        parts.push(self.emit_expr_against(
-                            &replacement.value,
-                            &update_bindings,
-                            &field.ty,
-                        )?);
-                    } else {
-                        parts.push(format!(
-                            "(({}) ((lume.core.LumeShape) {receiver_local}).get({}))",
-                            self.names.value_type(&field.ty),
-                            java_string_literal(&field.name)
-                        ));
-                    }
-                }
-                format!("lume.core.LumeShape.of({})", parts.join(", "))
-            }
-            _ => return None,
-        };
-        Some(format!(
-            "((java.util.function.Supplier<{}>) () -> {{ {} {receiver_local} = {receiver_expr}; return {construction}; }}).get()",
-            self.names.value_type(&receiver_ty),
-            self.names.value_type(&receiver_ty)
-        ))
     }
 
     fn emit_shape_projection(

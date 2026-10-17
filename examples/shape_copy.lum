@@ -2,7 +2,7 @@
 # original 10 x
 # updated 42 y
 # updated2 43 z
-# chained Ada 42
+# copied Ada 42
 # equal true
 # not equal true
 # cleared 0
@@ -30,7 +30,8 @@ shape Batch {
 
 def main() Unit {
     value = Amount(10, "x")
-    updated = value with {
+    updated Amount = {
+        ...value
         amount: 42
         description: "y"
     }
@@ -38,27 +39,32 @@ def main() Unit {
         amount: 43
         description: "z"
     }
-    updated2 = value with patch
+    updated2 Amount = {
+        ...value
+        override ...patch
+    }
 
     profile = Profile("Sergey", 37)
     namePatch = { name: "Ada" }
     agePatch = { age: 42 }
     expected = Profile("Ada", 42)
     different = Profile("Ada", 41)
-
-    chained = profile with namePatch with agePatch
-    equal = profile with namePatch with agePatch == expected
-    notEqual = profile with namePatch with agePatch != different
+    copied Profile = {
+        ...profile
+        override ...namePatch
+        override ...agePatch
+    }
 
     println("original " + value.amount + " " + value.description)
     println("updated " + updated.amount + " " + updated.description)
     println("updated2 " + updated2.amount + " " + updated2.description)
-    println("chained " + chained.name + " " + chained.age)
-    println("equal " + equal)
-    println("not equal " + notEqual)
+    println("copied " + copied.name + " " + copied.age)
+    println("equal " + (copied == expected))
+    println("not equal " + (copied != different))
 
     batch = Batch([1, 2], Point(3, 4))
-    cleared = batch with {
+    cleared Batch = {
+        ...batch
         items: []
         position: new(0, 0)
     }

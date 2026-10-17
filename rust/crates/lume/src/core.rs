@@ -339,11 +339,6 @@ pub enum Expr {
         explicit_type_args: Option<Vec<TypeRef>>,
         span: Span,
     },
-    RecordUpdate {
-        receiver: Box<Expr>,
-        patch: Box<Expr>,
-        span: Span,
-    },
     RecordLiteral {
         fields: Vec<CallArg>,
         values: Vec<Expr>,
@@ -439,7 +434,6 @@ impl Expr {
             | Expr::ContextualNew { span, .. }
             | Expr::Member { span, .. }
             | Expr::Index { span, .. }
-            | Expr::RecordUpdate { span, .. }
             | Expr::RecordLiteral { span, .. }
             | Expr::AnonymousObject { span, .. }
             | Expr::Try { span, .. }

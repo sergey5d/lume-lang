@@ -655,12 +655,6 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
             rewrite_expr_for_runtime(receiver, module, graph);
             rewrite_expr_for_runtime(index, module, graph);
         }
-        ast::Expr::RecordUpdate {
-            receiver, patch, ..
-        } => {
-            rewrite_expr_for_runtime(receiver, module, graph);
-            rewrite_expr_for_runtime(patch, module, graph);
-        }
         ast::Expr::RecordLiteral { fields, values, .. } => {
             for field in fields {
                 rewrite_expr_for_runtime(&mut field.value, module, graph);
@@ -1872,12 +1866,6 @@ impl<'a> Interpreter<'a> {
                     ));
                 }
                 Ok(Value::Record(Rc::new(RefCell::new(values))))
-            }
-            ir::RValue::RecordUpdate { base, patch } => {
-                let base = self.eval_operand_ref(frame, base, span)?;
-                let patch = self.eval_operand_ref(frame, patch, span)?;
-                let updates = self.record_spread_runtime_fields(patch, span)?;
-                self.record_update_value(base, updates, span)
             }
             ir::RValue::Construct { ty, fields } => self.construct_value(frame, ty, fields, span),
             ir::RValue::Variant {
@@ -3773,57 +3761,6 @@ impl<'a> Interpreter<'a> {
             field_names,
             fields,
         }))))
-    }
-
-    fn record_update_value(
-        &mut self,
-        base: Value,
-        updates: Vec<(String, Value)>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        match base {
-            Value::Record(fields) => {
-                let mut next = fields.borrow().clone();
-                for (name, value) in updates {
-                    if let Some((_, slot)) = next.iter_mut().find(|(field, _)| *field == name) {
-                        *slot = value;
-                    } else {
-                        return Err(
-                            self.runtime_error(span, format!("shape has no field '{}'", name))
-                        );
-                    }
-                }
-                Ok(Value::Record(Rc::new(RefCell::new(next))))
-            }
-            Value::Aggregate(instance) if instance.borrow().case_name.is_none() => {
-                let instance = instance.borrow();
-                let mut next = instance.fields.clone();
-                for (name, value) in updates {
-                    if let Some(index) =
-                        instance.field_names.iter().position(|field| field == &name)
-                    {
-                        next[index] = value;
-                    } else {
-                        return Err(self.runtime_error(
-                            span,
-                            format!("value '{}' has no field '{}'", instance.type_name, name),
-                        ));
-                    }
-                }
-                Ok(Value::Aggregate(Rc::new(RefCell::new(AggregateValue {
-                    runtime_type_id: instance.runtime_type_id,
-                    type_name: instance.type_name.clone(),
-                    kind: instance.kind,
-                    case_id: instance.case_id,
-                    case_name: instance.case_name.clone(),
-                    field_names: instance.field_names.clone(),
-                    fields: next,
-                }))))
-            }
-            other => {
-                Err(self.runtime_error(span, format!("cannot update fields on {}", other.render())))
-            }
-        }
     }
 
     fn record_spread_value(
@@ -9677,7 +9614,7 @@ mod tests {
                 projected Point = Point { ...first }
                 contextual Point = { ...first }
                 forced Point = new { ...first }
-                updated = first with { x: 4 }
+                updated Point = { ...first, x: 4 }
                 println(projected == concrete)
                 println(contextual == concrete)
                 println(forced == concrete)
@@ -10984,7 +10921,7 @@ def main() Unit {
     }
 
     #[test]
-    fn runs_global_shape_updates_through_synthetic_initializer() {
+    fn runs_global_shape_spreads_through_synthetic_initializer() {
         let program = lower_inline(
             r#"
             shape Amount {
@@ -11003,8 +10940,8 @@ def main() Unit {
 
             a1 = Amount(10, "description", 5)
             a2 = a1.multiple(a1)
-            a3 = a2 with { amount: 101, description: a2.description + " updated" }
-            a4 = (a3 with { amount: 102 }) with { count: 7 }
+            a3 Amount = { ...a2, amount: 101, description: a2.description + " updated" }
+            a4 Amount = { ...a3, amount: 102, count: 7 }
 
             def main() Unit {
                 OS.println(a2.amount, a2.description)

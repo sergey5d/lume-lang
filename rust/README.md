@@ -29,7 +29,7 @@ The Rust implementation now has these real building blocks:
 - a lowering pass that maps declarations plus Core bodies into IR
 - a real IR interpreter that executes lowered multi-module programs with
   globals, user-defined types/methods, `match`, `for`, `for ... yield`,
-  `try`, extraction operators, closures, shape updates, use declarations, and the stdlib/runtime helpers
+  `try`, extraction operators, closures, shape spreads, use declarations, and the stdlib/runtime helpers
   needed by the checked-in examples
 - a source-shaped Java generator with shared backend capability diagnostics
 - a repo-wide Rust parity test that runs non-skipped `examples/*.lum` files and

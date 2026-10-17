@@ -4734,7 +4734,6 @@ impl<'a> FunctionLowerer<'a> {
             | Expr::ContextualNew { .. }
             | Expr::Member { .. }
             | Expr::Index { .. }
-            | Expr::RecordUpdate { .. }
             | Expr::Is { .. }
             | Expr::TypeOf { .. }
             | Expr::Lambda { .. } => self.lower_expr_from_rvalue(expr),
@@ -5255,9 +5254,6 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     _ => index_result_ir_type(&receiver_ty),
                 }
-            }
-            Expr::RecordUpdate { receiver, .. } => {
-                self.infer_expr_type_with_overrides(receiver, overrides)
             }
             Expr::ExtractOr {
                 value, fallback, ..
@@ -7157,20 +7153,6 @@ impl<'a> FunctionLowerer<'a> {
             } => {
                 Some(self.lower_anonymous_object_rvalue(*kind, interfaces, fields, methods, *span))
             }
-            Expr::RecordUpdate {
-                receiver, patch, ..
-            } => {
-                let base_ty = self.infer_expr_type(receiver);
-                let patch_expected = self.shape_equality_fields(&base_ty).map(ir::Type::Record);
-                let base = self.lower_expr(receiver);
-                let patch = match (patch.as_ref(), patch_expected.as_ref()) {
-                    (Expr::RecordLiteral { .. }, Some(expected)) => {
-                        self.lower_record_update_literal(patch, expected)
-                    }
-                    _ => self.lower_expr(patch),
-                };
-                Some(ir::RValue::RecordUpdate { base, patch })
-            }
             Expr::Placeholder { .. } => None,
             _ => None,
         }
@@ -7962,15 +7944,6 @@ impl<'a> FunctionLowerer<'a> {
         }
         self.named_construct_fields(expected)?;
         self.lower_record_literal_as_construct(fields, values, expected, false)
-    }
-
-    fn lower_record_update_literal(&mut self, patch: &Expr, expected: &ir::Type) -> ir::Operand {
-        self.retain_source_expr(patch, Some(expected));
-        let patch_ty = self.infer_expr_type_against_with_overrides(patch, expected, &[]);
-        let value = self
-            .lower_rvalue_with_expected(patch, Some(expected))
-            .expect("record update literals should lower to an rvalue");
-        self.emit_temp_from_rvalue(value, patch_ty, Some(patch.span()))
     }
 
     fn lower_default_initialization(
@@ -12343,7 +12316,7 @@ mod tests {
     }
 
     #[test]
-    fn lowers_local_functions_lambdas_and_shape_updates() {
+    fn lowers_local_functions_lambdas_and_shape_spreads() {
         let program = parse_inline(
             r#"
             shape Amount {
@@ -12359,7 +12332,7 @@ mod tests {
                 def add(value Int) Int = plus(value)
 
                 current = Amount(1, "a")
-                updated = current with { amount: add(inc(1)) }
+                updated Amount = { ...current, amount: add(inc(1)) }
                 return updated.amount
             }
             "#,
@@ -12385,21 +12358,10 @@ mod tests {
                 )
             })
         }));
-        assert!(main.blocks.iter().any(|block| {
-            block.statements.iter().any(|stmt| {
-                matches!(
-                    stmt.kind,
-                    ir::StatementKind::Assign {
-                        value: ir::RValue::RecordUpdate { .. },
-                        ..
-                    }
-                )
-            })
-        }));
     }
 
     #[test]
-    fn lowers_shape_update_fields_with_base_field_context() {
+    fn lowers_shape_spread_fields_with_target_context() {
         let program = parse_inline(
             r#"
             shape Point {
@@ -12414,7 +12376,8 @@ mod tests {
 
             def main() Int {
                 original = Batch([1, 2], Point(3, 4))
-                updated = original with {
+                updated Batch = {
+                    ...original
                     items: []
                     position: new(0, 0)
                 }

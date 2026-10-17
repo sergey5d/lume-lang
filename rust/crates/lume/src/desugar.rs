@@ -244,15 +244,6 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             explicit_type_args: explicit_type_args.clone(),
             span: *span,
         },
-        ast::Expr::RecordUpdate {
-            receiver,
-            patch,
-            span,
-        } => core::Expr::RecordUpdate {
-            receiver: Box::new(desugar_expr(receiver)),
-            patch: Box::new(desugar_expr(patch)),
-            span: *span,
-        },
         ast::Expr::RecordLiteral {
             fields,
             values,

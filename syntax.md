@@ -1231,46 +1231,35 @@ available on `Vector` and `Str`; step syntax such as `values[1:5:2]` is not
 supported. At expression start, `[]` remains the contextual empty vector/map
 literal; `[:]` is meaningful only after a sliceable expression.
 
-Shape composition and exact update:
+Shape copying and composition use field spreads:
 
 ```txt
-updated = value with {
+updated Amount = {
+    ...value
     age: 42
     name: "Bob"
 }
 
 patch = { age: 43 }
-updated2 = value with patch
+updated2 Amount = {
+    ...value
+    override ...patch
+}
 ```
 
-A fresh update literal receives field-specific context from the base shape. This
-keeps partial updates concise even when a replacement needs an expected type:
+An expected shape target supplies field-specific context to replacement values:
 
 ```txt
-cleared = batch with {
+cleared Batch = {
+    ...batch
     items: []
     position: new(0, 0)
 }
 ```
 
-Here `items` is checked using the base field's collection type and `position`
-uses the base field's concrete shape type. Fields omitted from the patch remain
-unchanged; the patch is not required to construct the complete base shape.
-
-The patch itself is either a plain shape literal or an existing shape value.
-Contextual and default construction cannot be used as the patch root because
-`with` does not provide a construction target:
-
-```txt
-updated = value with new { age: 42 }     # invalid
-updated = value with new(42)             # invalid
-updated = value with default { age: 42 } # invalid
-```
-
-Contextual construction remains valid inside a replacement field, where that
-field has a concrete expected type, as in `position: new(0, 0)` above.
-
-Anonymous-shape spread:
+Here `items` is checked as `[Int]` and `position` receives the concrete `Point`
+target from `Batch`. Without an expected shape target, spread construction
+infers a fresh anonymous shape from the resulting fields.
 
 ```txt
 copy = { ...value }
@@ -1298,12 +1287,13 @@ layered = {
 }
 ```
 
-Spread entries copy fields from a class, shape, or anonymous-shape value into a
-new anonymous shape. Ordinary spreads are collision-protected. The compiler
-checks the complete literal, and every resulting field must have one
-unambiguous final provider. A field has a final provider when it comes from only
-one source, an explicit `field: value` selects it, or an
-`override ...source` spread gives that source precedence over earlier spreads.
+Spread entries copy fields from a class, shape, or anonymous-shape value.
+Without a concrete expected shape target they produce a new anonymous shape;
+with one, they construct that target. Ordinary spreads are collision-protected.
+The compiler checks the complete literal, and every resulting field must have
+one unambiguous final provider. A field has a final provider when it comes from
+only one source, an explicit `field: value` selects it, or an `override
+...source` spread gives that source precedence over earlier spreads.
 
 An explicit field resolves that field regardless of whether it appears before
 or after the colliding spreads. Duplicate explicit fields remain invalid.
@@ -1317,15 +1307,8 @@ Use `{ ...point, ...dot, x: point.x }` to resolve only `x`, or
 `{ ...point, override ...dot }` to accept all current and future overlaps from
 `dot`.
 
-`base with patch` updates existing fields on a named or anonymous shape.
-`patch` must also be a statically known named or anonymous shape. Every field in
-`patch` must already exist on `base`, and each patch field type must be
-assignable to the corresponding base field type. The result has the same shape
-as `base`, and the source value is not mutated.
-
-Classes do not support `with`. Copying a class implicitly would create unclear
-object-identity, private-state, resource, and constructor-invariant semantics.
-Classes that need copy-style updates should expose an explicit method:
+Classes are not copy-updated implicitly. A class that needs copy-style behavior
+should expose an explicit method:
 
 ```txt
 updated = account.withBalance(42)
@@ -5454,7 +5437,7 @@ Other operators / constructs:
 - `fn(...) T` for function types
 - `=>` for lambdas and by-name parameters
 - `=>` for match cases
-- `with` for interface implementation, generic bounds, and exact shape update
+- `with` for interface implementation and generic bounds
 - `override ...source` for whole-source precedence in shape construction
 - `when` for generic bound and equality conditions
 - `|` between type alternatives in a union and between alternatives in a match case
@@ -5579,12 +5562,11 @@ Newline continuation:
 - Continuation tokens:
   - binary operators: `+`, `-`, `*`, `/`, `%`, `&&`, `||`, `==`, `!=`, `<`, `<=`, `>`, `>=`
   - extraction/fallback operators: `??`
-  - exact shape update introducer: `with`
   - unary prefixes: unary `-`, `!`, `^`, `try`
   - runtime type check keywords: `is`, and contextual `not` after `is`
   - match arrow: `=>`
   - separators / chaining markers: `,`, `.`
-- Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary/update operators valid by themselves.
+- Delimited forms allow layout after opening delimiters and after commas, but they do not make leading binary operators valid by themselves.
 - Operators that require a right-hand expression may start that expression on
   the same line or the next indented line: `=`, `:=`, `+=`, `-=`, `*=`, `/=`,
   `%=`, and `<-`.

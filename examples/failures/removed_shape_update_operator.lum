@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*shape update operator ':<' was removed.*use 'value with patch'.*
+# .*shape update operator ':<' was removed.*use '\{ \.\.\.value, field: replacement \}'.*
 
 def main() Unit {
     value = { age: 41 }

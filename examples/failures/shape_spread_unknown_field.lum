@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*shape 'Amount' has no public constructor field 'missing'.*
+
+shape Amount {
+    amount Int
+}
+
+def main() Unit {
+    value = Amount(10)
+    updated Amount = { ...value, missing: 42 }
+}

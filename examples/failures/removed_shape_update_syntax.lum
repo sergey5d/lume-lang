@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*shape update syntax 'value with \{ \.\.\. \}' was removed.*use '\{ \.\.\.value, field: replacement \}'.*
+
+shape Amount {
+    amount Int
+}
+
+def main() Unit {
+    value = Amount(10)
+    updated = value with { amount: 42 }
+}
