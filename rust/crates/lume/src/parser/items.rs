@@ -562,32 +562,8 @@ impl<'a> Parser<'a> {
             );
             span
         };
-        let (name, name_span) = self.parse_callable_name("expected function name")?;
-        let generic_start = self.index;
+        let (name, _) = self.parse_callable_name("expected function name")?;
         let generic_clause = self.parse_generic_clause()?;
-        let has_generic_clause = self.index > generic_start;
-        let head_end = if has_generic_clause {
-            self.previous_span()
-        } else {
-            name_span
-        };
-        if self.at(TokenKind::LParen) && !spans_touch(head_end, self.current_span()) {
-            self.diagnostics.push(Diagnostic::error(
-                "callable_parameter_spacing",
-                if has_generic_clause {
-                    format!(
-                        "function parameter list must immediately follow the generic parameter list for '{}'; remove the space before '('",
-                        name
-                    )
-                } else {
-                    format!(
-                        "function parameter list must immediately follow '{}'; remove the space before '('",
-                        name
-                    )
-                },
-                self.current_span(),
-            ));
-        }
         let params = self.parse_param_list()?;
         let return_type = if self.callable_body_starts_here(false, false) {
             None
@@ -1105,8 +1081,9 @@ impl<'a> Parser<'a> {
         } else {
             name_span
         };
-        let params_touch_head =
-            self.at(TokenKind::LParen) && spans_touch(head_end, self.current_span());
+        let has_parameter_list = self.at(TokenKind::LParen);
+        let getter_parameter_list =
+            getter && has_parameter_list && spans_touch(head_end, self.current_span());
         let legacy_getter_syntax = !getter && !self.at(TokenKind::LParen);
         if legacy_getter_syntax {
             self.diagnostics.push(
@@ -1118,7 +1095,7 @@ impl<'a> Parser<'a> {
                 .with_help(format!("write `get {} Type = ...`", name)),
             );
         }
-        if getter && params_touch_head {
+        if getter_parameter_list {
             self.diagnostics.push(
                 Diagnostic::error(
                     "getter_parameter_list",
@@ -1131,24 +1108,7 @@ impl<'a> Parser<'a> {
                 )),
             );
         }
-        if !getter && self.at(TokenKind::LParen) && !params_touch_head {
-            self.diagnostics.push(Diagnostic::error(
-                "callable_parameter_spacing",
-                if has_generic_clause {
-                    format!(
-                        "method parameter list must immediately follow the generic parameter list for '{}'; remove the space before '('",
-                        name
-                    )
-                } else {
-                    format!(
-                        "method parameter list must immediately follow '{}'; remove the space before '('",
-                        name
-                    )
-                },
-                self.current_span(),
-            ));
-        }
-        let params = if getter && params_touch_head {
+        let params = if getter_parameter_list {
             self.parse_param_list()?;
             Vec::new()
         } else if getter || legacy_getter_syntax {

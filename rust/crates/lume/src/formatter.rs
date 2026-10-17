@@ -514,6 +514,18 @@ mod tests {
     }
 
     #[test]
+    fn canonicalizes_spaces_before_callable_parameter_lists() {
+        let result = format(
+            "def calculate (input Int) Int = input\ndef identity[T] (input T) T = input\nclass Calculator {\ndef calculate (input Int) Int = input\ndef convert[T] () T = panic(\"missing\")\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def calculate(input Int) Int = input\ndef identity[T](input T) T = input\nclass Calculator {\n    def calculate(input Int) Int = input\n    def convert[T]() T = panic(\"missing\")\n}\n"
+        );
+    }
+
+    #[test]
     fn indentation_does_not_extend_an_unbraced_lambda() {
         let result = format(
             "def main() Unit {\nmapper fn(Int) Int = value =>\n        value + 1\n        next = 2\nprintln(mapper(next))\n}\n",

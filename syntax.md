@@ -2318,15 +2318,16 @@ def map[T](value T) T = value          # generic method
 get values [Int] = items               # getter returning Vector[Int]
 ```
 
-Function and method parameter lists must touch the callable name, or the final
-`]` of a generic clause:
+Horizontal whitespace before a function or method parameter list is
+insignificant. The formatter removes it and uses the touching form as canonical
+style:
 
 ```txt
 def calculate(input Int) Int = input
 def convert[T](input T) T = input
 
-def calculate (input Int) Int = input  # error: remove the space before `(`
-def convert[T] (input T) T = input     # error: remove the space before `(`
+def calculate (input Int) Int = input  # valid; formats as calculate(...)
+def convert[T] (input T) T = input     # valid; formats as convert[T](...)
 ```
 
 Getters are read through ordinary member access and still lower to

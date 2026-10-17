@@ -7420,28 +7420,25 @@ class Accessors {
 }
 
 #[test]
-fn rejects_whitespace_before_function_and_method_parameter_lists() {
+fn allows_whitespace_before_function_and_method_parameter_lists() {
     let result = parse(
         r#"
 def calculate (input Int) Int = input
 def identity[T] (input T) T = input
 
-class Invalid {
+class Calculator {
     def calculate (input Int) Int = input
     def convert[T] () T = panic("missing")
 }
+
+def main() Unit {
+    def local (input Int) Int = input
+    calculator = Calculator()
+    println(calculate(1), identity[Int](2), calculator.calculate(3), local(4))
+}
 "#,
     );
-    let spacing = result
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| diagnostic.code == "callable_parameter_spacing")
-        .collect::<Vec<_>>();
-    assert_eq!(spacing.len(), 4, "{:#?}", result.diagnostics);
-    assert!(spacing[0].message.contains("function parameter list"));
-    assert!(spacing[1].message.contains("generic parameter list"));
-    assert!(spacing[2].message.contains("method parameter list"));
-    assert!(spacing[3].message.contains("generic parameter list"));
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
