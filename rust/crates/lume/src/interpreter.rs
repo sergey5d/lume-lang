@@ -5836,6 +5836,29 @@ impl<'a> Interpreter<'a> {
                     )),
                 };
             }
+            if kind == crate::ast::TypeKind::Record {
+                let declared_equals = self.find_declared_method_overload_for_kind(
+                    &type_name,
+                    kind,
+                    "equals",
+                    &[right.clone()],
+                );
+                if let Some(function) = declared_equals {
+                    return match self.call_function(
+                        function,
+                        Some(left.clone()),
+                        None,
+                        vec![right.clone()],
+                        span,
+                    )? {
+                        Value::Bool(equal) => Ok(equal),
+                        other => Err(self.runtime_error(
+                            span,
+                            format!("equals(other) must return Bool, got {}", other.render()),
+                        )),
+                    };
+                }
+            }
         }
 
         if let (Some(mut lhs), Some(mut rhs)) = (
@@ -6099,6 +6122,25 @@ impl<'a> Interpreter<'a> {
                     };
                 }
 
+                if kind == crate::ast::TypeKind::Record
+                    && let Some(function) =
+                        self.find_declared_method_overload_for_kind(&type_name, kind, "hash", &[])
+                {
+                    return match self.call_function(
+                        function,
+                        Some(value.clone()),
+                        None,
+                        Vec::new(),
+                        span,
+                    )? {
+                        Value::Int(hash) => Ok(hash),
+                        other => Err(self.runtime_error(
+                            span,
+                            format!("hash() must return Int, got {}", other.render()),
+                        )),
+                    };
+                }
+
                 if kind == crate::ast::TypeKind::Record {
                     "shape".hash(&mut hasher);
                     let mut fields = field_names.into_iter().zip(fields).collect::<Vec<_>>();
@@ -6303,6 +6345,18 @@ impl<'a> Interpreter<'a> {
         let mut visited = HashSet::new();
         let mut candidates = Vec::new();
         self.collect_methods_for_kind_inner(owner, kind, method, &mut visited, &mut candidates);
+        self.choose_function_overload(&candidates, args)
+    }
+
+    fn find_declared_method_overload_for_kind(
+        &self,
+        owner: &str,
+        kind: crate::ast::TypeKind,
+        method: &str,
+        args: &[Value],
+    ) -> Option<ir::FunctionId> {
+        let ty = self.lookup_type_by_kind(owner, kind)?;
+        let candidates = self.runtime.methods_named(ty.id, method);
         self.choose_function_overload(&candidates, args)
     }
 
@@ -8875,6 +8929,62 @@ mod tests {
             run.output,
             "true\nfalse\nfalse\ntrue\ntrue\ntrue\ntrue\ntrue\n"
         );
+    }
+
+    #[test]
+    fn shape_equality_uses_field_contracts_and_explicit_implementations() {
+        let program = lower_inline(
+            r#"
+            class Key with Eq[Key] {
+                id Int
+                note Str
+
+                def equals(other Key) Bool = this.id == other.id
+            }
+
+            shape WrappedKey {
+                key Key
+            }
+
+            shape PrivateEntry with Eq[PrivateEntry] {
+                id Int
+                private note Str = "hidden"
+
+                def equals(other PrivateEntry) Bool = this.id == other.id
+            }
+
+            shape PrivateKey with Hashed[PrivateKey] {
+                id Int
+                note Str
+                private marker Int = 0
+
+                def equals(other PrivateKey) Bool = this.id == other.id
+                def hash() Int = this.id
+            }
+
+            def main() Unit {
+                println(WrappedKey(Key(1, "left")) == WrappedKey(Key(1, "right")))
+                println(WrappedKey(Key(1, "left")) == WrappedKey(Key(2, "left")))
+                println(PrivateEntry(1) == PrivateEntry(1))
+                println(PrivateEntry(1) != PrivateEntry(2))
+                left = PrivateKey(7, "left")
+                right = PrivateKey(7, "right")
+                println(left == right)
+                println(left.hash() == right.hash())
+                values [PrivateKey: Str] = [left: "found"]
+                println(values[right] !)
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(
+            run.diagnostics.is_empty(),
+            "output: {}\n{:#?}",
+            run.output,
+            run.diagnostics
+        );
+        assert_eq!(run.output, "true\nfalse\ntrue\ntrue\ntrue\ntrue\nfound\n");
     }
 
     #[test]

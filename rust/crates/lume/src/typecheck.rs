@@ -1819,18 +1819,6 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if decl.kind == TypeKind::Record {
-                        if field.visibility != Visibility::Default {
-                            self.add_error(
-                                "invalid_shape_field",
-                                format!(
-                                    "shape '{}' cannot declare {} field '{}'; shape fields are public structural data",
-                                    decl.name,
-                                    visibility_label(field.visibility),
-                                    field.name
-                                ),
-                                field.span,
-                            );
-                        }
                         if field.mutable {
                             self.add_error(
                                 "invalid_shape_field",
@@ -1866,19 +1854,6 @@ impl<'a> Checker<'a> {
                 }
                 TypeMember::Case(case) => {
                     for field in &case.fields {
-                        if case.kind == TypeKind::Record && field.visibility != Visibility::Default
-                        {
-                            self.add_error(
-                                "invalid_shape_field",
-                                format!(
-                                    "shape union variant '{}' cannot declare {} field '{}'; shape fields are public structural data",
-                                    case.name,
-                                    visibility_label(field.visibility),
-                                    field.name
-                                ),
-                                field.span,
-                            );
-                        }
                         if case.kind == TypeKind::Record && field.mutable {
                             self.add_error(
                                 "invalid_shape_field",
@@ -9272,6 +9247,23 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
+
+        let mut reported = HashSet::new();
+        for operand in [left, right] {
+            if reported.insert(operand.describe())
+                && !self.is_equality_type(operand, &mut HashSet::new())
+            {
+                self.add_error(
+                    "missing_equality_contract",
+                    format!(
+                        "type '{}' has no equality contract; a shape derives equality only when every field is public and satisfies Eq, otherwise declare 'with Eq[{}]' and implement equals(other)",
+                        operand.describe(),
+                        operand.describe()
+                    ),
+                    span,
+                );
+            }
+        }
     }
 
     fn supports_reference_id(&self, ty: &Ty) -> bool {
@@ -10720,6 +10712,12 @@ impl<'a> Checker<'a> {
     }
 
     fn member_type(&self, receiver: &Ty, name: &str) -> Option<Ty> {
+        if name == "equals"
+            && !matches!(receiver, Ty::Unknown)
+            && !self.is_equality_type(receiver, &mut HashSet::new())
+        {
+            return None;
+        }
         if name == "hash" && self.is_hashable_type(receiver, &mut HashSet::new()) {
             return Some(Ty::Function(Vec::new(), Box::new(Ty::int())));
         }
@@ -10832,6 +10830,12 @@ impl<'a> Checker<'a> {
     }
 
     fn member_method_sigs(&self, receiver: &Ty, name: &str) -> Option<Vec<FunctionSig>> {
+        if name == "equals"
+            && !matches!(receiver, Ty::Unknown)
+            && !self.is_equality_type(receiver, &mut HashSet::new())
+        {
+            return None;
+        }
         if name == "hash" && self.is_hashable_type(receiver, &mut HashSet::new()) {
             return Some(vec![hash_method_sig()]);
         }
@@ -13264,11 +13268,13 @@ impl<'a> Checker<'a> {
             {
                 true
             }
-            Ty::Record(_) => true,
+            Ty::Record(fields) => fields
+                .iter()
+                .all(|(_, field_ty)| self.is_equality_type(field_ty, seen)),
             Ty::Tuple(items) | Ty::Union(items) => {
                 items.iter().all(|item| self.is_equality_type(item, seen))
             }
-            Ty::Named(name, _) => {
+            Ty::Named(name, args) => {
                 if let Some((owner_name, _)) = enum_case_view_parts(name) {
                     return self
                         .lookup_any_type(owner_name)
@@ -13278,7 +13284,28 @@ impl<'a> Checker<'a> {
                     return false;
                 };
                 match sig.kind {
-                    TypeKind::Record | TypeKind::Enum | TypeKind::Object => true,
+                    TypeKind::Record => {
+                        if self.type_sig_has_equality_bound(&sig, ty, seen) {
+                            return true;
+                        }
+                        let key = format!("shape-equality:{}", ty.describe());
+                        if !seen.insert(key.clone()) {
+                            return true;
+                        }
+                        let subst = sig
+                            .type_params
+                            .iter()
+                            .cloned()
+                            .zip(args.iter().cloned())
+                            .collect::<HashMap<_, _>>();
+                        let derives = sig.fields.iter().all(|field| {
+                            field.visibility == Visibility::Default
+                                && self.is_equality_type(&substitute_type(&field.ty, &subst), seen)
+                        });
+                        seen.remove(&key);
+                        derives
+                    }
+                    TypeKind::Enum | TypeKind::Object => true,
                     TypeKind::Class | TypeKind::Interface => {
                         self.type_sig_has_equality_bound(&sig, ty, seen)
                     }
@@ -13329,6 +13356,12 @@ impl<'a> Checker<'a> {
                     TypeKind::Enum => self.enum_sig_is_hashable(&sig, args, None, seen),
                     TypeKind::Object => true,
                     TypeKind::Record => {
+                        if self.type_sig_has_hashed_bound(&sig, ty, seen) {
+                            return true;
+                        }
+                        if self.type_sig_has_equality_bound(&sig, ty, seen) {
+                            return false;
+                        }
                         let key = ty.describe();
                         if !seen.insert(key.clone()) {
                             return true;
@@ -13340,7 +13373,8 @@ impl<'a> Checker<'a> {
                             .zip(args.iter().cloned())
                             .collect::<HashMap<_, _>>();
                         let hashable = sig.fields.iter().all(|field| {
-                            self.is_hashable_type(&substitute_type(&field.ty, &subst), seen)
+                            field.visibility == Visibility::Default
+                                && self.is_hashable_type(&substitute_type(&field.ty, &subst), seen)
                         });
                         seen.remove(&key);
                         hashable
@@ -16498,6 +16532,159 @@ def main() Unit {
     }
 
     #[test]
+    fn derives_shape_equality_only_from_public_equality_fields() {
+        let program = parse_inline(
+            r#"
+class Token {
+    value Int
+}
+
+shape Entry {
+    token Token
+}
+
+shape Nested {
+    entry Entry
+}
+
+shape Box[T] {
+    value T
+}
+
+shape PrivateEntry {
+    value Int
+    private marker Int = 0
+}
+
+shape InternalEntry {
+    value Int
+    internal marker Int = 0
+}
+
+def requireEq[T with Eq[T]](value T) Unit = ()
+
+def main() Unit {
+    entry = Entry(Token(1))
+    nested = Nested(entry)
+    privateEntry = PrivateEntry(1)
+    internalEntry = InternalEntry(1)
+
+    _ = entry == entry
+    _ = nested == nested
+    _ = privateEntry == privateEntry
+    _ = internalEntry == internalEntry
+    requireEq(Box(1))
+    requireEq(Box(Token(1)))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "missing_equality_contract")
+                .count(),
+            4,
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "generic_bound_not_satisfied"
+                    && diagnostic.message.contains("Box[Token]")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn explicit_shape_equality_allows_non_public_and_non_equality_fields() {
+        let program = parse_inline(
+            r#"
+class Token {
+    value Int
+}
+
+shape Entry with Eq[Entry] {
+    token Token
+    private marker Int = 0
+
+    def equals(other Entry) Bool =
+        this.token.referenceId == other.token.referenceId
+}
+
+def requireEq[T with Eq[T]](value T) Unit = ()
+
+def main() Unit {
+    token = Token(1)
+    first = Entry(token)
+    alias = Entry(token)
+    other = Entry(Token(1))
+
+    requireEq(first)
+    _ = first == alias
+    _ = first != other
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn derives_shape_hashing_only_from_public_hashed_fields() {
+        let program = parse_inline(
+            r#"
+shape PublicKey {
+    id Int
+}
+
+shape PrivateKey {
+    id Int
+    private marker Int = 0
+}
+
+shape CustomEquality with Eq[CustomEquality] {
+    id Int
+    note Str
+
+    def equals(other CustomEquality) Bool = this.id == other.id
+}
+
+shape ExplicitKey with Hashed[ExplicitKey] {
+    id Int
+    private marker Int = 0
+
+    def equals(other ExplicitKey) Bool = this.id == other.id
+    def hash() Int = this.id
+}
+
+def requireHash[T with Hashed[T]](value T) Unit = ()
+
+def main() Unit {
+    requireHash(PublicKey(1))
+    requireHash(PrivateKey(1))
+    requireHash(CustomEquality(1, "one"))
+    requireHash(ExplicitKey(1))
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert_eq!(
+            result
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "generic_bound_not_satisfied")
+                .count(),
+            2,
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn derives_equality_and_hashing_recursively_for_tuples_and_declared_unions() {
         let program = parse_inline(
             r#"
@@ -16567,7 +16754,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_hashed_bound_for_shape_with_non_hashed_class_field() {
+    fn rejects_equality_and_hashed_bounds_for_shape_with_uncontracted_class_field() {
         let program = parse_inline(
             r#"
 class MutableReference {
@@ -16602,7 +16789,7 @@ def main() Unit {
                 .iter()
                 .filter(|diagnostic| diagnostic.code == "generic_bound_not_satisfied")
                 .count(),
-            1,
+            2,
             "{:#?}",
             result.diagnostics
         );

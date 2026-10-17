@@ -1,7 +1,11 @@
 # FAIL_REGEX:
-# .*shape 'SecretPoint' cannot declare private field 'x'.*
+# .*type 'SecretPoint' has no equality contract.*every field is public and satisfies Eq.*
 
 shape SecretPoint {
-    private x Int
+    private x Int = 0
     y Int
+}
+
+def main() Unit {
+    _ = SecretPoint(1) == SecretPoint(1)
 }

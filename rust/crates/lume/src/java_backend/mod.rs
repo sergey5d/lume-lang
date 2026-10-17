@@ -6427,6 +6427,22 @@ shape Box[T] {
 shape Marker {
 }
 
+shape PrivateEntry with Eq[PrivateEntry] {
+    id Int
+    private note Str = "hidden"
+
+    def equals(other PrivateEntry) Bool = this.id == other.id
+}
+
+shape PrivateHashKey with Hashed[PrivateHashKey] {
+    id Int
+    note Str
+    private marker Int = 0
+
+    def equals(other PrivateHashKey) Bool = this.id == other.id
+    def hash() Int = this.id
+}
+
 def main() Unit {
     x = 1
     label = "one"
@@ -6448,6 +6464,11 @@ def main() Unit {
     println(Point(1, "one") == ReorderedPoint("one", 1))
 
     println(Marker {} == Marker {})
+    println(PrivateEntry(1) == PrivateEntry(1))
+    println(PrivateEntry(1) != PrivateEntry(2))
+    hashKeys [PrivateHashKey: Str] = []
+    hashKeys[PrivateHashKey(7, "left")] := "found"
+    println(hashKeys[PrivateHashKey(7, "right")] !)
 
     println(Account(1) == Account(1))
     println(Account(1) != Account(2))
@@ -6486,8 +6507,25 @@ def main() Unit {
         let generic =
             fs::read_to_string(out.join("demo/shapevalue/Box.java")).expect("read generated Box");
         assert!(generic.contains("other instanceof Box<?> that"));
-        assert!(generic.contains("implements Eq<Box<T>>, LumeTyped"));
+        assert!(!generic.contains("Eq<Box<T>>"));
         assert!(!generic.contains("Hashed<"));
+
+        let private_entry = fs::read_to_string(out.join("demo/shapevalue/PrivateEntry.java"))
+            .expect("read generated PrivateEntry");
+        assert!(private_entry.contains("implements Eq<PrivateEntry>, LumeTyped"));
+        assert!(private_entry.contains("public Boolean equals(PrivateEntry "));
+        assert!(private_entry.contains("return Boolean.TRUE.equals(this.equals(that))"));
+        assert!(!private_entry.contains("Objects.equals(this.note, that.note)"));
+        assert!(private_entry.contains("public int hashCode()"));
+        assert!(private_entry.contains("return 0;"));
+
+        let private_hash_key = fs::read_to_string(out.join("demo/shapevalue/PrivateHashKey.java"))
+            .expect("read generated PrivateHashKey");
+        assert!(private_hash_key.contains("implements Hashed<PrivateHashKey>, LumeTyped"));
+        assert!(private_hash_key.contains("return Boolean.TRUE.equals(this.equals(that))"));
+        assert!(!private_hash_key.contains("Objects.equals(this.note, that.note)"));
+        assert!(private_hash_key.contains("return Long.hashCode(this.hash())"));
+        assert!(!private_hash_key.contains("Objects.hash(this.id, this.marker, this.note)"));
 
         let reordered = fs::read_to_string(out.join("demo/shapevalue/ReorderedPoint.java"))
             .expect("read generated ReorderedPoint");
@@ -6536,7 +6574,7 @@ def main() Unit {
         );
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
-            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+            "true\nfalse\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\nfound\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
         );
 
         let _ = fs::remove_dir_all(temp);

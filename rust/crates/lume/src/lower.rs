@@ -135,18 +135,46 @@ impl<'a> Lowerer<'a> {
                         .map(ir::Type::TypeParam)
                         .collect(),
                 };
-                let hashed = if ty.kind == ast::TypeKind::Object {
-                    true
-                } else {
-                    ty.fields
-                        .iter()
-                        .chain(ty.enum_cases.iter().flat_map(|case| case.fields.iter()))
-                        .all(|field| {
-                            ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new())
-                        })
+                let (equality, hashed) = match ty.kind {
+                    ast::TypeKind::Object => (true, true),
+                    ast::TypeKind::Enum => {
+                        let hashed = ty
+                            .fields
+                            .iter()
+                            .chain(ty.enum_cases.iter().flat_map(|case| case.fields.iter()))
+                            .all(|field| {
+                                ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new())
+                            });
+                        (true, hashed)
+                    }
+                    ast::TypeKind::Record => {
+                        let explicit_hashed =
+                            ir_type_has_hashed_bound(ty, &self_ty, &types, &mut HashSet::new());
+                        let explicit_equality =
+                            ir_type_has_equality_bound(ty, &self_ty, &types, &mut HashSet::new());
+                        if explicit_hashed || explicit_equality {
+                            (false, false)
+                        } else {
+                            let equality = ty.fields.iter().all(|field| {
+                                field.visibility == ast::Visibility::Default
+                                    && ir_type_is_equality(
+                                        &field.ty,
+                                        ty,
+                                        &types,
+                                        &mut HashSet::new(),
+                                    )
+                            });
+                            let hashed = equality
+                                && ty.fields.iter().all(|field| {
+                                    ir_type_is_hashable(&field.ty, ty, &types, &mut HashSet::new())
+                                });
+                            (equality, hashed)
+                        }
+                    }
+                    _ => unreachable!("filtered value-bound derivation kind"),
                 };
                 Some((
-                    (!hashed).then(|| ir::Type::Named {
+                    (equality && !hashed).then(|| ir::Type::Named {
                         name: "Eq".to_string(),
                         args: vec![self_ty.clone()],
                     }),
@@ -11019,6 +11047,12 @@ fn ir_type_is_hashable(
                 }
                 ast::TypeKind::Object => true,
                 ast::TypeKind::Record => {
+                    if ir_type_has_hashed_bound(definition, ty, types, seen) {
+                        return true;
+                    }
+                    if ir_type_has_equality_bound(definition, ty, types, seen) {
+                        return false;
+                    }
                     let key = format!("{}<{args:?}>", definition.name);
                     if !seen.insert(key.clone()) {
                         return true;
@@ -11030,14 +11064,93 @@ fn ir_type_is_hashable(
                         .zip(args.iter().cloned())
                         .collect::<HashMap<_, _>>();
                     let hashable = definition.fields.iter().all(|field| {
-                        let field_ty = substitute_ir_type(&field.ty, &subst);
-                        ir_type_is_hashable(&field_ty, definition, types, seen)
+                        field.visibility == ast::Visibility::Default && {
+                            let field_ty = substitute_ir_type(&field.ty, &subst);
+                            ir_type_is_hashable(&field_ty, definition, types, seen)
+                        }
                     });
                     seen.remove(&key);
                     hashable
                 }
                 ast::TypeKind::Class => ir_type_has_hashed_bound(definition, ty, types, seen),
                 ast::TypeKind::Annotation | ast::TypeKind::Interface => false,
+            }
+        }
+        ir::Type::Unknown | ir::Type::Never | ir::Type::Function { .. } => false,
+    }
+}
+
+fn ir_type_is_equality(
+    ty: &ir::Type,
+    owner: &ir::TypeDef,
+    types: &[ir::TypeDef],
+    seen: &mut HashSet<String>,
+) -> bool {
+    match ty {
+        ir::Type::Unit | ir::Type::Bool | ir::Type::Int | ir::Type::Float | ir::Type::Str => true,
+        ir::Type::Named { name, args }
+            if args.is_empty()
+                && matches!(
+                    name.as_str(),
+                    "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                ) =>
+        {
+            true
+        }
+        ir::Type::TypeParam(name) => owner.generic_conditions.iter().any(|condition| {
+            matches!(
+                condition,
+                ir::GenericCondition::Bound {
+                    subject: ir::Type::TypeParam(subject),
+                    bound: ir::Type::Named { name: bound, args }
+                } if subject == name
+                    && matches!(bound.as_str(), "Eq" | "Hashed")
+                    && args.len() == 1
+                    && matches!(&args[0], ir::Type::TypeParam(bound_param) if bound_param == name)
+            )
+        }),
+        ir::Type::Record(fields) => fields
+            .iter()
+            .all(|field| ir_type_is_equality(&field.ty, owner, types, seen)),
+        ir::Type::Tuple(items) | ir::Type::Union(items) => items
+            .iter()
+            .all(|item| ir_type_is_equality(item, owner, types, seen)),
+        ir::Type::Named { name, args } => {
+            if enum_case_view_parts(name).is_some() {
+                return true;
+            }
+            let Some(definition) = types.iter().find(|candidate| candidate.name == *name) else {
+                return false;
+            };
+            match definition.kind {
+                ast::TypeKind::Enum | ast::TypeKind::Object => true,
+                ast::TypeKind::Record => {
+                    if ir_type_has_equality_bound(definition, ty, types, seen) {
+                        return true;
+                    }
+                    let key = format!("shape-equality:{}<{args:?}>", definition.name);
+                    if !seen.insert(key.clone()) {
+                        return true;
+                    }
+                    let subst = definition
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(args.iter().cloned())
+                        .collect::<HashMap<_, _>>();
+                    let equality = definition.fields.iter().all(|field| {
+                        field.visibility == ast::Visibility::Default && {
+                            let field_ty = substitute_ir_type(&field.ty, &subst);
+                            ir_type_is_equality(&field_ty, definition, types, seen)
+                        }
+                    });
+                    seen.remove(&key);
+                    equality
+                }
+                ast::TypeKind::Class | ast::TypeKind::Interface => {
+                    ir_type_has_equality_bound(definition, ty, types, seen)
+                }
+                ast::TypeKind::Annotation => false,
             }
         }
         ir::Type::Unknown | ir::Type::Never | ir::Type::Function { .. } => false,
@@ -11089,6 +11202,42 @@ fn ir_enum_type_is_hashable(
     };
     seen.remove(&key);
     shared_fields_hashable && cases_hashable
+}
+
+fn ir_type_has_equality_bound(
+    ty: &ir::TypeDef,
+    actual: &ir::Type,
+    types: &[ir::TypeDef],
+    seen: &mut HashSet<String>,
+) -> bool {
+    let key = format!("equality:{}:{actual:?}", ty.name);
+    if !seen.insert(key.clone()) {
+        return false;
+    }
+    let subst = match actual {
+        ir::Type::Named { args, .. } => ty
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>(),
+        _ => HashMap::new(),
+    };
+    let found = ty.with_bounds.iter().any(|bound| {
+        let bound = substitute_ir_type(bound, &subst);
+        let ir::Type::Named { name, args } = &bound else {
+            return false;
+        };
+        if matches!(name.as_str(), "Eq" | "Hashed") {
+            return args.len() == 1 && args[0] == *actual;
+        }
+        types
+            .iter()
+            .find(|candidate| candidate.name == *name)
+            .is_some_and(|parent| ir_type_has_equality_bound(parent, &bound, types, seen))
+    });
+    seen.remove(&key);
+    found
 }
 
 fn ir_type_has_hashed_bound(

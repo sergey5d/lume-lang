@@ -1977,7 +1977,7 @@ settings Settings = new {}
 ```
 
 Named shapes are data-only structural field views:
-- fields are always visible and read-only
+- fields are read-only; they are public by default and may be `internal` or `private`
 - fields are declared in the `shape` body
 - methods are declared directly in the `shape` body
 - custom `new` constructors are not allowed
@@ -2044,12 +2044,16 @@ named = Holder { payload }      # one named input using field punning
 
 Shape equality is structural across shape declarations:
 
-- comparing two shapes with `==`, `!=`, or `equals(...)` requires the same complete set of field names and normalized field types
+- a shape derives `Eq` only when every stored field is public and its type satisfies `Eq`
+- a shape with an `internal` or `private` field does not derive equality, even when that field's type satisfies `Eq`
+- a shape that cannot derive equality remains a valid data type; only operations requiring `Eq` are rejected
+- such a shape may declare `with Eq[ShapeName]` and implement `equals(other ShapeName)` explicitly
+- comparing two implicitly equality-capable shapes with `==`, `!=`, or `equals(...)` requires the same complete set of field names and normalized field types
 - field declaration order may differ
 - the right operand is converted to the left operand's shape by field name, then ordinary value equality is applied
 - unlike shape assignment, equality does not ignore extra fields
 - width-compatible shapes must first be projected through a narrower typed binding, parameter, return, cast, or collection element type
-- generated Java shape records define field-based `equals` and matching `hashCode` methods; hash inputs are ordered by field name so declaration order does not change the hash
+- generated Java for implicit shape equality compares fields through their equality contracts; hash inputs are ordered by field name so declaration order does not change the hash
 
 ```txt
 shape Point { x Int, y Int }
@@ -2073,7 +2077,7 @@ narrowed before comparison.
 
 | Operands | `==` / `!=` |
 | --- | --- |
-| same shape schema | field equality |
+| same shape schema, with derived `Eq` on both sides | field equality |
 | different shape names, same schema | field equality by name |
 | width-compatible shape schemas | error; project to a common narrower shape first |
 | class and shape | error; project explicitly before erasure |
@@ -2089,8 +2093,11 @@ the participating type's declared equality. Collections never replace a
 class's `equals` method with direct comparison of its stored fields.
 
 `Hashed[T]` extends `Eq[T]` and declares `hash() Int`. Equal values must return
-the same hash. Every shape derives `Eq` structurally and derives `Hashed[Shape]`
-only when every field type is hashable:
+the same hash. A shape derives `Eq` structurally only under the public-field
+rule above, and derives `Hashed[Shape]` only when it derives `Eq` and every
+field type is hashable. A shape with an explicit `Eq` implementation must also
+implement `Hashed` explicitly if it is to be hashable, because a structural
+hash might not match its custom equality:
 
 ```txt
 interface Eq[T] {
@@ -2109,6 +2116,7 @@ class Map[K with Hashed[K], V] {
 - primitives and singleton object values are intrinsically hashable
 - a tuple derives `Eq` when every item type satisfies `Eq`, and derives `Hashed` when every item type satisfies `Hashed`
 - a declared union derives `Hashed` only when every shared field and every payload field of every alternative is hashable; zero-payload object alternatives are always safe
+- nested shapes participate through their own derived or explicit equality contracts; the outer shape does not inspect class storage
 - nested shapes are hashable when their own fields are recursively hashable
 - a class is hashable only when it explicitly implements `Hashed[ClassName]`, including `equals` and `hash`
 - a type parameter is hashable only when it has a `Hashed[T]` bound

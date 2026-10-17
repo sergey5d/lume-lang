@@ -392,13 +392,18 @@ fn render_shape(
     ));
     push_type_descriptor(&mut out, bundle, ty, package, names);
     push_runtime_type_method(&mut out, false);
-    push_shape_value_methods(&mut out, ty);
+    push_shape_value_methods(&mut out, bundle, ty, names);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     out.push_str("}\n");
     out
 }
 
-fn push_shape_value_methods(out: &mut String, ty: &ir::TypeDef) {
+fn push_shape_value_methods(
+    out: &mut String,
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    names: &JavaNames,
+) {
     let shape_name = java_type_name(&ty.name);
     let pattern_type = if ty.type_params.is_empty() {
         shape_name.clone()
@@ -412,43 +417,73 @@ fn push_shape_value_methods(out: &mut String, ty: &ir::TypeDef) {
         )
     };
 
-    out.push_str("\n    @Override\n");
-    out.push_str("    public boolean equals(Object other) {\n");
-    out.push_str("        if (this == other) return true;\n");
-    out.push_str(&format!(
-        "        if (!(other instanceof {pattern_type} that)) return false;\n"
-    ));
-    if ty.fields.is_empty() {
-        out.push_str("        return true;\n");
+    let declares_equality = (java_type_has_bound(bundle, ty, "Eq", &mut HashSet::new())
+        || java_type_has_bound(bundle, ty, "Hashed", &mut HashSet::new()))
+        && ty.methods.iter().any(|method| {
+            bundle
+                .ir
+                .function(*method)
+                .is_some_and(|function| function.name == "equals" && function.params.len() == 1)
+        });
+    if declares_equality {
+        push_class_equality_bridge(out, bundle, ty, names);
     } else {
-        out.push_str("        return ");
-        for (index, field) in ty.fields.iter().enumerate() {
-            if index > 0 {
-                out.push_str("\n            && ");
+        out.push_str("\n    @Override\n");
+        out.push_str("    public boolean equals(Object other) {\n");
+        out.push_str("        if (this == other) return true;\n");
+        out.push_str(&format!(
+            "        if (!(other instanceof {pattern_type} that)) return false;\n"
+        ));
+        if ty.fields.is_empty() {
+            out.push_str("        return true;\n");
+        } else {
+            out.push_str("        return ");
+            for (index, field) in ty.fields.iter().enumerate() {
+                if index > 0 {
+                    out.push_str("\n            && ");
+                }
+                let field_name = java_member_name(&field.name);
+                out.push_str(&format!(
+                    "java.util.Objects.equals(this.{field_name}, that.{field_name})"
+                ));
             }
-            let field_name = java_member_name(&field.name);
-            out.push_str(&format!(
-                "java.util.Objects.equals(this.{field_name}, that.{field_name})"
-            ));
+            out.push_str(";\n");
         }
-        out.push_str(";\n");
+        out.push_str("    }\n");
     }
-    out.push_str("    }\n");
 
-    out.push_str("\n    @Override\n");
-    out.push_str("    public int hashCode() {\n");
-    out.push_str("        return java.util.Objects.hash(");
-    let mut hash_fields = ty.fields.iter().collect::<Vec<_>>();
-    hash_fields.sort_by(|left, right| left.name.cmp(&right.name));
-    out.push_str(
-        &hash_fields
-            .iter()
-            .map(|field| format!("this.{}", java_member_name(&field.name)))
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    out.push_str(");\n");
-    out.push_str("    }\n");
+    let declares_hash = java_type_has_bound(bundle, ty, "Hashed", &mut HashSet::new())
+        && ty.methods.iter().any(|method| {
+            bundle
+                .ir
+                .function(*method)
+                .is_some_and(|function| function.name == "hash" && function.params.is_empty())
+        });
+    if declares_hash {
+        push_class_hash_bridge(out, bundle, ty);
+    } else if declares_equality {
+        // Lume does not expose this shape as Hashed, but Java still requires
+        // equal record instances to have matching Object hash codes.
+        out.push_str("\n    @Override\n");
+        out.push_str("    public int hashCode() {\n");
+        out.push_str("        return 0;\n");
+        out.push_str("    }\n");
+    } else {
+        out.push_str("\n    @Override\n");
+        out.push_str("    public int hashCode() {\n");
+        out.push_str("        return java.util.Objects.hash(");
+        let mut hash_fields = ty.fields.iter().collect::<Vec<_>>();
+        hash_fields.sort_by(|left, right| left.name.cmp(&right.name));
+        out.push_str(
+            &hash_fields
+                .iter()
+                .map(|field| format!("this.{}", java_member_name(&field.name)))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        out.push_str(");\n");
+        out.push_str("    }\n");
+    }
 }
 
 fn render_single(
@@ -8187,6 +8222,51 @@ impl<'a> SourceBodyEmitter<'a> {
         Some(value)
     }
 
+    fn complete_shape_positional_args(
+        &self,
+        name: &str,
+        supplied: &[String],
+    ) -> Option<Vec<String>> {
+        let Some(shape) = self
+            .bundle
+            .ir
+            .types
+            .iter()
+            .find(|ty| ty.name == name && ty.kind == TypeKind::Record)
+        else {
+            return Some(supplied.to_vec());
+        };
+        if supplied.len() == shape.fields.len() {
+            return Some(supplied.to_vec());
+        }
+
+        let construction_fields = shape
+            .fields
+            .iter()
+            .filter(|field| field.visibility != Visibility::Private)
+            .collect::<Vec<_>>();
+        if supplied.len() > construction_fields.len() {
+            return None;
+        }
+        let supplied_by_name = construction_fields
+            .iter()
+            .zip(supplied)
+            .map(|(field, value)| (field.name.as_str(), value.clone()))
+            .collect::<HashMap<_, _>>();
+
+        shape
+            .fields
+            .iter()
+            .map(|field| {
+                supplied_by_name
+                    .get(field.name.as_str())
+                    .cloned()
+                    .or_else(|| field.initializer.as_ref().map(java_constant))
+                    .or_else(|| field.has_initializer.then(|| java_default_value(&field.ty)))
+            })
+            .collect()
+    }
+
     fn type_has_explicit_constructor(&self, name: &str) -> bool {
         self.bundle.ir.types.iter().any(|ty| {
             ty.name == name
@@ -9433,9 +9513,11 @@ impl<'a> SourceBodyEmitter<'a> {
             )),
             [owner] if emitter.is_lume_constructible_type(owner) => {
                 let generic = emitter.lume_constructor_type_args(owner);
+                let emitted = self.complete_shape_positional_args(owner, &emitted)?;
                 Some(format!(
-                    "new {}{generic}({joined})",
-                    self.names.named_type(owner)
+                    "new {}{generic}({})",
+                    self.names.named_type(owner),
+                    emitted.join(", ")
                 ))
             }
             [owner, method] if self.names.is_java_single_type(owner) => Some(format!(
