@@ -305,7 +305,6 @@ pub enum Expr {
     },
     Spread {
         value: Box<Expr>,
-        override_existing: bool,
         span: Span,
     },
     ListLiteral {

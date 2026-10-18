@@ -683,10 +683,7 @@ pub struct NamedOperand {
 /// A source-ordered anonymous-shape spread element.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordSpreadPart {
-    Spread {
-        value: Operand,
-        override_existing: bool,
-    },
+    Spread { value: Operand },
     Field(NamedOperand),
 }
 

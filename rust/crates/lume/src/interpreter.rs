@@ -3779,18 +3779,13 @@ impl<'a> Interpreter<'a> {
         let mut out = Vec::new();
         for part in parts {
             match part {
-                ir::RecordSpreadPart::Spread {
-                    value: operand,
-                    override_existing,
-                } => {
+                ir::RecordSpreadPart::Spread { value: operand } => {
                     let value = self.eval_operand_ref(frame, operand, span)?;
                     for (name, value) in self.record_spread_runtime_fields(value, span)? {
                         if explicit_names.contains(name.as_str()) {
                             if !out.iter().any(|(existing, _)| existing == &name) {
                                 out.push((name, value));
                             }
-                        } else if *override_existing {
-                            upsert_runtime_record_field(&mut out, name, value);
                         } else {
                             push_unique_runtime_record_field(&mut out, name, value, span, self)?;
                         }
@@ -8256,7 +8251,7 @@ fn push_unique_runtime_record_field(
         Err(interpreter.runtime_error(
             span,
             format!(
-                "field '{}' is provided by multiple spreads; select a value explicitly or use 'override' on one spread",
+                "field '{}' is provided by multiple spreads; select a value explicitly",
                 name
             ),
         ))
@@ -11079,18 +11074,16 @@ def main() Unit {
                 dot = { x: 3, time: 4 }
                 selected = { ...point, ...dot, x: point.x }
                 selectedFirst = { x: dot.x, ...point, ...dot }
-                overridden = { ...point, override ...dot }
 
                 OS.println(selected.x, selected.y, selected.time)
                 OS.println(selectedFirst.x, selectedFirst.y, selectedFirst.time)
-                OS.println(overridden.x, overridden.y, overridden.time)
             }
             "#,
         );
 
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
-        assert_eq!(run.output, "1 2 4\n3 2 4\n3 2 4\n");
+        assert_eq!(run.output, "1 2 4\n3 2 4\n");
     }
 
     #[test]

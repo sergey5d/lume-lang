@@ -30,7 +30,6 @@ pub enum Keyword {
     Match,
     Module,
     Object,
-    Override,
     Return,
     Reified,
     Shape,
@@ -390,7 +389,6 @@ impl<'a> Lexer<'a> {
             "let" => TokenKind::Keyword(Keyword::Let),
             "match" => TokenKind::Keyword(Keyword::Match),
             "module" => TokenKind::Keyword(Keyword::Module),
-            "override" => TokenKind::Keyword(Keyword::Override),
             "return" => TokenKind::Keyword(Keyword::Return),
             "reified" => TokenKind::Keyword(Keyword::Reified),
             "shape" => TokenKind::Keyword(Keyword::Shape),
@@ -628,7 +626,7 @@ mod tests {
     #[test]
     fn treats_removed_keywords_as_identifiers() {
         let result = lex(&source(
-            "enum Int = 1\npartial Int = 2\nhidden Str = \"value\"\n",
+            "enum Int = 1\npartial Int = 2\nhidden Str = \"value\"\noverride Bool = true\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(result.tokens[0].kind, TokenKind::Identifier);
@@ -644,6 +642,12 @@ mod tests {
                 .tokens
                 .iter()
                 .any(|token| token.kind == TokenKind::Identifier && token.lexeme == "hidden")
+        );
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Identifier && token.lexeme == "override")
         );
     }
 
@@ -710,7 +714,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = { ...value, amount: 1 }\ndefaulted = default {}\nmerged = { ...left, override ...right }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = { ...value, amount: 1 }\ndefaulted = default {}\nmerged = { ...left, ...right, amount: right.amount }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -727,7 +731,6 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Type)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Vararg)));
-        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Override)));
         assert!(kinds.contains(&TokenKind::Question));
         assert!(kinds.contains(&TokenKind::QuestionQuestion));
         assert!(kinds.contains(&TokenKind::PercentEq));

@@ -41,7 +41,9 @@ def main() Unit {
     }
     updated2 Amount = {
         ...value
-        override ...patch
+        ...patch
+        amount: patch.amount
+        description: patch.description
     }
 
     profile = Profile("Sergey", 37)
@@ -51,8 +53,10 @@ def main() Unit {
     different = Profile("Ada", 41)
     copied Profile = {
         ...profile
-        override ...namePatch
-        override ...agePatch
+        ...namePatch
+        ...agePatch
+        name: namePatch.name
+        age: agePatch.age
     }
 
     println("original " + value.amount + " " + value.description)

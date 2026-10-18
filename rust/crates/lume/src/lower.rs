@@ -6831,19 +6831,13 @@ impl<'a> FunctionLowerer<'a> {
                                         value,
                                     })
                                 } else {
-                                    let Expr::Spread {
-                                        value,
-                                        override_existing,
-                                        ..
-                                    } = &field.value
-                                    else {
+                                    let Expr::Spread { value, .. } = &field.value else {
                                         unreachable!(
                                             "shape spread fields are represented by Expr::Spread"
                                         )
                                     };
                                     ir::RecordSpreadPart::Spread {
                                         value: self.lower_expr(value),
-                                        override_existing: *override_existing,
                                     }
                                 }
                             })
@@ -8054,21 +8048,11 @@ impl<'a> FunctionLowerer<'a> {
                 ));
                 continue;
             }
-            let Expr::Spread {
-                value,
-                override_existing,
-                ..
-            } = &field.value
-            else {
+            let Expr::Spread { value, .. } = &field.value else {
                 return None;
             };
             let source_fields = self.shape_equality_fields(&self.infer_expr_type(value))?;
-            spread_sources.push((
-                source_index,
-                source_fields,
-                self.lower_expr(value),
-                *override_existing,
-            ));
+            spread_sources.push((source_index, source_fields, self.lower_expr(value)));
         }
 
         let mut lowered_fields = Vec::new();
@@ -8078,13 +8062,10 @@ impl<'a> FunctionLowerer<'a> {
                 .find(|(_, field_name, _)| field_name == &name)
             {
                 value.clone()
-            } else if let Some((_, _, source, _)) =
-                spread_sources
-                    .iter()
-                    .rev()
-                    .find(|(_, source_fields, _, _)| {
-                        source_fields.iter().any(|field| field.name == name)
-                    })
+            } else if let Some((_, _, source)) = spread_sources
+                .iter()
+                .rev()
+                .find(|(_, source_fields, _)| source_fields.iter().any(|field| field.name == name))
             {
                 ir::Operand::Copy(Box::new(ir::Place::Field {
                     base: Box::new(source.clone()),

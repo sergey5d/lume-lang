@@ -20,10 +20,11 @@ def main() Unit {
         ...dot
         x: point.x
     }
-    overridden = {
+    selectedFromDot = {
         ...point
-        override ...dot
+        ...dot
+        x: dot.x
     }
     println(selected.x, selected.y, selected.time)
-    println(overridden.x, overridden.y, overridden.time)
+    println(selectedFromDot.x, selectedFromDot.y, selectedFromDot.time)
 }

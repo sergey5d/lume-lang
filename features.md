@@ -83,8 +83,8 @@ Open checker/runtime design:
 - define diagnostics for ambiguous interface method calls so the compiler points users toward the disambiguation syntax
 
 Related syntax question:
-- whether explicit implementation/override markers would add enough readability in large types to justify extra syntax
-- if added, decide whether they should mark interface satisfaction, override of a concrete method, or both
+- whether explicit implementation markers would add enough readability in large types to justify extra syntax
+- if added, decide whether they should mark interface satisfaction, replacement of an inherited concrete method, or both
 - define diagnostics for accidental signature mismatches even if no marker is added
 
 ### Getter Effect Architecture

@@ -2946,40 +2946,14 @@ fn rejects_removed_shape_update_syntax_with_a_migration_diagnostic() {
 }
 
 #[test]
-fn parses_override_shape_spread() {
-    match parse_expr_only("{ ...left, override ...right }") {
+fn parses_override_as_an_ordinary_field_name() {
+    match parse_expr_only("{ override: true }") {
         Expr::RecordLiteral { fields, .. } => {
-            assert_eq!(fields.len(), 2);
-            assert!(matches!(
-                fields[0].value,
-                Expr::Spread {
-                    override_existing: false,
-                    ..
-                }
-            ));
-            assert!(matches!(
-                fields[1].value,
-                Expr::Spread {
-                    override_existing: true,
-                    ..
-                }
-            ));
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].name.as_deref(), Some("override"));
         }
         other => panic!("expected shape literal, got {other:#?}"),
     }
-}
-
-#[test]
-fn requires_spread_after_override_in_shape_construction() {
-    let result = parse("def run() Unit = { override right }");
-    assert!(
-        result.diagnostics.iter().any(|diag| {
-            diag.code == "expected_token"
-                || diag.message.contains("expected '...' after 'override'")
-        }),
-        "{:#?}",
-        result.diagnostics
-    );
 }
 
 #[test]

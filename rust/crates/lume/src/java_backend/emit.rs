@@ -8352,11 +8352,7 @@ impl<'a> SourceBodyEmitter<'a> {
             let source_id = field.span.start;
             let argument_name = self.synthetic_name("recordArgument", "argument", source_id);
             match &field.value {
-                core::Expr::Spread {
-                    value,
-                    override_existing,
-                    span,
-                } => {
+                core::Expr::Spread { value, span } => {
                     let source_ty = self.expr_type(value, bindings)?;
                     preamble.push(format!(
                         "{} {argument_name} = {};",
@@ -8368,7 +8364,6 @@ impl<'a> SourceBodyEmitter<'a> {
                             name: argument_name.clone(),
                             span: value.span(),
                         }),
-                        override_existing: *override_existing,
                         span: *span,
                     };
                 }
@@ -8732,13 +8727,8 @@ impl<'a> SourceBodyEmitter<'a> {
                 span: value_expr.span(),
             };
             rewritten_args[index].value = match &arg.value {
-                core::Expr::Spread {
-                    override_existing,
-                    span,
-                    ..
-                } => core::Expr::Spread {
+                core::Expr::Spread { span, .. } => core::Expr::Spread {
                     value: Box::new(identifier),
-                    override_existing: *override_existing,
                     span: *span,
                 },
                 _ => identifier,

@@ -5327,12 +5327,7 @@ impl<'a> Checker<'a> {
                                 },
                             );
                         } else {
-                            let Expr::Spread {
-                                value,
-                                override_existing,
-                                ..
-                            } = &field.value
-                            else {
+                            let Expr::Spread { value, .. } = &field.value else {
                                 self.add_error(
                                     "invalid_shape_spread",
                                     "internal shape spread representation is invalid",
@@ -5358,17 +5353,7 @@ impl<'a> Checker<'a> {
                                         continue;
                                     }
 
-                                    if *override_existing {
-                                        upsert_shape_field(&mut actual_fields, name.clone(), ty);
-                                        providers.insert(
-                                            name,
-                                            ShapeFieldProvider {
-                                                source: source.clone(),
-                                                conflicting_source: None,
-                                                span: field.span,
-                                            },
-                                        );
-                                    } else if let Some(provider) = providers.get_mut(&name) {
+                                    if let Some(provider) = providers.get_mut(&name) {
                                         provider.conflicting_source = Some(source.clone());
                                         provider.span = field.span;
                                     } else {
@@ -5391,7 +5376,7 @@ impl<'a> Checker<'a> {
                             self.add_error(
                                 "ambiguous_shape_field",
                                 format!(
-                                    "field '{}' is provided by both '{}' and '{}'; select a value explicitly or use 'override' on one spread",
+                                    "field '{}' is provided by both '{}' and '{}'; select a value explicitly",
                                     name, provider.source, conflicting_source
                                 ),
                                 provider.span,
@@ -18964,49 +18949,8 @@ def main() Unit {
                     && diag.message.contains("field 'x'")
                     && diag.message.contains("point")
                     && diag.message.contains("dot")
-                    && diag.message.contains("override")
+                    && diag.message.contains("select a value explicitly")
             }),
-            "{:#?}",
-            result.diagnostics
-        );
-    }
-
-    #[test]
-    fn override_shape_spread_resolves_earlier_overlap() {
-        let program = parse_inline(
-            r#"
-def main() Unit {
-    point = { x: 1, y: 2 }
-    dot = { x: 3, time: 4 }
-    merged = { ...point, override ...dot }
-    x Int = merged.x
-    y Int = merged.y
-    time Int = merged.time
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    }
-
-    #[test]
-    fn later_protected_spread_reopens_overlap_after_override() {
-        let program = parse_inline(
-            r#"
-def main() Unit {
-    first = { x: 1 }
-    second = { x: 2 }
-    third = { x: 3 }
-    merged = { ...first, override ...second, ...third }
-}
-"#,
-        );
-        let result = check_program(&program);
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.code == "ambiguous_shape_field"),
             "{:#?}",
             result.diagnostics
         );

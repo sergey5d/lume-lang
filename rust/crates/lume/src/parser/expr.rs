@@ -382,7 +382,6 @@ impl<'a> Parser<'a> {
             },
             Spread {
                 value: Expr,
-                override_existing: bool,
                 span: Span,
             },
             Positional {
@@ -412,25 +411,12 @@ impl<'a> Parser<'a> {
         let mut entries = Vec::new();
         self.skip_newlines();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-            let entry = if self.match_keyword(Keyword::Override) {
-                let start = self.previous_span();
-                self.consume(
-                    TokenKind::Ellipsis,
-                    "expected '...' after 'override' in shape construction",
-                )?;
-                let value = self.parse_expr()?;
-                RecordEntry::Spread {
-                    span: start.cover(value.span()),
-                    value,
-                    override_existing: true,
-                }
-            } else if self.match_token(TokenKind::Ellipsis) {
+            let entry = if self.match_token(TokenKind::Ellipsis) {
                 let start = self.previous_span();
                 let value = self.parse_expr()?;
                 RecordEntry::Spread {
                     span: start.cover(value.span()),
                     value,
-                    override_existing: false,
                 }
             } else if self.match_token(TokenKind::LBracket) {
                 self.error_at_current(
@@ -560,17 +546,12 @@ impl<'a> Parser<'a> {
                             span,
                         });
                     }
-                    RecordEntry::Spread {
-                        value,
-                        override_existing,
-                        span,
-                    } => {
+                    RecordEntry::Spread { value, span } => {
                         fields.push(CallArg {
                             name: None,
                             ty: None,
                             value: Expr::Spread {
                                 value: Box::new(value),
-                                override_existing,
                                 span,
                             },
                             span,
@@ -2036,7 +2017,6 @@ impl<'a> Parser<'a> {
                     span,
                     value: Expr::Spread {
                         value: Box::new(value),
-                        override_existing: false,
                         span,
                     },
                 });
@@ -2307,12 +2287,11 @@ impl<'a> Parser<'a> {
         {
             return allow_empty;
         }
-        if self.tokens.get(lookahead).is_some_and(|token| {
-            matches!(
-                token.kind,
-                TokenKind::Ellipsis | TokenKind::Keyword(Keyword::Override)
-            )
-        }) {
+        if self
+            .tokens
+            .get(lookahead)
+            .is_some_and(|token| token.kind == TokenKind::Ellipsis)
+        {
             return true;
         }
         if self
@@ -2453,7 +2432,6 @@ impl<'a> Parser<'a> {
                 let span = spread_start.cover(value.span());
                 entries.push(Expr::Spread {
                     value: Box::new(value),
-                    override_existing: false,
                     span,
                 });
             } else {
@@ -2565,7 +2543,6 @@ impl<'a> Parser<'a> {
             let span = start.cover(value.span());
             return Some(Expr::Spread {
                 value: Box::new(value),
-                override_existing: false,
                 span,
             });
         }

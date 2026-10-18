@@ -11,9 +11,9 @@ annotation  as        break     case       class      continue
 defer       def       default   do         else       ext
 false       fn        for       get        if         interface
 internal    is        let       match      module     object
-override    private   reified   return     shape      true
-try         type      use       var        vararg     when
-while       with      yield
+private     reified   return    shape      true       try
+type        use       var       vararg     when       while
+with        yield
 ```
 
 They are not ordinary identifiers. A grammar rule may explicitly reuse a
@@ -1243,7 +1243,8 @@ updated = Amount {
 patch = { age: 43 }
 updated2 = Amount {
     ...value
-    override ...patch
+    ...patch
+    age: patch.age
 }
 ```
 
@@ -1291,8 +1292,10 @@ selected = {
 
 layered = {
     ...defaults
-    override ...environment
-    override ...commandLine
+    ...environment
+    ...commandLine
+    host: commandLine.host
+    port: commandLine.port
 }
 ```
 
@@ -1301,20 +1304,16 @@ Without a concrete expected shape target they produce a new anonymous shape;
 with one, they construct that target. Ordinary spreads are collision-protected.
 The compiler checks the complete literal, and every resulting field must have
 one unambiguous final provider. A field has a final provider when it comes from
-only one source, an explicit `field: value` selects it, or an `override
-...source` spread gives that source precedence over earlier spreads.
+only one source or an explicit `field: value` selects it.
 
 An explicit field resolves that field regardless of whether it appears before
-or after the colliding spreads. Duplicate explicit fields remain invalid.
-`override ...source` adds unique fields and selects that source for every field
-that overlaps an earlier spread. A later ordinary spread can introduce a new
-unresolved collision. This strict default prevents newly added source fields
-from silently changing an existing merge.
+or after the colliding spreads. Duplicate explicit fields remain invalid. This
+strict rule prevents newly added source fields from silently changing an
+existing merge: a new overlap requires another explicitly named winner.
 
 For example, `{ ...point, ...dot }` is invalid when both values provide `x`.
-Use `{ ...point, ...dot, x: point.x }` to resolve only `x`, or
-`{ ...point, override ...dot }` to accept all current and future overlaps from
-`dot`.
+Use `{ ...point, ...dot, x: point.x }` or
+`{ ...point, ...dot, x: dot.x }` to select the intended value.
 
 Classes are not copy-updated implicitly. A class that needs copy-style behavior
 should expose an explicit method:
@@ -5456,7 +5455,6 @@ Other operators / constructs:
 - `=>` for lambdas and by-name parameters
 - `=>` for match cases
 - `with` for interface implementation and generic bounds
-- `override ...source` for whole-source precedence in shape construction
 - `when` for generic bound and equality conditions
 - `|` between type alternatives in a union and between alternatives in a match case
 - `:` inside map types, map literals, and construction field lists
