@@ -570,7 +570,6 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_optional_return_type()
         };
-        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
         let body = self.parse_callable_body()?;
         let end = body.span();
         Some(FunctionDecl {
@@ -581,7 +580,6 @@ impl<'a> Parser<'a> {
             type_conditions: generic_clause.conditions,
             params,
             return_type,
-            equals_body,
             body,
             span: start.cover(end),
         })
@@ -928,7 +926,6 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_constructor_param_list()?
         };
-        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
         let body = self.parse_callable_body()?;
         let end = body.span();
         Some(MethodDecl {
@@ -940,7 +937,6 @@ impl<'a> Parser<'a> {
             type_conditions: Vec::new(),
             params,
             return_type: None,
-            equals_body,
             body: Some(body),
             span: start.cover(end),
         })
@@ -1151,7 +1147,6 @@ impl<'a> Parser<'a> {
                 start,
             ));
         }
-        let equals_body = matches!(self.next_significant_token().kind, TokenKind::Eq);
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
             Some(self.parse_callable_body()?)
         } else if allow_signature_only {
@@ -1174,7 +1169,6 @@ impl<'a> Parser<'a> {
             type_conditions: generic_clause.conditions,
             params,
             return_type,
-            equals_body,
             body,
             span: start.cover(end),
         })

@@ -135,9 +135,6 @@ pub struct FunctionDecl {
     pub type_conditions: Vec<GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
-    /// Whether an unannotated callable body infers its result instead of
-    /// defaulting to `Unit`.
-    pub equals_body: bool,
     pub body: CallableBody,
     pub span: Span,
 }
@@ -155,9 +152,6 @@ pub struct MethodDecl {
     pub type_conditions: Vec<GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
-    /// Whether an unannotated callable body infers its result instead of
-    /// defaulting to `Unit`.
-    pub equals_body: bool,
     pub body: Option<CallableBody>,
     pub span: Span,
 }

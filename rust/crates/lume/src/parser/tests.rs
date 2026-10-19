@@ -2594,7 +2594,6 @@ def lambdas() Unit {
     let Item::Function(empty_expression) = &program.items[2] else {
         panic!("expected emptyExpression function");
     };
-    assert!(empty_expression.equals_body);
     assert!(matches!(
         empty_expression.body,
         CallableBody::Expr(Expr::RecordLiteral { ref fields, ref values, .. })
@@ -3435,13 +3434,10 @@ def run() Unit = {
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
     match &program.items[0] {
-        Item::Function(function) => {
-            assert!(function.equals_body);
-            match &function.body {
-                CallableBody::Block(block) => assert_eq!(block.statements.len(), 1),
-                other => panic!("expected block body, got {other:#?}"),
-            }
-        }
+        Item::Function(function) => match &function.body {
+            CallableBody::Block(block) => assert_eq!(block.statements.len(), 1),
+            other => panic!("expected block body, got {other:#?}"),
+        },
         other => panic!("expected function, got {other:#?}"),
     }
 }

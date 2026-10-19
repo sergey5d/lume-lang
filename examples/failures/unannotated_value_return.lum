@@ -1,0 +1,4 @@
+# EXPECT_ERROR:
+# .*discarded expression has no effect.*
+
+def answer() = 42

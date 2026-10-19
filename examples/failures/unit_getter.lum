@@ -1,0 +1,6 @@
+# EXPECT_ERROR:
+# .*getter 'cleanup' cannot return Unit.*
+
+class Worker {
+    get cleanup Unit = ()
+}

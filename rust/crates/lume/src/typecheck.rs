@@ -1673,13 +1673,7 @@ impl<'a> Checker<'a> {
             .return_type
             .as_ref()
             .map(|ty| self.ty_from_type_ref(ty))
-            .unwrap_or_else(|| {
-                if function.equals_body {
-                    Ty::Unknown
-                } else {
-                    Ty::unit()
-                }
-            });
+            .unwrap_or_else(Ty::unit);
         self.current_return = expected_return.clone();
         self.defer_depth = 0;
         self.callable_depth += 1;
@@ -2406,13 +2400,21 @@ impl<'a> Checker<'a> {
             .return_type
             .as_ref()
             .map(|ty| self.ty_from_type_ref(ty))
-            .unwrap_or_else(|| {
-                if method.equals_body && method.name != "new" {
-                    Ty::Unknown
-                } else {
-                    Ty::unit()
-                }
-            });
+            .unwrap_or_else(Ty::unit);
+        if method.getter && expected_return == Ty::unit() {
+            self.add_error(
+                "getter_unit_return",
+                format!(
+                    "getter '{}' cannot return Unit; use a method for an operation that does not produce a value",
+                    method.name
+                ),
+                method
+                    .return_type
+                    .as_ref()
+                    .map(TypeRef::span)
+                    .unwrap_or(method.span),
+            );
+        }
         self.current_return = expected_return.clone();
         self.defer_depth = 0;
         self.callable_depth += 1;
@@ -14485,13 +14487,7 @@ fn function_sig_from_function(
             .return_type
             .as_ref()
             .map(|ty| convert_type_ref(ty, &type_params))
-            .unwrap_or_else(|| {
-                if function.equals_body {
-                    Ty::Unknown
-                } else {
-                    Ty::unit()
-                }
-            }),
+            .unwrap_or_else(Ty::unit),
         visibility: function.visibility,
         has_body: true,
         getter: false,
@@ -14568,13 +14564,7 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
             .return_type
             .as_ref()
             .map(|ty| convert_type_ref(ty, &type_params))
-            .unwrap_or_else(|| {
-                if method.equals_body && method.name != "new" {
-                    Ty::Unknown
-                } else {
-                    Ty::unit()
-                }
-            }),
+            .unwrap_or_else(Ty::unit),
         visibility: method.visibility,
         has_body: method.body.is_some(),
         getter: method.getter,
@@ -20641,21 +20631,42 @@ def contains(range Option[Int], value Int) Bool {
     }
 
     #[test]
-    fn infers_return_type_for_equals_block_local_function() {
+    fn unannotated_equals_block_local_function_returns_unit() {
         let program = parse_inline(
             r#"
 def contains(range Option[Int], value Int) Bool {
-    def present() = {
-        let item <- range else return false
-        item == value
+    def report() = {
+        let item <- range else return
+        println(item == value)
     }
 
-    present()
+    report()
+    true
 }
 "#,
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_value_body_when_return_type_is_omitted() {
+        let program = parse_inline(
+            r#"
+def isMissing(value Option[Int]) = {
+    value is None
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "discarded_expression"),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]
@@ -22646,6 +22657,36 @@ def read(values Accessors) Unit {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_getters_that_return_unit_directly_or_through_an_alias() {
+        let program = parse_inline(
+            r#"
+type Nothing = Unit
+
+interface InvalidAccessors {
+    get ignored Unit
+}
+
+class Worker {
+    get cleanup Unit = ()
+}
+
+shape Marker {
+    value Int
+
+    get empty Nothing = ()
+}
+"#,
+        );
+        let result = check_program(&program);
+        let unit_getters = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "getter_unit_return")
+            .count();
+        assert_eq!(unit_getters, 3, "{:#?}", result.diagnostics);
     }
 
     #[test]

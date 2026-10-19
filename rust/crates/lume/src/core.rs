@@ -40,7 +40,6 @@ pub struct FunctionDecl {
     pub type_conditions: Vec<ast::GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
-    pub equals_body: bool,
     pub body: CallableBody,
     pub span: Span,
 }
@@ -56,7 +55,6 @@ pub struct MethodDecl {
     pub type_conditions: Vec<ast::GenericCondition>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeRef>,
-    pub equals_body: bool,
     pub body: Option<CallableBody>,
     pub span: Span,
 }

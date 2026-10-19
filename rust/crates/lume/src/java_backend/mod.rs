@@ -885,7 +885,6 @@ fn java_library_method(
             })
             .collect(),
         return_type,
-        equals_body: false,
         body: None,
         span,
     })
@@ -3409,32 +3408,28 @@ def main() Unit {
     }
 
     #[test]
-    fn generated_java_infers_equals_block_return_type() {
+    fn generated_java_defaults_unannotated_equals_block_to_unit() {
         if !command_available("javac") || !command_available("java") {
-            eprintln!("skipping inferred return Java test because a JDK tool is unavailable");
+            eprintln!("skipping implicit Unit Java test because a JDK tool is unavailable");
             return;
         }
 
-        let temp = temp_path("lume-java-inferred-return");
-        let source = temp.join("inferred_return.lum");
+        let temp = temp_path("lume-java-implicit-unit");
+        let source = temp.join("implicit_unit.lum");
         let out = temp.join("out");
         let classes = temp.join("classes");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
             r#"
-module demo/inferredreturn
+module demo/implicitunit
 
-def flag() = {
-    false
+def announce() = {
+    println("ok")
 }
 
 def main() Unit {
-    if flag() {
-        println("wrong")
-    } else {
-        println("ok")
-    }
+    announce()
 }
 "#,
         )
@@ -3443,9 +3438,9 @@ def main() Unit {
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 
-        let module = fs::read_to_string(out.join("demo/inferredreturn/InferredreturnModule.java"))
+        let module = fs::read_to_string(out.join("demo/implicitunit/ImplicitunitModule.java"))
             .expect("read module");
-        assert!(module.contains("static Boolean flag()"), "{module}");
+        assert!(module.contains("static void announce()"), "{module}");
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -3459,7 +3454,7 @@ def main() Unit {
             Command::new("java")
                 .arg("-cp")
                 .arg(&classes)
-                .arg("demo.inferredreturn.InferredreturnMain"),
+                .arg("demo.implicitunit.ImplicitunitMain"),
             "java",
         );
         assert_eq!(

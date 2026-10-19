@@ -1,0 +1,21 @@
+# EXPECT:
+# first
+# second
+
+private def addLine(lines [Str], value Str?) {
+    if let text <- value {
+        lines.add(text)
+    }
+}
+
+private def printLines(lines [Str]) = {
+    lines.forEach(line => println(line))
+}
+
+def main() Unit {
+    lines [Str] = []
+    addLine(lines, ^"first")
+    addLine(lines, None)
+    addLine(lines, ^"second")
+    printLines(lines)
+}

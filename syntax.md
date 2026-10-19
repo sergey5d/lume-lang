@@ -1677,7 +1677,7 @@ A bare block with no following operation remains a block body, and a direct
 callable body without `=` remains unchanged:
 
 ```txt
-def calculation() = { 40 }
+def calculation() Int = { 40 }
 
 def procedure() {
     println("done")
@@ -2256,23 +2256,30 @@ def addWithEquals(left Int, right Int) Int = {
 Callable block bodies may include `=` or omit it. Expression-bodied callables
 still use `=`.
 
-When the return type is omitted, the body introducer determines the return
-rule:
+When the return type is omitted, the callable returns `Unit` regardless of its
+body spelling:
 
 ```txt
 def reset() {
     this.value := 0
-}                         # implicit Unit
+}
 
-def isMissing(value Int?) = {
-    value is None
-}                         # inferred Bool
+private def addEmbeddingLine(lines [Str], label Str, value Str?) {
+    if let text <- value {
+        lines.add(label + ": " + text)
+    }
+}
+
+def announce() = println("ready")
+
+def isMissing(value Int?) Bool = value is None
 ```
 
-A direct `{ ... }` body without a return type is a `Unit` callable, so
-returning a value from it is an error. An `= expression` or `= { ... }` body
-without a return type infers its result type from the body. An explicit return
-type always takes precedence.
+The compiler does not infer a named function or method's return type from its
+body. A missing annotation always means `Unit`; any callable that produces a
+different value must declare that return type. This keeps signatures stable
+when their bodies change. The `=` token selects an expression-style body but
+does not enable return-type inference.
 
 ### Getters
 
@@ -2368,6 +2375,8 @@ Getter rules:
 
 - getters are declared with `get`; `def` always declares a method
 - getters require an explicit return type
+- getters cannot return `Unit`; use a method for behavior that does not produce
+  a value
 - getters have no parameter list and are accessed without parentheses
 - getters cannot declare type parameters or generic conditions
 - getters may declare local bindings
@@ -3203,7 +3212,7 @@ Rules:
 - block expressions evaluate to the value of their last statement
 - successive statements in a braced block must be separated by a newline; a
   closing `}` may immediately follow the final statement
-- named function and method block bodies may be written as `def name(...) { ... }` or `def name(...) = { ... }`; without an explicit return type, the direct block returns `Unit` and the equals block infers its result type
+- named function and method block bodies may be written as `def name(...) { ... }` or `def name(...) = { ... }`; without an explicit return type, either form returns `Unit`
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
@@ -5574,9 +5583,10 @@ Newline continuation:
   the same line or the next indented line: `=`, `:=`, `+=`, `-=`, `*=`, `/=`,
   `%=`, and `<-`.
 - Named function and method declarations require `def` and have three accepted body forms:
-  - `def name(...) { ... }` for block bodies, with implicit `Unit` when the return type is omitted
-  - `def name(...) = { ... }` for block bodies whose return type is inferred when omitted
-  - `def name(...) = expr` for expression bodies whose return type is inferred when omitted
+  - `def name(...) { ... }` for direct block bodies
+  - `def name(...) = { ... }` for expression-style block bodies
+  - `def name(...) = expr` for expression bodies
+- A named function or method without an explicit return type returns `Unit` in all three forms. Non-`Unit` return types are never inferred from named callable bodies.
 - Getter declarations begin with `get`, omit a parameter list, require a return type, and use the same block or expression body forms.
 - Constructor declarations begin with `new` and use the constructor body forms documented above.
 - Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.

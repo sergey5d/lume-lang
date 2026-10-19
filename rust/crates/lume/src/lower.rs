@@ -300,7 +300,6 @@ impl<'a> Lowerer<'a> {
                         &function.type_conditions,
                         &[],
                         function.return_type.as_ref(),
-                        function.equals_body,
                         ir::FunctionKind::TopLevel,
                         &function.params,
                         None,
@@ -550,7 +549,6 @@ impl<'a> Lowerer<'a> {
         type_conditions: &[ast::GenericCondition],
         owner_type_params: &[String],
         return_type: Option<&TypeRef>,
-        infer_return: bool,
         kind: ir::FunctionKind,
         params: &[core::Param],
         this_local: Option<(String, ir::Type)>,
@@ -572,11 +570,7 @@ impl<'a> Lowerer<'a> {
                 .map(|ty| {
                     lower_type_ref_with_type_params(ty, &available_type_params, &self.type_aliases)
                 })
-                .unwrap_or(if infer_return {
-                    ir::Type::Unknown
-                } else {
-                    ir::Type::Unit
-                }),
+                .unwrap_or(ir::Type::Unit),
         );
         function.annotations = lower_annotations(annotations);
         function.visibility = visibility;
@@ -644,7 +638,6 @@ impl<'a> Lowerer<'a> {
             &method.type_conditions,
             &owner_type_params,
             method.return_type.as_ref(),
-            method.equals_body && method.name != "new",
             ir::FunctionKind::Method { owner },
             &method.params,
             Some((String::from("this"), ir::Type::named(owner_name))),
@@ -673,7 +666,6 @@ impl<'a> Lowerer<'a> {
                 args: Vec::new(),
                 span,
             }),
-            false,
             ir::FunctionKind::Method { owner },
             &[],
             Some((String::from("this"), ir::Type::named(owner_name))),
@@ -1416,11 +1408,7 @@ impl<'a> FunctionLowerer<'a> {
                     .return_type
                     .as_ref()
                     .map(|ty| self.lower_type_ref(ty))
-                    .unwrap_or(if function.equals_body {
-                        ir::Type::Unknown
-                    } else {
-                        ir::Type::Unit
-                    }),
+                    .unwrap_or(ir::Type::Unit),
             ),
         };
         let local_id = self.add_local(function.name.clone(), ty, false, ir::LocalKind::Binding);
@@ -1472,11 +1460,7 @@ impl<'a> FunctionLowerer<'a> {
                 .return_type
                 .as_ref()
                 .map(|ty| self.lower_type_ref(ty))
-                .unwrap_or(if function.equals_body {
-                    ir::Type::Unknown
-                } else {
-                    ir::Type::Unit
-                }),
+                .unwrap_or(ir::Type::Unit),
         );
         nested.span = Some(function.span);
         for (index, param) in function.params.iter().enumerate() {
@@ -1784,7 +1768,7 @@ impl<'a> FunctionLowerer<'a> {
                     .return_type
                     .as_ref()
                     .map(|ty| self.lower_type_ref(ty))
-                    .unwrap_or(ir::Type::Unknown),
+                    .unwrap_or(ir::Type::Unit),
             );
             function.annotations = lower_annotations(&method.annotations);
             function.visibility = method.visibility;
