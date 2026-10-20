@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Printer {
+public interface Printer {
     def print(value [Str] vararg) Unit
     def println(value [Str] vararg) Unit
     def printf(format Str, value [Str] vararg) Unit

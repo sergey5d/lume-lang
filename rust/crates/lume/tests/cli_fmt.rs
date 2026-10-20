@@ -35,7 +35,7 @@ fn fmt_command_rewrites_a_valid_file_in_place() {
     assert!(output.stdout.is_empty());
     assert_eq!(
         fs::read_to_string(&path).expect("formatted source should be readable"),
-        "def main() Unit {\n    println(\"ok\")\n}\n"
+        "def main() {\n    println(\"ok\")\n}\n"
     );
     fs::remove_file(path).expect("temporary source should be removable");
 }

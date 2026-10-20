@@ -2787,7 +2787,7 @@ def main() Unit {
             r#"
 module common
 
-class Shared {
+public class Shared {
     name Str
 }
 "#,
@@ -2800,7 +2800,7 @@ module feature/repo
 
 use common/{Shared}
 
-class FeatureRepo {
+public class FeatureRepo {
     shared Shared
 }
 "#,
@@ -3676,6 +3676,83 @@ def main() Unit {
             assert_eq!(
                 String::from_utf8(output.stdout).expect("Java stdout utf8"),
                 "AdaAda\n6\n"
+            );
+        }
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn readable_java_bridges_public_fields_to_interface_getters() {
+        let temp = temp_path("lume-java-interface-field-getters");
+        let source = temp.join("field_getters.lum");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/fieldgetters
+
+interface Identified[T] {
+    get id T
+}
+
+interface Labeled {
+    get label Str = "default"
+}
+
+class User with Identified[Int] {
+    id Int
+    name Str
+}
+
+shape Snapshot with Identified[Int] {
+    id Int
+}
+
+class LabeledUser with Labeled {
+    label Str
+}
+
+def readId(value Identified[Int]) Int = value.id
+def readLabel(value Labeled) Str = value.label
+
+def main() Unit {
+    println(readId(User(7, "Ada")))
+    println(readId(Snapshot(8)))
+    println(readLabel(LabeledUser("stored")))
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate readable Java");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let user = fs::read_to_string(out.join("demo/fieldgetters/User.java")).expect("read User");
+        assert!(user.contains("public Long id()"), "{user}");
+        assert!(user.contains("return this.id;"), "{user}");
+
+        if command_available("javac") && command_available("java") {
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).expect("collect generated Java");
+            fs::create_dir_all(&classes).expect("create classes dir");
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("demo.fieldgetters.FieldgettersMain"),
+                "java",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).expect("Java stdout utf8"),
+                "7\n8\nstored\n"
             );
         }
 
@@ -5556,7 +5633,7 @@ def main() Unit {
             r#"
 module demo/lib
 
-interface Binder {
+public interface Binder {
     def queryRow(sql Str, values [Any] vararg) Int
 }
 "#,

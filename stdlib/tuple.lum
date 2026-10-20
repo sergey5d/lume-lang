@@ -1,25 +1,25 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-class Tuple2[A, B] {
+public class Tuple2[A, B] {
     _1 A
     _2 B
 }
 
-class Tuple3[A, B, C] {
+public class Tuple3[A, B, C] {
     _1 A
     _2 B
     _3 C
 }
 
-class Tuple4[A, B, C, D] {
+public class Tuple4[A, B, C, D] {
     _1 A
     _2 B
     _3 C
     _4 D
 }
 
-class Tuple5[A, B, C, D, E] {
+public class Tuple5[A, B, C, D, E] {
     _1 A
     _2 B
     _3 C
@@ -27,7 +27,7 @@ class Tuple5[A, B, C, D, E] {
     _5 E
 }
 
-class Tuple6[A, B, C, D, E, F] {
+public class Tuple6[A, B, C, D, E, F] {
     _1 A
     _2 B
     _3 C
@@ -36,7 +36,7 @@ class Tuple6[A, B, C, D, E, F] {
     _6 F
 }
 
-class Tuple7[A, B, C, D, E, F, G] {
+public class Tuple7[A, B, C, D, E, F, G] {
     _1 A
     _2 B
     _3 C
@@ -46,7 +46,7 @@ class Tuple7[A, B, C, D, E, F, G] {
     _7 G
 }
 
-class Tuple8[A, B, C, D, E, F, G, H] {
+public class Tuple8[A, B, C, D, E, F, G, H] {
     _1 A
     _2 B
     _3 C
@@ -57,7 +57,7 @@ class Tuple8[A, B, C, D, E, F, G, H] {
     _8 H
 }
 
-class Tuple9[A, B, C, D, E, F, G, H, I] {
+public class Tuple9[A, B, C, D, E, F, G, H, I] {
     _1 A
     _2 B
     _3 C
@@ -69,7 +69,7 @@ class Tuple9[A, B, C, D, E, F, G, H, I] {
     _9 I
 }
 
-class Tuple10[A, B, C, D, E, F, G, H, I, J] {
+public class Tuple10[A, B, C, D, E, F, G, H, I, J] {
     _1 A
     _2 B
     _3 C

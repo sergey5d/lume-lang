@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Int with Comparable[Int] {
+public interface Int with Comparable[Int] {
     def compareTo(other Int) Int
     def abs() Int
     def pow(exponent Int) Int
@@ -10,7 +10,7 @@ interface Int with Comparable[Int] {
     def toFloat() Float
 }
 
-object Int {
+public object Int {
     get MIN Int = panic("Int.MIN is provided by the active runtime")
     get MAX Int = panic("Int.MAX is provided by the active runtime")
 
@@ -18,7 +18,7 @@ object Int {
         panic("Int.parse is provided by the active runtime")
 }
 
-interface Float with Comparable[Float] {
+public interface Float with Comparable[Float] {
     def compareTo(other Float) Int
     def abs() Float
     def pow(exponent Int) Float
@@ -31,7 +31,7 @@ interface Float with Comparable[Float] {
     def toInt() Int
 }
 
-object Float {
+public object Float {
     get MIN Float = panic("Float.MIN is provided by the active runtime")
     get MAX Float = panic("Float.MAX is provided by the active runtime")
 

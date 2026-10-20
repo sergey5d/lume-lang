@@ -1,8 +1,8 @@
 module lume/db
 
-use lume/db/{DbError}
+use lume/db/ { DbError }
 
-interface Row {
+public interface Row {
     def columns() [Str]
     def has(column Str) Bool
     def value(column Str) Result[Any, DbError]
@@ -20,7 +20,7 @@ interface Row {
     def boolOpt(column Str) Result[Option[Bool], DbError]
 }
 
-interface Query {
+public interface Query {
     def bind(values [Any] vararg) Query
     def rows() Result[[Row], DbError]
     def all() Result[[Row], DbError]
@@ -29,7 +29,7 @@ interface Query {
     def decodeAll[reified T]() Result[[T], DbError]
 }
 
-interface RowQuery {
+public interface RowQuery {
     def bind(values [Any] vararg) RowQuery
     def row() Result[Option[Row], DbError]
     def map[T](mapper fn(Row) T) Result[Option[T], DbError]
@@ -37,16 +37,16 @@ interface RowQuery {
     def decodeOne[reified T]() Result[Option[T], DbError]
 }
 
-interface Exec {
+public interface Exec {
     def bind(values [Any] vararg) BoundExec
     def run() Result[Int, DbError]
 }
 
-interface BoundExec {
+public interface BoundExec {
     def run() Result[Int, DbError]
 }
 
-interface Transaction {
+public interface Transaction {
     def query(sql Str, values [Any] vararg) Query
     def queryRow(sql Str, values [Any] vararg) RowQuery
     def exec(sql Str) Exec
@@ -56,7 +56,7 @@ interface Transaction {
     def close() Result[Unit, DbError]
 }
 
-interface Database {
+public interface Database {
     def query(sql Str, values [Any] vararg) Query
     def queryRow(sql Str, values [Any] vararg) RowQuery
     def exec(sql Str) Exec

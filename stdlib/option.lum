@@ -1,7 +1,7 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-type Option[T] with Iterable[T] =
+public type Option[T] with Iterable[T] =
     class Some { value T }
     | object None {}
 

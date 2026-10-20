@@ -23,6 +23,7 @@ pub enum Keyword {
     Get,
     Internal,
     Private,
+    Public,
     If,
     Interface,
     Is,
@@ -382,6 +383,7 @@ impl<'a> Lexer<'a> {
             "get" => TokenKind::Keyword(Keyword::Get),
             "internal" => TokenKind::Keyword(Keyword::Internal),
             "private" => TokenKind::Keyword(Keyword::Private),
+            "public" => TokenKind::Keyword(Keyword::Public),
             "if" => TokenKind::Keyword(Keyword::If),
             "use" => TokenKind::Keyword(Keyword::Use),
             "interface" => TokenKind::Keyword(Keyword::Interface),
@@ -714,7 +716,7 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = { ...value, amount: 1 }\ndefaulted = default {}\nmerged = { ...left, ...right, amount: right.amount }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\npublic def api() Unit = ()\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = { ...value, amount: 1 }\ndefaulted = default {}\nmerged = { ...left, ...right, amount: right.amount }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
@@ -727,6 +729,7 @@ mod tests {
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Get)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Internal)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Private)));
+        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Public)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Reified)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Type)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Yield)));

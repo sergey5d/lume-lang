@@ -1,48 +1,48 @@
 module lume/http/javalin
 
 use io/javalin/Javalin
-use io/javalin/http/{Context as JavalinRawContext, Handler}
-use lume/http/{Context as HttpContext}
+use io/javalin/http/ { Context as JavalinRawContext, Handler }
+use lume/http/ { Context as HttpContext }
 use lume/http/javalin/runtime/HttpResponder
-use lume/http/javalin/runtime/{JavalinContext as JavalinRuntimeContext}
+use lume/http/javalin/runtime/ { JavalinContext as JavalinRuntimeContext }
 use lume/http/javalin/runtime/JavalinRuntime
 
-annotation Controller {
+public annotation Controller {
     path Str = ""
 }
 
-annotation Get {
+public annotation Get {
     path Str
     contentType Str = "text/plain"
 }
 
-annotation Post {
+public annotation Post {
     path Str
     contentType Str = "text/plain"
 }
 
-annotation Put {
+public annotation Put {
     path Str
     contentType Str = "text/plain"
 }
 
-annotation Patch {
+public annotation Patch {
     path Str
     contentType Str = "text/plain"
 }
 
-annotation Delete {
+public annotation Delete {
     path Str
     contentType Str = "text/plain"
 }
 
-shape HttpResponse {
+public shape HttpResponse {
     status Int = 200
     body Str
     contentType Str = "application/json"
 }
 
-shape HttpError {
+public shape HttpError {
     status Int
     body Str
     contentType Str = "application/json"
@@ -180,7 +180,7 @@ private class JavalinHttpContext with HttpContext {
 
 
 
-class HttpServer {
+public class HttpServer {
     backend JavalinBackend
 
     new(port Int) {

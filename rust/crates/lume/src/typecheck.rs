@@ -874,6 +874,7 @@ struct ModuleInfo {
     types: HashMap<String, TypeSig>,
     objects: HashMap<String, TypeSig>,
     aliases: HashMap<String, TypeRef>,
+    type_visibilities: HashMap<String, Visibility>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
     global_binding_stmts: Vec<crate::ast::BindingStmt>,
 }
@@ -892,6 +893,7 @@ impl ModuleInfo {
             types: HashMap::new(),
             objects: HashMap::new(),
             aliases: HashMap::new(),
+            type_visibilities: HashMap::new(),
             extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
@@ -913,6 +915,7 @@ impl ModuleInfo {
             types: HashMap::new(),
             objects: HashMap::new(),
             aliases: HashMap::new(),
+            type_visibilities: HashMap::new(),
             extensions: HashMap::new(),
             global_binding_stmts: Vec::new(),
         };
@@ -925,9 +928,18 @@ impl ModuleInfo {
 
         // Collect aliases first so signatures do not depend on declaration order.
         for item in &items {
-            if let Item::TypeAlias(alias) = item {
-                self.aliases
-                    .insert(alias.name.clone(), alias.target.clone());
+            match item {
+                Item::TypeAlias(alias) => {
+                    self.aliases
+                        .insert(alias.name.clone(), alias.target.clone());
+                    self.type_visibilities
+                        .insert(alias.name.clone(), alias.visibility);
+                }
+                Item::Type(decl) => {
+                    self.type_visibilities
+                        .insert(decl.name.clone(), decl.visibility);
+                }
+                _ => {}
             }
         }
 
@@ -961,6 +973,17 @@ impl ModuleInfo {
 
         self.canonicalize_nested_types_in_signatures();
         self.expand_aliases_in_signatures();
+    }
+
+    fn effective_type_visibility(&self, name: &str) -> Option<Visibility> {
+        let mut visibility = *self.type_visibilities.get(name)?;
+        let mut path = name;
+        while let Some((parent, _)) = path.rsplit_once('.') {
+            let parent_visibility = *self.type_visibilities.get(parent)?;
+            visibility = restricted_visibility(visibility, parent_visibility);
+            path = parent;
+        }
+        Some(visibility)
     }
 
     fn canonicalize_nested_types_in_signatures(&mut self) {
@@ -1141,6 +1164,22 @@ fn visibility_label(visibility: Visibility) -> &'static str {
         Visibility::Default => "public",
         Visibility::Internal => "internal",
         Visibility::Private => "private",
+    }
+}
+
+fn visibility_rank(visibility: Visibility) -> u8 {
+    match visibility {
+        Visibility::Private => 0,
+        Visibility::Internal => 1,
+        Visibility::Default => 2,
+    }
+}
+
+fn restricted_visibility(left: Visibility, right: Visibility) -> Visibility {
+    if visibility_rank(left) <= visibility_rank(right) {
+        left
+    } else {
+        right
     }
 }
 
@@ -1559,6 +1598,7 @@ impl<'a> Checker<'a> {
 
     fn check_module(&mut self) {
         self.check_global_bindings();
+        self.check_api_type_visibility();
         for item in &self.module.program.items {
             match item {
                 Item::Function(function) => self.check_function(function),
@@ -1569,6 +1609,360 @@ impl<'a> Checker<'a> {
             }
         }
         self.check_constructor_delegation_cycles();
+    }
+
+    fn check_api_type_visibility(&mut self) {
+        let items = self.module.program.items.clone();
+        for item in &items {
+            match item {
+                Item::Function(function) => {
+                    self.check_callable_api_type_visibility(
+                        function.visibility,
+                        &format!("function '{}'", function.name),
+                        &function.type_params,
+                        &function.type_conditions,
+                        &function.params,
+                        function.return_type.as_ref(),
+                        None,
+                    );
+                }
+                Item::TypeAlias(alias) => {
+                    let Some(exposure) = self.module.effective_type_visibility(&alias.name) else {
+                        continue;
+                    };
+                    self.check_api_type_ref(
+                        &alias.target,
+                        exposure,
+                        &format!("type alias '{}'", alias.name),
+                        &HashSet::new(),
+                        alias.name.rsplit_once('.').map(|(owner, _)| owner),
+                    );
+                }
+                Item::Type(decl) => self.check_type_api_visibility(decl),
+                Item::Statement(Stmt::Binding(binding)) => {
+                    if binding.visibility == Visibility::Private {
+                        continue;
+                    }
+                    for local in &binding.bindings {
+                        let api = format!("binding '{}'", local.name);
+                        if let Some(reference) = &local.ty {
+                            self.check_api_type_ref(
+                                reference,
+                                binding.visibility,
+                                &api,
+                                &HashSet::new(),
+                                None,
+                            );
+                        } else if let Some(info) = self.globals.get(&local.name) {
+                            let ty = info.ty.clone();
+                            self.check_api_ty(&ty, binding.visibility, &api, local.span);
+                        }
+                    }
+                }
+                Item::Extension(_) | Item::Statement(_) => {}
+            }
+        }
+    }
+
+    fn check_type_api_visibility(&mut self, decl: &TypeDecl) {
+        let Some(owner_exposure) = self.module.effective_type_visibility(&decl.name) else {
+            return;
+        };
+        if owner_exposure == Visibility::Private {
+            return;
+        }
+
+        let owner_type_params = decl
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<HashSet<_>>();
+        let api = format!("{} '{}'", type_kind_label(decl.kind), decl.name);
+        self.check_api_generic_clause(
+            &decl.type_params,
+            &decl.type_conditions,
+            owner_exposure,
+            &api,
+            &owner_type_params,
+            Some(&decl.name),
+        );
+        for member in &decl.members {
+            match member {
+                TypeMember::Field(field) => {
+                    let exposure = restricted_visibility(owner_exposure, field.visibility);
+                    if exposure == Visibility::Private {
+                        continue;
+                    }
+                    if let Some(reference) = &field.ty {
+                        self.check_api_type_ref(
+                            reference,
+                            exposure,
+                            &format!("field '{}.{}'", decl.name, field.name),
+                            &owner_type_params,
+                            Some(&decl.name),
+                        );
+                    }
+                }
+                TypeMember::Method(method) => {
+                    let exposure = restricted_visibility(owner_exposure, method.visibility);
+                    let label = if method.name == "new" {
+                        format!("constructor for '{}'", decl.name)
+                    } else if method.getter {
+                        format!("getter '{}.{}'", decl.name, method.name)
+                    } else {
+                        format!("method '{}.{}'", decl.name, method.name)
+                    };
+                    self.check_callable_api_type_visibility(
+                        exposure,
+                        &label,
+                        &method.type_params,
+                        &method.type_conditions,
+                        &method.params,
+                        method.return_type.as_ref(),
+                        Some((&owner_type_params, decl.name.as_str())),
+                    );
+                }
+                TypeMember::Case(case) => {
+                    for field in &case.fields {
+                        if let Some(reference) = &field.ty {
+                            self.check_api_type_ref(
+                                reference,
+                                owner_exposure,
+                                &format!(
+                                    "declared-union alternative '{}.{}'",
+                                    decl.name, case.name
+                                ),
+                                &owner_type_params,
+                                Some(&decl.name),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn check_callable_api_type_visibility(
+        &mut self,
+        exposure: Visibility,
+        api: &str,
+        type_params: &[TypeParam],
+        conditions: &[GenericCondition],
+        params: &[Param],
+        return_type: Option<&TypeRef>,
+        owner: Option<(&HashSet<String>, &str)>,
+    ) {
+        if exposure == Visibility::Private {
+            return;
+        }
+        let mut names = owner.map(|(names, _)| names.clone()).unwrap_or_default();
+        names.extend(type_params.iter().map(|param| param.name.clone()));
+        let owner_name = owner.map(|(_, name)| name);
+        self.check_api_generic_clause(type_params, conditions, exposure, api, &names, owner_name);
+        for param in params {
+            if let Some(reference) = &param.ty {
+                self.check_api_type_ref(reference, exposure, api, &names, owner_name);
+            }
+        }
+        if let Some(reference) = return_type {
+            self.check_api_type_ref(reference, exposure, api, &names, owner_name);
+        }
+    }
+
+    fn check_api_generic_clause(
+        &mut self,
+        params: &[TypeParam],
+        conditions: &[GenericCondition],
+        exposure: Visibility,
+        api: &str,
+        type_params: &HashSet<String>,
+        owner: Option<&str>,
+    ) {
+        for param in params {
+            for bound in &param.bounds {
+                self.check_api_type_ref(bound, exposure, api, type_params, owner);
+            }
+        }
+        for condition in conditions {
+            match condition {
+                GenericCondition::Bound { subject, bound, .. } => {
+                    self.check_api_type_ref(subject, exposure, api, type_params, owner);
+                    self.check_api_type_ref(bound, exposure, api, type_params, owner);
+                }
+                GenericCondition::Equal { left, right, .. } => {
+                    self.check_api_type_ref(left, exposure, api, type_params, owner);
+                    self.check_api_type_ref(right, exposure, api, type_params, owner);
+                }
+            }
+        }
+    }
+
+    fn check_api_type_ref(
+        &mut self,
+        reference: &TypeRef,
+        exposure: Visibility,
+        api: &str,
+        type_params: &HashSet<String>,
+        owner: Option<&str>,
+    ) {
+        match reference {
+            TypeRef::Wildcard { .. } => {}
+            TypeRef::Named { name, args, span } => {
+                if !type_params.contains(name)
+                    && let Some((visibility, declared_name)) =
+                        self.named_type_visibility(name, owner)
+                    && visibility_rank(visibility) < visibility_rank(exposure)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::error(
+                            "inaccessible_type_in_api",
+                            format!(
+                                "{} API {} exposes {} type '{}'",
+                                visibility_label(exposure),
+                                api,
+                                visibility_label(visibility),
+                                declared_name
+                            ),
+                            *span,
+                        )
+                        .with_help(format!(
+                            "make '{}' at least {}, or reduce the visibility of {}",
+                            declared_name,
+                            visibility_label(exposure),
+                            api
+                        )),
+                    );
+                }
+                for arg in args {
+                    self.check_api_type_ref(arg, exposure, api, type_params, owner);
+                }
+            }
+            TypeRef::Tuple { fields, .. } => {
+                for field in fields {
+                    self.check_api_type_ref(&field.ty, exposure, api, type_params, owner);
+                }
+            }
+            TypeRef::Record { fields, .. } => {
+                for field in fields {
+                    self.check_api_type_ref(&field.ty, exposure, api, type_params, owner);
+                }
+            }
+            TypeRef::Function { params, ret, .. } => {
+                for param in params {
+                    self.check_api_type_ref(param, exposure, api, type_params, owner);
+                }
+                self.check_api_type_ref(ret, exposure, api, type_params, owner);
+            }
+            TypeRef::Union { members, .. } => {
+                for member in members {
+                    self.check_api_type_ref(member, exposure, api, type_params, owner);
+                }
+            }
+        }
+    }
+
+    fn check_api_ty(
+        &mut self,
+        ty: &Ty,
+        exposure: Visibility,
+        api: &str,
+        span: crate::source::Span,
+    ) {
+        match ty {
+            Ty::Named(name, args) => {
+                if let Some((visibility, declared_name)) = self.named_type_visibility(name, None)
+                    && visibility_rank(visibility) < visibility_rank(exposure)
+                {
+                    self.add_error(
+                        "inaccessible_type_in_api",
+                        format!(
+                            "{} API {} exposes {} type '{}'",
+                            visibility_label(exposure),
+                            api,
+                            visibility_label(visibility),
+                            declared_name
+                        ),
+                        span,
+                    );
+                }
+                for arg in args {
+                    self.check_api_ty(arg, exposure, api, span);
+                }
+            }
+            Ty::Tuple(fields) | Ty::Union(fields) => {
+                for field in fields {
+                    self.check_api_ty(field, exposure, api, span);
+                }
+            }
+            Ty::Record(fields) => {
+                for (_, field) in fields {
+                    self.check_api_ty(field, exposure, api, span);
+                }
+            }
+            Ty::Function(params, ret) => {
+                for param in params {
+                    self.check_api_ty(param, exposure, api, span);
+                }
+                self.check_api_ty(ret, exposure, api, span);
+            }
+            Ty::Wildcard | Ty::Capture(_) | Ty::TypeParam(_) | Ty::Never | Ty::Unknown => {}
+        }
+    }
+
+    fn named_type_visibility(
+        &self,
+        name: &str,
+        owner: Option<&str>,
+    ) -> Option<(Visibility, String)> {
+        if let Some(visibility) = self.module.effective_type_visibility(name) {
+            return Some((visibility, name.to_string()));
+        }
+
+        if !name.contains('.')
+            && let Some(owner) = owner
+            && let Some(candidate) = lexical_nested_name(owner, name, |candidate| {
+                self.module.type_visibilities.contains_key(candidate)
+            })
+            && let Some(visibility) = self.module.effective_type_visibility(&candidate)
+        {
+            return Some((visibility, candidate));
+        }
+
+        let (root, suffix) = name
+            .split_once('.')
+            .map_or((name, None), |(root, suffix)| (root, Some(suffix)));
+        if let Some(imported) = self.module.symbol_imports.get(root) {
+            let source = self.world.modules.get(&imported.module_path)?;
+            let declared_name = suffix
+                .map(|suffix| format!("{}.{}", imported.original_name, suffix))
+                .unwrap_or_else(|| imported.original_name.clone());
+            if let Some(visibility) = source.effective_type_visibility(&declared_name) {
+                return Some((visibility, declared_name));
+            }
+        }
+
+        if let Some(suffix) = suffix
+            && let Some(path) = self.module.imports.get(root)
+            && let Some(source) = self.world.modules.get(path)
+            && let Some(visibility) = source.effective_type_visibility(suffix)
+        {
+            return Some((visibility, suffix.to_string()));
+        }
+
+        let mut imported_matches = self.module.symbol_imports.values().filter_map(|imported| {
+            (imported.original_name == name).then(|| {
+                let source = self.world.modules.get(&imported.module_path)?;
+                let visibility = source.effective_type_visibility(&imported.original_name)?;
+                Some((visibility, imported.original_name.clone()))
+            })?
+        });
+        let first = imported_matches.next();
+        if first.is_some() && imported_matches.next().is_none() {
+            return first;
+        }
+
+        None
     }
 
     fn check_type_alias(&mut self, alias: &crate::ast::TypeAliasDecl) {
@@ -1996,27 +2390,13 @@ impl<'a> Checker<'a> {
                 continue;
             }
 
-            let mut required = HashSet::new();
-            let mut seen = HashSet::new();
-            self.collect_required_interface_method_names(&interface_sig, &mut seen, &mut required);
-            let mut missing = required
-                .into_iter()
-                .filter(|name| !self.type_declares_method_body(sig, name))
-                .collect::<Vec<_>>();
-            missing.sort();
-            for name in missing {
-                self.add_error(
-                    "missing_interface_member",
-                    format!(
-                        "{} '{}' declares interface '{}' but does not implement required method '{}'",
-                        type_kind_label(sig.kind),
-                        sig.name,
-                        interface_sig.name,
-                        name
-                    ),
-                    span,
-                );
-            }
+            self.check_interface_bound_implementation(
+                sig,
+                bound,
+                &interface_sig.name,
+                &format!("{} '{}'", type_kind_label(sig.kind), sig.name),
+                span,
+            );
         }
     }
 
@@ -6004,13 +6384,9 @@ impl<'a> Checker<'a> {
     fn validate_anonymous_interfaces(
         &mut self,
         interfaces: &[TypeRef],
-        methods: &[MethodDecl],
+        implementation: &TypeSig,
         span: crate::source::Span,
     ) -> Vec<Ty> {
-        let provided = methods
-            .iter()
-            .map(|method| method.name.clone())
-            .collect::<HashSet<_>>();
         let mut result_tys = Vec::new();
 
         for interface in interfaces {
@@ -6018,25 +6394,13 @@ impl<'a> Checker<'a> {
             let Some(interface_sig) = self.interface_sig_from_type_ref(interface) else {
                 continue;
             };
-            let mut required = HashSet::new();
-            let mut seen = HashSet::new();
-            self.collect_required_interface_method_names(&interface_sig, &mut seen, &mut required);
-
-            let mut missing = required
-                .into_iter()
-                .filter(|name| !provided.contains(name))
-                .collect::<Vec<_>>();
-            missing.sort();
-            for name in missing {
-                self.add_error(
-                    "missing_interface_member",
-                    format!(
-                        "anonymous implementation of interface '{}' is missing method '{}'",
-                        interface_sig.name, name
-                    ),
-                    span,
-                );
-            }
+            self.check_interface_bound_implementation(
+                implementation,
+                &interface_ty,
+                &interface_sig.name,
+                "anonymous implementation",
+                span,
+            );
             result_tys.push(interface_ty);
         }
         result_tys
@@ -6052,7 +6416,6 @@ impl<'a> Checker<'a> {
     ) -> Ty {
         let name = crate::source::anonymous_object_type_name(span);
         let mut field_sigs = Vec::new();
-        let interface_tys = self.validate_anonymous_interfaces(interfaces, methods, span);
 
         self.push_scope();
         for field in fields {
@@ -6111,17 +6474,18 @@ impl<'a> Checker<'a> {
                 .or_default()
                 .push(function_sig_from_method(method, &[]));
         }
-        let sig = TypeSig {
+        let mut sig = TypeSig {
             kind,
             name: name.clone(),
             module_id: self.module.module_id.clone(),
             type_params: Vec::new(),
             generic_conditions: Vec::new(),
-            with_bounds: interface_tys,
+            with_bounds: Vec::new(),
             fields: field_sigs,
             methods: method_sigs,
             enum_cases: HashMap::new(),
         };
+        sig.with_bounds = self.validate_anonymous_interfaces(interfaces, &sig, span);
         self.anonymous_types.insert(name.clone(), sig.clone());
         for method in methods {
             self.check_method(method, &sig);
@@ -6706,45 +7070,157 @@ impl<'a> Checker<'a> {
         Some(sig)
     }
 
-    fn collect_required_interface_method_names(
+    fn effective_interface_methods(
         &self,
-        sig: &TypeSig,
+        interface_ty: &Ty,
         seen: &mut HashSet<String>,
-        methods: &mut HashSet<String>,
-    ) {
-        if !seen.insert(sig.name.clone()) {
-            return;
+    ) -> HashMap<String, Vec<FunctionSig>> {
+        let Ty::Named(name, args) = interface_ty else {
+            return HashMap::new();
+        };
+        let key = interface_ty.describe();
+        if !seen.insert(key.clone()) {
+            return HashMap::new();
         }
+        let Some(sig) = self.lookup_any_type(name) else {
+            seen.remove(&key);
+            return HashMap::new();
+        };
+        if sig.kind != TypeKind::Interface {
+            seen.remove(&key);
+            return HashMap::new();
+        }
+
+        let subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let mut methods = HashMap::<String, Vec<FunctionSig>>::new();
         for bound in &sig.with_bounds {
-            let Ty::Named(bound_name, _) = bound else {
-                continue;
-            };
-            let Some(bound_sig) = self.lookup_any_type(bound_name) else {
-                continue;
-            };
-            if bound_sig.kind == TypeKind::Interface {
-                self.collect_required_interface_method_names(&bound_sig, seen, methods);
+            let bound = substitute_type(bound, &subst);
+            for (name, inherited) in self.effective_interface_methods(&bound, seen) {
+                methods.entry(name).or_default().extend(inherited);
             }
         }
         for (name, overloads) in &sig.methods {
-            if overloads.iter().any(|method| !method.has_body) {
-                methods.insert(name.clone());
-            } else {
-                methods.remove(name);
+            methods.insert(
+                name.clone(),
+                overloads
+                    .iter()
+                    .cloned()
+                    .map(|method| instantiate_function_sig(method, &subst))
+                    .collect(),
+            );
+        }
+        seen.remove(&key);
+        methods
+    }
+
+    fn check_interface_bound_implementation(
+        &mut self,
+        implementation: &TypeSig,
+        interface_ty: &Ty,
+        interface_name: &str,
+        implementation_label: &str,
+        span: crate::source::Span,
+    ) {
+        let methods = self.effective_interface_methods(interface_ty, &mut HashSet::new());
+        let mut names = methods.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+
+        for name in names {
+            let requirements = &methods[&name];
+            let required = requirements
+                .iter()
+                .filter(|method| !method.has_body)
+                .collect::<Vec<_>>();
+            let field = implementation
+                .fields
+                .iter()
+                .find(|field| field.name == name && field.visibility == Visibility::Default);
+
+            if requirements.iter().all(|method| method.getter)
+                && let Some(field) = field
+            {
+                let incompatible = requirements
+                    .iter()
+                    .find(|getter| !self.is_assignable(&field.ty, &getter.ret));
+                if let Some(getter) = incompatible {
+                    self.add_error(
+                        "invalid_interface_getter_field_type",
+                        format!(
+                            "public field '{}' on {} has type '{}' but interface '{}' getter '{}' returns '{}'",
+                            name,
+                            implementation_label,
+                            field.ty.describe(),
+                            interface_name,
+                            name,
+                            getter.ret.describe()
+                        ),
+                        span,
+                    );
+                }
+                continue;
             }
+
+            if required.is_empty() {
+                continue;
+            }
+            let implemented = if required.iter().all(|method| method.getter) {
+                implementation.methods.get(&name).is_some_and(|methods| {
+                    methods.iter().any(|method| {
+                        method.has_body
+                            && method.visibility == Visibility::Default
+                            && method.getter
+                            && required.iter().all(|requirement| {
+                                self.is_assignable(&method.ret, &requirement.ret)
+                            })
+                    })
+                })
+            } else {
+                self.type_declares_method_body(implementation, &name)
+            };
+            if implemented {
+                continue;
+            }
+
+            let member_kind = if required.iter().all(|method| method.getter) {
+                "getter"
+            } else {
+                "method"
+            };
+            let message = if implementation_label == "anonymous implementation" {
+                format!(
+                    "anonymous implementation of interface '{}' is missing {} '{}'",
+                    interface_name, member_kind, name
+                )
+            } else {
+                format!(
+                    "{} declares interface '{}' but does not implement required {} '{}'",
+                    implementation_label, interface_name, member_kind, name
+                )
+            };
+            self.add_error("missing_interface_member", message, span);
         }
     }
 
     fn type_declares_method_body(&self, sig: &TypeSig, name: &str) -> bool {
-        sig.methods
-            .get(name)
-            .is_some_and(|methods| methods.iter().any(|method| method.has_body))
-            || self
-                .module
-                .extensions
-                .get(&sig.name)
-                .and_then(|methods| methods.get(name))
-                .is_some_and(|methods| methods.iter().any(|method| method.has_body))
+        sig.methods.get(name).is_some_and(|methods| {
+            methods
+                .iter()
+                .any(|method| method.has_body && method.visibility == Visibility::Default)
+        }) || self
+            .module
+            .extensions
+            .get(&sig.name)
+            .and_then(|methods| methods.get(name))
+            .is_some_and(|methods| {
+                methods
+                    .iter()
+                    .any(|method| method.has_body && method.visibility == Visibility::Default)
+            })
     }
 
     fn reject_parenthesized_constructor_fields(
@@ -16006,6 +16482,69 @@ def main() Unit {
     }
 
     #[test]
+    fn rejects_api_signatures_that_expose_less_visible_types() {
+        let program = parse_inline(
+            r#"
+class FileDetails {
+    value Int
+}
+
+internal class ModuleDetails {
+    value Int
+}
+
+public def inspect(value ModuleDetails) FileDetails = FileDetails(value.value)
+internal def share(value ModuleDetails) ModuleDetails = value
+internal def leak(value FileDetails) FileDetails = value
+
+public type ExposedDetails = FileDetails
+
+public class Api {
+    details ModuleDetails
+    private cached FileDetails = FileDetails(0)
+
+    def read(value ModuleDetails) ModuleDetails = value
+    private def helper(value FileDetails) FileDetails = value
+}
+
+class LocalApi {
+    def read(value FileDetails) FileDetails = value
+}
+"#,
+        );
+        let result = check_program(&program);
+        let visibility_errors = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "inaccessible_type_in_api")
+            .collect::<Vec<_>>();
+        assert_eq!(visibility_errors.len(), 8, "{:#?}", result.diagnostics);
+        assert!(
+            visibility_errors.iter().any(|diagnostic| {
+                diagnostic.message.contains("public API function 'inspect'")
+                    && diagnostic.message.contains("internal type 'ModuleDetails'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            visibility_errors.iter().any(|diagnostic| {
+                diagnostic.message.contains("internal API function 'leak'")
+                    && diagnostic.message.contains("private type 'FileDetails'")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        assert!(
+            !visibility_errors
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("function 'share'")),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn propagates_expected_types_through_groups_tuples_and_for_yield() {
         let program = parse_inline(
             r#"
@@ -16840,6 +17379,114 @@ class IncompleteKey with Hashed[IncompleteKey] {
     }
 
     #[test]
+    fn interface_implementations_cannot_reduce_member_visibility() {
+        let program = parse_inline(
+            r#"
+interface Reader {
+    def read() Str
+}
+
+class PrivateReader with Reader {
+    private def read() Str = "private"
+}
+
+class InternalReader with Reader {
+    internal def read() Str = "internal"
+}
+
+class PublicReader with Reader {
+    def read() Str = "public"
+}
+"#,
+        );
+        let result = check_program(&program);
+        let missing = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.code == "missing_interface_member" && diagnostic.message.contains("read")
+            })
+            .count();
+        assert_eq!(missing, 2, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn public_fields_satisfy_read_only_interface_getters() {
+        let program = parse_inline(
+            r#"
+interface Identified[T] {
+    get id T
+}
+
+class User with Identified[Int] {
+    id Int
+    name Str
+}
+
+class MutableUser with Identified[Int] {
+    var id Int
+}
+
+shape UserSnapshot with Identified[Int] {
+    id Int
+}
+
+def main() Unit {
+    user Identified[Int] = User(7, "Ada")
+    mutable Identified[Int] = MutableUser(8)
+    snapshot Identified[Int] = UserSnapshot(9)
+    anonymous Identified[Int] = object with Identified[Int] {
+        id Int = 10
+    }
+    println(user.id + mutable.id + snapshot.id + anonymous.id)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn fields_must_be_public_and_compatible_to_satisfy_interface_getters() {
+        let program = parse_inline(
+            r#"
+interface Identified {
+    get id Int
+}
+
+class HiddenId with Identified {
+    private id Int = 1
+}
+
+class WrongId with Identified {
+    id Str
+}
+
+class MethodId with Identified {
+    def id() Int = 1
+}
+"#,
+        );
+        let result = check_program(&program);
+        let missing = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "missing_interface_member")
+            .count();
+        assert_eq!(missing, 2, "{:#?}", result.diagnostics);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "invalid_interface_getter_field_type"
+                    && diagnostic.message.contains("WrongId")
+                    && diagnostic.message.contains("Str")
+                    && diagnostic.message.contains("Int")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn reports_argument_mismatch() {
         let program = parse_inline(
             r#"
@@ -16878,12 +17525,12 @@ def main() Int {
             r#"
 module models
 
-shape Point {
+public shape Point {
     x Int
     y Int
 }
 
-class Box[T] {
+public class Box[T] {
     value T
 }
 "#,
@@ -16946,7 +17593,7 @@ def main() Unit {
             r#"
 module model
 
-class Parser {
+public class Parser {
     type Text = Str
     type Outcome =
         class Parsed { text Text }
@@ -16991,8 +17638,8 @@ def main() Str {
             r#"
 module states
 
-type ConnectionState = object Ready {} | object Closed {}
-type JobState = object Ready {} | object Running {}
+public type ConnectionState = object Ready {} | object Closed {}
+public type JobState = object Ready {} | object Running {}
 "#,
         )
         .expect("write states module");
@@ -17032,7 +17679,7 @@ def main() Bool {
             r#"
 module shared
 
-class Box {
+internal class Box {
     internal var value Int = 1
 
     internal def increment() Unit = this.value += 1
@@ -17075,7 +17722,7 @@ def main() Int {
             r#"
 module model
 
-class Box {
+public class Box {
     internal var value Int = 1
 
     internal def increment() Unit = this.value += 1
@@ -17120,14 +17767,14 @@ def main() Unit {
             r#"
 module model
 
-class Account {
+public class Account {
     owner Str
     internal region Str = "US"
     balance Int
     private cache Int = 0
 }
 
-def localAccount() Account = Account("local", 1)
+public def localAccount() Account = Account("local", 1)
 "#,
         )
         .expect("write model");

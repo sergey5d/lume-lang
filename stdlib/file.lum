@@ -4,9 +4,9 @@
 
 # Byte is an API-level distinction for now. A range-checked primitive can replace
 # this alias later without changing the file API.
-type Byte = Int
+public type Byte = Int
 
-type FileError =
+public type FileError =
     class NotFound {
         path Str
     }
@@ -26,33 +26,33 @@ type FileError =
         message Str
     }
 
-type SeekFrom =
+public type SeekFrom =
     object Start {}
     | object Current {}
     | object End {}
 
-interface Closeable {
+public interface Closeable {
     get closed Bool
     def close() Result[Unit, FileError]
 }
 
-interface ByteReader {
+public interface ByteReader {
     def read(maxBytes Int) Result[[Byte], FileError]
     def readToEnd() Result[[Byte], FileError]
 }
 
-interface Seekable {
+public interface Seekable {
     get position Int
     def seek(offset Int) Result[Int, FileError]
     def seek(offset Int, from SeekFrom) Result[Int, FileError]
 }
 
-interface TextReader with Closeable {
+public interface TextReader with Closeable {
     def readLine() Result[Str?, FileError]
     def readToEnd() Result[Str, FileError]
 }
 
-class FileStream with ByteReader, Seekable, Closeable {
+public class FileStream with ByteReader, Seekable, Closeable {
     private new() {}
 
     get path Str = panic("FileStream is provided by the active runtime")
@@ -75,7 +75,7 @@ class FileStream with ByteReader, Seekable, Closeable {
         panic("FileStream is provided by the active runtime")
 }
 
-class TextFileReader with TextReader {
+public class TextFileReader with TextReader {
     private new() {}
 
     get path Str = panic("TextFileReader is provided by the active runtime")
@@ -91,7 +91,7 @@ class TextFileReader with TextReader {
         panic("TextFileReader is provided by the active runtime")
 }
 
-object File {
+public object File {
     def readBytes(path Str) Result[[Byte], FileError] =
         panic("File is provided by the active runtime")
 

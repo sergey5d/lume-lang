@@ -2,11 +2,11 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Eq[T] {
+public interface Eq[T] {
     def equals(other T) Bool
 }
 
 # Values whose equality is compatible with stable hashing.
-interface Hashed[T] with Eq[T] {
+public interface Hashed[T] with Eq[T] {
     def hash() Int
 }

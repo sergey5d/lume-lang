@@ -656,6 +656,7 @@ impl<'a> Parser<'a> {
             Some(TokenKind::At)
                 | Some(TokenKind::Keyword(Keyword::Internal))
                 | Some(TokenKind::Keyword(Keyword::Private))
+                | Some(TokenKind::Keyword(Keyword::Public))
                 | Some(TokenKind::Keyword(Keyword::Def))
                 | Some(TokenKind::Keyword(Keyword::Get))
         ) || self.starts_local_callable_decl_at(lookahead)

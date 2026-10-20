@@ -1,6 +1,6 @@
 module lume/http
 
-interface Context {
+public interface Context {
     def queryParam(name Str) Option[Str]
     def pathParam(name Str) Option[Str]
     def header(name Str) Option[Str]

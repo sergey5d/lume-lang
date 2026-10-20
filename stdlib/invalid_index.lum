@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-shape InvalidIndex {
+public shape InvalidIndex {
     index Int
     size Int
 }

@@ -109,6 +109,77 @@ private internalSeed Int = 0
 }
 
 #[test]
+fn applies_contextual_visibility_defaults() {
+    let result = parse(
+        r#"
+helper Int = 1
+public exposed Int = 2
+
+class Hidden {
+    value Int
+    private secret Int = 0
+
+    def read() Int = this.value
+}
+
+public class Exposed {}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.expect("program");
+
+    let Item::Statement(Stmt::Binding(helper)) = &program.items[0] else {
+        panic!("expected private helper binding")
+    };
+    assert_eq!(helper.visibility, Visibility::Private);
+
+    let Item::Statement(Stmt::Binding(exposed)) = &program.items[1] else {
+        panic!("expected public binding")
+    };
+    assert_eq!(exposed.visibility, Visibility::Default);
+
+    let Item::Type(hidden) = &program.items[2] else {
+        panic!("expected private class")
+    };
+    assert_eq!(hidden.visibility, Visibility::Private);
+    let TypeMember::Field(value) = &hidden.members[0] else {
+        panic!("expected public field")
+    };
+    assert_eq!(value.visibility, Visibility::Default);
+    let TypeMember::Field(secret) = &hidden.members[1] else {
+        panic!("expected private field")
+    };
+    assert_eq!(secret.visibility, Visibility::Private);
+    let TypeMember::Method(read) = &hidden.members[2] else {
+        panic!("expected public method")
+    };
+    assert_eq!(read.visibility, Visibility::Default);
+
+    let Item::Type(exposed) = &program.items[3] else {
+        panic!("expected public class")
+    };
+    assert_eq!(exposed.visibility, Visibility::Default);
+}
+
+#[test]
+fn rejects_non_public_interface_members() {
+    let result = parse(
+        r#"
+interface Reader {
+    private def read() Str
+    internal get closed Bool
+}
+"#,
+    );
+    let diagnostics = result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "interface_member_visibility")
+        .count();
+    assert_eq!(diagnostics, 2, "{:#?}", result.diagnostics);
+}
+
+#[test]
 fn parses_internal_declarations_and_members() {
     let result = parse(
         r#"

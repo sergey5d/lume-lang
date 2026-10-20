@@ -11,9 +11,9 @@ annotation  as        break     case       class      continue
 defer       def       default   do         else       ext
 false       fn        for       get        if         interface
 internal    is        let       match      module     object
-private     reified   return    shape      true       try
-type        use       var       vararg     when       while
-with        yield
+private     public    reified   return     shape      true
+try         type      use       var        vararg     when
+while       with      yield
 ```
 
 They are not ordinary identifiers. A grammar rule may explicitly reuse a
@@ -3315,6 +3315,26 @@ interface Named {
 }
 ```
 
+A public stored field satisfies a read-only interface getter with the same name
+when the field type is assignable to the getter's return type:
+
+```txt
+interface Identified {
+    get id Int
+}
+
+class User with Identified {
+    id Int
+    name Str
+}
+```
+
+No forwarding `get id Int = this.id` declaration is required. A `var` field
+may also satisfy the getter; the interface exposes only its read capability.
+Private and internal fields do not satisfy the contract, and an ordinary
+zero-argument method such as `def id() Int` is not a getter implementation.
+Implementations may instead compute the value with an explicit getter.
+
 Interface implementation and inheritance lists use one `with`, followed by
 comma-separated interface types:
 
@@ -5645,25 +5665,58 @@ size = "hello"
 
 ## Visibility
 
-Supported today:
+Top-level definitions are private by default. Use `public` deliberately for an
+external API and `internal` for declarations shared by files with the same
+`module` name:
 
-- `private` and `internal` on top-level `def` and immutable bindings
-- `private` and `internal` on top-level `annotation`, `interface`, `class`, `shape`, `object`, and `type` declarations
-- `private` and `internal` on fields, methods, getters, and constructors, subject to the structural-field restriction below
+```txt
+def normalize(value Str) Str = value.trim()       # source-file private
+internal def normalizeRecord(value Str) Str = ... # visible in this module
+public def parse(value Str) Result[Data, Str] = ...
+```
 
-Default visibility is public. There is no `public` keyword.
-Use `internal` for declarations and members shared by files with the same
-`module` name. Other modules cannot import an internal top-level declaration or
-access an internal member.
+This default applies to top-level functions, immutable bindings, annotations,
+interfaces, classes, shapes, objects, transparent aliases, and declared
+unions. Top-level mutable bindings are not allowed; mutable module state must
+live inside named objects, class instances, or function locals.
 
-Use `private` for declarations local to their source file and for members local
-to their declaring type. A class method may access private members on another
-instance of the same class; extension methods cannot access private members.
+Members use the opposite default: fields, methods, getters, constructors,
+nested declarations, and extension methods are public unless marked
+`internal` or `private`. A public member does not publish its containing type,
+and a nested declaration cannot be more visible than any declaration that
+contains it.
 
-Shape and annotation fields are always public structural data, so they cannot
-be `internal` or `private`.
-Top-level mutable bindings are not allowed; mutable module state must live inside
-named objects, class instances, or function locals.
+```txt
+public class Client {
+    private endpoint Str = "local"
+
+    def send(message Str) Unit = ...       # public
+    private def normalize(value Str) Str = ...
+}
+```
+
+Interface contract members are always public. Declaring an interface itself
+as private or internal is valid, but `private` and `internal` are rejected on
+its members. Implementations cannot satisfy a public interface method or
+getter with a less-visible member. A compatible public field is the one
+exception described in the interface section: it may implement a read-only
+getter requirement directly.
+
+An exposed signature cannot name a less-visible type. Public signatures may
+name only public types; internal signatures may name public or internal types.
+This applies recursively to parameters, return types, fields, generic
+arguments and bounds, transparent aliases, and exported immutable bindings.
+Reduce the API visibility or raise the named type's visibility to resolve such
+an error.
+
+`private` top-level declarations are local to their source file. Private
+members are local to their declaring type; a class method may access private
+members on another instance of that class. Extension methods cannot access
+private members.
+
+Shape fields are public by default and may be restricted explicitly.
+Annotation fields are always public metadata and cannot be `internal` or
+`private`.
 
 ## Notes
 

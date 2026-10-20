@@ -1,7 +1,7 @@
 # PRELUDE_SKIP
 # JAVA_SKIP
 
-interface Spec {
+public interface Spec {
     def it()
 }
 

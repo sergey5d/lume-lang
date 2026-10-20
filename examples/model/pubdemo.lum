@@ -1,12 +1,12 @@
 # SKIP
 module pubdemo
 
-prefix Str = "hello"
+public prefix Str = "hello"
 private secret Str = "shh"
 
 private class SecretBox {
     value Str
 }
 
-def greet(name Str) Str = prefix + ", " + name
+public def greet(name Str) Str = prefix + ", " + name
 private def whisper() Str = secret

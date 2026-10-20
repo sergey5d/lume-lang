@@ -64,7 +64,7 @@ private interface VectorApi[T] with Iterable[T] {
     }
 }
 
-class Vector[T] with VectorApi[T] {
+public class Vector[T] with VectorApi[T] {
     new(values [T] vararg) =
         panic("Vector construction is provided by the active runtime")
 }

@@ -2,16 +2,16 @@
 
 module models
 
-interface NamedModel {
+public interface NamedModel {
     def label() Str
 }
 
-class User with NamedModel {
+public class User with NamedModel {
     def label() Str = "User"
 }
 
-class Guest with NamedModel {
+public class Guest with NamedModel {
     def label() Str = "Guest"
 }
 
-type ModelUser = User
+public type ModelUser = User

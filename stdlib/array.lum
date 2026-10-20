@@ -30,7 +30,7 @@ private interface ArrayApi[T] with Iterable[T] {
     get size Int
 }
 
-class Array[T] with ArrayApi[T] {
+public class Array[T] with ArrayApi[T] {
     new(values [T] vararg) =
         panic("Array construction is provided by the active runtime")
 }

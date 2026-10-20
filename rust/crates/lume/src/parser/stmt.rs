@@ -160,7 +160,9 @@ impl<'a> Parser<'a> {
         let mut index = self.index;
         if matches!(
             self.tokens.get(index).map(|token| token.kind),
-            Some(TokenKind::Keyword(Keyword::Private | Keyword::Internal))
+            Some(TokenKind::Keyword(
+                Keyword::Public | Keyword::Private | Keyword::Internal,
+            ))
         ) {
             index += 1;
         }

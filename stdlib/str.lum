@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-interface Str with Comparable[Str] {
+public interface Str with Comparable[Str] {
     get size Int
     get isEmpty Bool
     get nonEmpty Bool

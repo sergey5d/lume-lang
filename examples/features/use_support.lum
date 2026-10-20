@@ -2,7 +2,7 @@
 
 module use_support
 
-class A {
+public class A {
 
     def label() Str = "A"
 }

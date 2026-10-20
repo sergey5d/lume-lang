@@ -5576,6 +5576,12 @@ impl<'a> Interpreter<'a> {
                             span,
                         );
                     }
+                    // Anonymous-object fields can implement read-only interface
+                    // getters. Interface member reads arrive here as zero-argument
+                    // calls, while direct reads still use ordinary field access.
+                    if args.is_empty() {
+                        return Ok(value);
+                    }
                     return self.invoke_value(value, args, span);
                 }
             }
@@ -5588,6 +5594,16 @@ impl<'a> Interpreter<'a> {
                         self.aggregate_field_value(&aggregate, method),
                     )
                 };
+                if let Some(function) =
+                    self.find_declared_method_overload_for_kind(&type_name, kind, method, &args)
+                {
+                    return self.call_function(function, Some(receiver), None, args, span);
+                }
+                if args.is_empty()
+                    && let Some(value) = field_fallback.clone()
+                {
+                    return Ok(value);
+                }
                 if let Some(function) =
                     self.find_method_overload_for_kind(&type_name, kind, method, &args)
                 {
@@ -11538,6 +11554,53 @@ def main() Unit {
     }
 
     #[test]
+    fn runs_interface_getters_implemented_by_public_fields() {
+        let program = lower_inline(
+            r#"
+            interface Identified[T] {
+                get id T
+            }
+
+            interface Labeled {
+                get label Str = "default"
+            }
+
+            class User with Identified[Int] {
+                id Int
+                name Str
+            }
+
+            shape Snapshot with Identified[Int] {
+                id Int
+            }
+
+            class LabeledUser with Labeled {
+                label Str
+            }
+
+            def readId(value Identified[Int]) Int = value.id
+            def readLabel(value Labeled) Str = value.label
+
+            def main() Unit {
+                user Identified[Int] = User(7, "Ada")
+                snapshot Identified[Int] = Snapshot(8)
+                anonymous Identified[Int] = object with Identified[Int] {
+                    id Int = 9
+                }
+                println(readId(user))
+                println(readId(snapshot))
+                println(readId(anonymous))
+                println(readLabel(LabeledUser("stored")))
+            }
+            "#,
+        );
+
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "7\n8\n9\nstored\n");
+    }
+
+    #[test]
     fn runs_interface_default_methods_and_overrides() {
         let program = lower_inline(
             r#"
@@ -11787,8 +11850,8 @@ def main() Unit {
             r#"
 module states
 
-type ConnectionState = object Ready {} | object Closed {}
-type JobState = object Ready {} | object Running {}
+public type ConnectionState = object Ready {} | object Closed {}
+public type JobState = object Ready {} | object Running {}
 "#,
         )
         .expect("write states module");
@@ -11818,7 +11881,7 @@ def main() Unit {
     }
 
     #[test]
-    fn run_path_executes_default_exports_across_modules() {
+    fn run_path_executes_explicit_exports_across_modules() {
         let path = repo_root().join("examples/pub_imports.lum");
         let run = run_path(path, None).expect("run default exports");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);

@@ -57,7 +57,7 @@ private interface LinkedListApi[T] with Iterable[T] {
     }
 }
 
-class LinkedList[T] with LinkedListApi[T] {
+public class LinkedList[T] with LinkedListApi[T] {
     new(values [T] vararg) =
         panic("LinkedList construction is provided by the active runtime")
 }

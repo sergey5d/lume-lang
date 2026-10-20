@@ -293,14 +293,14 @@ impl AmbientRegistry {
                             registry.values.insert(case.clone());
                         }
                     }
+                    registry.types.insert(name, info);
                 }
-                registry.types.insert(name.clone(), info.clone());
             }
             for (name, info) in decls.objects {
                 if info.visibility == Visibility::Default {
                     registry.values.insert(name.clone());
+                    registry.types.insert(name, info);
                 }
-                registry.types.insert(name, info);
             }
             registry.aliases.extend(
                 decls
@@ -3892,8 +3892,8 @@ def main() Unit {}
     fn rejects_ambiguous_bare_union_alternatives() {
         let program = parse_inline(
             r#"
-type ConnectionState = object Ready {} | object Closed {}
-type JobState = object Ready {} | object Running {}
+public type ConnectionState = object Ready {} | object Closed {}
+public type JobState = object Ready {} | object Running {}
 
 def main() Unit {
     value = Ready
@@ -3922,8 +3922,8 @@ def main() Unit {
             r#"
 module states
 
-type ConnectionState = object Ready {} | object Closed {}
-type JobState = object Ready {} | object Running {}
+public type ConnectionState = object Ready {} | object Closed {}
+public type JobState = object Ready {} | object Running {}
 "#,
         )
         .expect("write states module");
@@ -4031,7 +4031,7 @@ def main() Unit {
                     r#"
 module lib/math
 
-class Adder {
+public class Adder {
     value Int
 }
 "#,
@@ -4073,7 +4073,7 @@ def qualified() nested.Namespace.Point = nested.Namespace.Point(2)
                     r#"
 module nested
 
-class Namespace {
+public class Namespace {
     shape Point { x Int }
 }
 "#,
@@ -4174,6 +4174,89 @@ def main() Int = answer()
         );
 
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn top_level_declarations_require_public_for_external_imports() {
+        let temp = workspace_root().join("rust/target/resolver-explicit-public-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("support.lum"),
+            r#"
+module support
+
+def hidden() Int = 1
+public def exposed() Int = 2
+
+shape HiddenValue {
+    value Int
+}
+
+public shape ExposedValue {
+    value Int
+}
+"#,
+        )
+        .expect("write support");
+
+        let visible = temp.join("visible.lum");
+        fs::write(
+            &visible,
+            r#"
+module app
+use support/{exposed, ExposedValue}
+
+def main() Int = exposed() + ExposedValue(1).value
+"#,
+        )
+        .expect("write visible consumer");
+        let result = resolve_path(&visible).expect("resolve explicit public imports");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let hidden = temp.join("hidden.lum");
+        fs::write(
+            &hidden,
+            r#"
+module app
+use support/{hidden, HiddenValue}
+
+def main() Int = hidden() + HiddenValue(1).value
+"#,
+        )
+        .expect("write hidden consumer");
+        let error = resolve_path(&hidden).expect_err("default-private imports must fail");
+        assert!(
+            error.contains("no visible symbol 'hidden'")
+                || error.contains("no visible symbol 'HiddenValue'"),
+            "unexpected error: {error}"
+        );
+
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn private_stdlib_helper_types_are_not_ambient_names() {
+        let temp = workspace_root().join("rust/target/resolver-private-stdlib-helper-test.lum");
+        fs::write(
+            &temp,
+            r#"
+module app
+
+def consume(value VectorApi[Int]) Unit {}
+"#,
+        )
+        .expect("write source");
+        let result = resolve_path(&temp).expect("resolve source");
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.diagnostic.code == "undefined_type"
+                    && diagnostic.diagnostic.message.contains("VectorApi")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+        let _ = fs::remove_file(&temp);
     }
 
     #[test]

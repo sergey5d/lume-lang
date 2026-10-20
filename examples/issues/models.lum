@@ -2,11 +2,11 @@
 
 module models
 
-shape Point {
+public shape Point {
     x Int
     y Int
 }
 
-class Box[T] {
+public class Box[T] {
     value T
 }

@@ -1,17 +1,17 @@
 module lume/json
 
-annotation JsonName {
+public annotation JsonName {
     value Str
 }
 
-annotation JsonIgnore {}
+public annotation JsonIgnore {}
 
-shape JsonField {
+public shape JsonField {
     name Str
     value JsonValue
 }
 
-type JsonValue =
+public type JsonValue =
     object JsonNull {}
     | class JsonBool { value Bool }
     | class JsonNumber { value Str }
@@ -25,7 +25,7 @@ ext JsonValue {
     def textContent() Str = Json.textContent(this)
 }
 
-object Json {
+public object Json {
 
     def str(value Str) JsonValue =
         panic("Json is provided by the Rust runtime")

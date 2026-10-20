@@ -10,7 +10,7 @@ private interface MapApi[K with Hashed[K], V] with Iterable[(K, V)] {
     def flatMap[X](f fn(K, V) Iterable[X]) Vector[X]
     def filter(f fn(K, V) Bool) Map[K, V]
     def fold[X](initial X, f fn(X, K, V) X) X
-    def reduce(f fn(K, V, K, V) (K, V)) Option[(K, V)]
+    def reduce(f fn(K, V, K, V)(K, V)) Option[(K, V)]
     def exists(f fn(K, V) Bool) Bool
     def forAll(f fn(K, V) Bool) Bool
     def forEach(f fn(K, V) Unit)
@@ -25,7 +25,7 @@ private interface MapApi[K with Hashed[K], V] with Iterable[(K, V)] {
     def values() [V]
 }
 
-class Map[K with Hashed[K], V] with MapApi[K, V] {
+public class Map[K with Hashed[K], V] with MapApi[K, V] {
     new(entries [(K, V)] vararg) =
         panic("Map construction is provided by the active runtime")
 }

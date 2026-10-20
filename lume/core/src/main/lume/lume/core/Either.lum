@@ -1,6 +1,6 @@
 module lume/core
 
-type Either[L, R] =
+public type Either[L, R] =
     class Left { value L }
     | class Right { value R }
 

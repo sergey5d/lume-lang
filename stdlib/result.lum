@@ -1,7 +1,7 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-type Result[T, E] =
+public type Result[T, E] =
     class Ok { value T }
     | class Err { error E }
 

@@ -104,6 +104,7 @@ impl<'a> Lowerer<'a> {
         self.declare_top_level_items();
         self.define_items();
         self.canonicalize_nested_ir_types();
+        self.synthesize_interface_field_getters();
         self.derive_value_bounds();
         self.lower_top_level_functions();
         self.lower_methods();
@@ -113,6 +114,133 @@ impl<'a> Lowerer<'a> {
             self.program.set_entry(main);
         }
         std::mem::take(&mut self.program)
+    }
+
+    fn synthesize_interface_field_getters(&mut self) {
+        let mut bridges = Vec::new();
+        for ty in &self.program.types {
+            // Java records already expose component accessors with the exact
+            // interface-getter shape. Classes and named objects need an
+            // explicit bridge method for their stored fields.
+            if matches!(ty.kind, ast::TypeKind::Interface | ast::TypeKind::Record) {
+                continue;
+            }
+            let getter_names = ty
+                .with_bounds
+                .iter()
+                .flat_map(|bound| self.effective_interface_getter_names(bound, &mut HashSet::new()))
+                .collect::<HashSet<_>>();
+            if getter_names.is_empty() {
+                continue;
+            }
+            let declared = ty
+                .methods
+                .iter()
+                .filter_map(|id| self.program.function(*id))
+                .map(|method| method.name.clone())
+                .collect::<HashSet<_>>();
+            for field in &ty.fields {
+                if field.visibility == ast::Visibility::Default
+                    && getter_names.contains(&field.name)
+                    && !declared.contains(&field.name)
+                    && let Some(span) = field.span.or(ty.span)
+                {
+                    bridges.push((ty.id, ty.name.clone(), field.clone(), span));
+                }
+            }
+        }
+
+        for (owner, owner_name, field, span) in bridges {
+            let mut getter = ir::Function::new(
+                field.name.clone(),
+                ir::FunctionKind::Method { owner },
+                field.ty.clone(),
+            );
+            getter.visibility = ast::Visibility::Default;
+            getter.getter = true;
+            getter.span = Some(span);
+            let this_local = getter.add_local(
+                "this",
+                ir::Type::named(owner_name),
+                false,
+                ir::LocalKind::Capture,
+            );
+            let id = self.program.add_function(getter);
+            let body = CallableBody::Expr(Expr::Member {
+                receiver: Box::new(Expr::Identifier {
+                    name: "this".to_string(),
+                    span,
+                }),
+                name: field.name.clone(),
+                span,
+            });
+            self.core_bodies.insert(id, body.clone());
+            self.method_work.push(MethodWork {
+                id,
+                decl: MethodDecl {
+                    annotations: Vec::new(),
+                    visibility: ast::Visibility::Default,
+                    name: field.name,
+                    getter: true,
+                    type_params: Vec::new(),
+                    type_conditions: Vec::new(),
+                    params: Vec::new(),
+                    return_type: None,
+                    body: Some(body),
+                    span,
+                },
+                this_local,
+            });
+            self.program.types[owner.0].methods.push(id);
+        }
+    }
+
+    fn effective_interface_getter_names(
+        &self,
+        interface_ty: &ir::Type,
+        seen: &mut HashSet<String>,
+    ) -> HashSet<String> {
+        let ir::Type::Named { name, .. } = interface_ty else {
+            return HashSet::new();
+        };
+        if !seen.insert(name.clone()) {
+            return HashSet::new();
+        }
+        let Some(interface) = self
+            .program
+            .types
+            .iter()
+            .find(|ty| ty.name == *name && ty.kind == ast::TypeKind::Interface)
+        else {
+            seen.remove(name);
+            return HashSet::new();
+        };
+
+        let mut getters = interface
+            .with_bounds
+            .iter()
+            .flat_map(|bound| self.effective_interface_getter_names(bound, seen))
+            .collect::<HashSet<_>>();
+        let mut local_members = HashMap::<String, bool>::new();
+        for method in interface
+            .methods
+            .iter()
+            .filter_map(|id| self.program.function(*id))
+        {
+            local_members
+                .entry(method.name.clone())
+                .and_modify(|getter| *getter &= method.getter)
+                .or_insert(method.getter);
+        }
+        for (name, getter) in local_members {
+            if getter {
+                getters.insert(name);
+            } else {
+                getters.remove(&name);
+            }
+        }
+        seen.remove(name);
+        getters
     }
 
     fn derive_value_bounds(&mut self) {
@@ -1749,6 +1877,7 @@ impl<'a> FunctionLowerer<'a> {
                 return_ty,
             );
             getter.visibility = field.visibility;
+            getter.getter = true;
             getter.span = Some(field.span);
             getter.add_local(
                 "this",

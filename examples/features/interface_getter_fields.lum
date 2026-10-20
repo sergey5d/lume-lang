@@ -1,0 +1,31 @@
+# EXPECT:
+# 7 Ada
+# 8
+# 9
+
+interface Identified[T] {
+    get id T
+}
+
+class User with Identified[Int] {
+    id Int
+    name Str
+}
+
+shape Snapshot with Identified[Int] {
+    id Int
+}
+
+def printId(value Identified[Int]) Unit = println(value.id)
+
+def main() Unit {
+    user = User(7, "Ada")
+    println(user.id, user.name)
+
+    printId(Snapshot(8))
+
+    anonymous Identified[Int] = object with Identified[Int] {
+        id Int = 9
+    }
+    printId(anonymous)
+}

@@ -100,7 +100,12 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_item(&mut self) -> Option<Item> {
         let annotations = self.parse_annotations()?;
-        let visibility = self.parse_visibility();
+        let explicit_visibility = self.at_visibility_modifier();
+        let visibility = if explicit_visibility {
+            self.parse_visibility()
+        } else {
+            Visibility::Private
+        };
         match self.current_kind() {
             TokenKind::Keyword(Keyword::Def) => {
                 let function = self.parse_function_decl(annotations, visibility)?;
@@ -125,7 +130,7 @@ impl<'a> Parser<'a> {
                     );
                     return None;
                 }
-                if visibility != Visibility::Default {
+                if explicit_visibility {
                     self.error_at_current(
                         "unexpected_visibility",
                         "ext blocks do not accept visibility modifiers",
@@ -167,7 +172,7 @@ impl<'a> Parser<'a> {
                     );
                     return None;
                 }
-                if visibility != Visibility::Default {
+                if explicit_visibility {
                     self.error_at_current(
                         "unexpected_visibility",
                         "visibility modifiers are only valid on declarations",
@@ -184,13 +189,22 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_visibility(&mut self) -> Visibility {
-        if self.match_keyword(Keyword::Internal) {
+        if self.match_keyword(Keyword::Public) {
+            Visibility::Default
+        } else if self.match_keyword(Keyword::Internal) {
             Visibility::Internal
         } else if self.match_keyword(Keyword::Private) {
             Visibility::Private
         } else {
             Visibility::Default
         }
+    }
+
+    pub(super) fn at_visibility_modifier(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            TokenKind::Keyword(Keyword::Public | Keyword::Internal | Keyword::Private)
+        )
     }
 
     fn parse_type_alias_or_union_decl(
@@ -676,6 +690,13 @@ impl<'a> Parser<'a> {
             let member_annotations = self.parse_annotations()?;
 
             let member_visibility = self.parse_visibility();
+            if kind == TypeKind::Interface && member_visibility != Visibility::Default {
+                self.diagnostics.push(Diagnostic::error(
+                    "interface_member_visibility",
+                    "interface members are always public and cannot be declared private or internal",
+                    self.previous_span(),
+                ));
+            }
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Type) if self.starts_type_alias_decl() => {
                     let nested =

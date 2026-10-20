@@ -1,6 +1,6 @@
 module lume/core
 
-type Option[T] with Iterable[T] =
+public type Option[T] with Iterable[T] =
     class Some { value T }
     | object None {}
 

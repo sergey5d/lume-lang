@@ -3,7 +3,7 @@
 # INTERPRETER
 
 # Opaque identity token returned by the synthetic `referenceId` member.
-class ReferenceId with Hashed[ReferenceId] {
+public class ReferenceId with Hashed[ReferenceId] {
     private new() {}
 
     def equals(other ReferenceId) Bool =
