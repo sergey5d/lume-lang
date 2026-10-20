@@ -36,7 +36,7 @@ function runFormatter(executable, sourcePath, cwd, signal) {
       } else if (error.code === "ENOENT") {
         reject(
           new Error(
-            `cannot find '${executable}'; install Lume or set lume.formatter.path`,
+            `cannot find '${executable}'; install Lume or set lume.executable.path`,
           ),
         );
       } else {

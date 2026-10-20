@@ -32,6 +32,12 @@ pub struct ResolveResult {
     pub diagnostics: Vec<LocatedDiagnostic>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefinitionTarget {
+    pub path: String,
+    pub span: crate::source::Span,
+}
+
 impl ResolveResult {
     pub fn has_errors(&self) -> bool {
         self.diagnostics
@@ -75,6 +81,39 @@ fn default_inline_ambient_registry() -> AmbientRegistry {
 
 pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolveResult, String> {
     resolve_path_with_options(path, &ModuleLoadOptions::default())
+}
+
+pub fn definition_at_path(
+    path: impl AsRef<Path>,
+    source: Option<&str>,
+    offset: usize,
+) -> Result<Option<DefinitionTarget>, String> {
+    let path = path.as_ref();
+    let root =
+        fs::canonicalize(path).map_err(|err| format!("resolve {}: {err}", path.display()))?;
+    let stdlib_dir = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?;
+    let ambient = AmbientRegistry::load_from_stdlib(&stdlib_dir)?;
+    let mut options = ModuleLoadOptions::default();
+    if let Some(source) = source {
+        options
+            .source_overrides
+            .insert(root.clone(), source.to_string());
+    }
+    options.allow_missing_modules = true;
+    let (graph, root) = load_module_graph_with_options(&root, &options)?;
+    let module = graph
+        .modules
+        .get(&root)
+        .ok_or_else(|| format!("loaded module missing {}", root.display()))?;
+    let mut resolver = Resolver::new(
+        module.display_path.as_str(),
+        module,
+        &graph.modules,
+        &ambient,
+    );
+    resolver.definition_offset = Some(offset);
+    resolver.resolve();
+    Ok(resolver.definition)
 }
 
 pub(crate) fn resolve_path_with_options(
@@ -148,12 +187,16 @@ pub(crate) fn load_module_graph_with_options(
 #[derive(Debug, Clone)]
 pub(crate) struct ModuleLoadOptions {
     pub(crate) library_modules: HashMap<String, LibraryModule>,
+    pub(crate) source_overrides: HashMap<PathBuf, String>,
+    pub(crate) allow_missing_modules: bool,
 }
 
 impl Default for ModuleLoadOptions {
     fn default() -> Self {
         Self {
             library_modules: native_library_modules(),
+            source_overrides: HashMap::new(),
+            allow_missing_modules: false,
         }
     }
 }
@@ -162,6 +205,7 @@ impl Default for ModuleLoadOptions {
 pub(crate) struct LibraryModule {
     pub(crate) program: Program,
     pub(crate) typecheck_only_types: HashSet<String>,
+    pub(crate) source_path: Option<PathBuf>,
 }
 
 fn native_library_modules() -> HashMap<String, LibraryModule> {
@@ -171,6 +215,7 @@ fn native_library_modules() -> HashMap<String, LibraryModule> {
         LibraryModule {
             program: native_json_program(),
             typecheck_only_types: HashSet::new(),
+            source_path: Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/native_json.lum")),
         },
     );
     modules
@@ -248,6 +293,8 @@ pub(crate) enum ImportedKind {
 struct AmbientRegistry {
     types: HashMap<String, TypeInfo>,
     aliases: HashMap<String, TypeAliasInfo>,
+    type_origins: HashMap<String, String>,
+    alias_origins: HashMap<String, String>,
     values: HashSet<String>,
 }
 
@@ -293,21 +340,29 @@ impl AmbientRegistry {
                             registry.values.insert(case.clone());
                         }
                     }
+                    registry
+                        .type_origins
+                        .insert(name.clone(), path.display().to_string());
                     registry.types.insert(name, info);
                 }
             }
             for (name, info) in decls.objects {
                 if info.visibility == Visibility::Default {
                     registry.values.insert(name.clone());
+                    registry
+                        .type_origins
+                        .insert(name.clone(), path.display().to_string());
                     registry.types.insert(name, info);
                 }
             }
-            registry.aliases.extend(
-                decls
-                    .aliases
-                    .into_iter()
-                    .filter(|(_, alias)| alias.visibility == Visibility::Default),
-            );
+            for (name, alias) in decls.aliases {
+                if alias.visibility == Visibility::Default {
+                    registry
+                        .alias_origins
+                        .insert(name.clone(), path.display().to_string());
+                    registry.aliases.insert(name, alias);
+                }
+            }
         }
 
         Ok(registry)
@@ -334,11 +389,12 @@ struct TypeAliasInfo {
     span: crate::source::Span,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct DeclSpan {
     visibility: Visibility,
     span: crate::source::Span,
     getter: bool,
+    return_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -410,24 +466,33 @@ struct TypeInfo {
     visibility: Visibility,
     arity: usize,
     span: crate::source::Span,
+    bounds: Vec<String>,
     fields: Vec<SymbolicField>,
     methods: HashMap<String, DeclSpan>,
     enum_cases: HashMap<String, crate::source::Span>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct SymbolicField {
-    name: &'static str,
+    name: String,
     mutable: bool,
     visibility: Visibility,
+    span: crate::source::Span,
+    type_name: Option<String>,
 }
 
 impl SymbolicField {
     fn from_field(field: &crate::ast::FieldDecl) -> Self {
         Self {
-            name: Box::leak(field.name.to_string().into_boxed_str()),
+            name: field.name.clone(),
             mutable: field.mutable,
             visibility: field.visibility,
+            span: field.span,
+            type_name: field
+                .ty
+                .as_ref()
+                .and_then(type_ref_name)
+                .map(str::to_string),
         }
     }
 }
@@ -457,7 +522,11 @@ fn load_module_with_options(
         return Err(format!("use cycle detected at {}", abs.display()));
     }
 
-    let program = parse_program_from_path(&abs)?;
+    let program = if let Some(source) = options.source_overrides.get(&abs) {
+        parse_program_from_source(&abs, source.clone())?
+    } else {
+        parse_program_from_path(&abs)?
+    };
     let display_path = abs.display().to_string();
     let base_dir = abs
         .parent()
@@ -486,6 +555,9 @@ fn load_module_with_options(
         let child_path = local_module_path(source_root, base_dir, stdlib_dir, &import.path);
         let library_import =
             !child_path.exists() && options.library_modules.contains_key(&import.path);
+        if !child_path.exists() && !library_import && options.allow_missing_modules {
+            continue;
+        }
         let child_abs = if library_import {
             ensure_library_module(&import.path, graph, options)?
         } else {
@@ -638,6 +710,15 @@ fn local_module_path(
         return relative;
     }
 
+    // Editor features can resolve a nested module as the graph root. Walk up
+    // to find the nearest enclosing source root before falling back to stdlib.
+    for ancestor in base_dir.ancestors().skip(1) {
+        let enclosing = ancestor.join(&module_file);
+        if enclosing.exists() {
+            return enclosing;
+        }
+    }
+
     let stdlib = stdlib_dir.join(&module_file);
     if stdlib.exists() {
         return stdlib;
@@ -648,6 +729,10 @@ fn local_module_path(
 
 pub(crate) fn parse_program_from_path(path: &Path) -> Result<Program, String> {
     let text = fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    parse_program_from_source(path, text)
+}
+
+fn parse_program_from_source(path: &Path, text: String) -> Result<Program, String> {
     let file = SourceFile::new(path.display().to_string(), text);
     let lexed = lex(&file);
     if !lexed.diagnostics.is_empty() {
@@ -701,7 +786,11 @@ fn ensure_library_module(
             path.clone(),
             LoadedModule {
                 path: path.clone(),
-                display_path: path.display().to_string(),
+                display_path: library
+                    .source_path
+                    .as_ref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| path.display().to_string()),
                 program: library.program.clone(),
                 source: ModuleSource::Library,
                 typecheck_only_types: library.typecheck_only_types.clone(),
@@ -1063,6 +1152,11 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
                         visibility: function.visibility,
                         span: function.span,
                         getter: false,
+                        return_type: function
+                            .return_type
+                            .as_ref()
+                            .and_then(type_ref_name)
+                            .map(str::to_string),
                     },
                 );
             }
@@ -1102,7 +1196,40 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
             _ => {}
         }
     }
+    let catalog = decls
+        .types
+        .iter()
+        .chain(decls.objects.iter())
+        .map(|(name, info)| (name.clone(), info.clone()))
+        .collect::<HashMap<_, _>>();
+    for info in decls.types.values_mut().chain(decls.objects.values_mut()) {
+        inherit_type_members(info, &catalog, &mut HashSet::new());
+    }
     decls
+}
+
+fn inherit_type_members(
+    info: &mut TypeInfo,
+    catalog: &HashMap<String, TypeInfo>,
+    seen: &mut HashSet<String>,
+) {
+    for bound in info.bounds.clone() {
+        if !seen.insert(bound.clone()) {
+            continue;
+        }
+        let Some(mut parent) = catalog.get(&bound).cloned() else {
+            continue;
+        };
+        inherit_type_members(&mut parent, catalog, seen);
+        for field in parent.fields {
+            if !info.fields.iter().any(|own| own.name == field.name) {
+                info.fields.push(field);
+            }
+        }
+        for (name, method) in parent.methods {
+            info.methods.entry(name).or_insert(method);
+        }
+    }
 }
 
 fn summarize_type(decl: &TypeDecl) -> TypeInfo {
@@ -1121,6 +1248,11 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
                         visibility: method.visibility,
                         span: method.span,
                         getter: method.getter,
+                        return_type: method
+                            .return_type
+                            .as_ref()
+                            .and_then(type_ref_name)
+                            .map(str::to_string),
                     },
                 );
             }
@@ -1134,6 +1266,12 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
         visibility: decl.visibility,
         arity: decl.type_params.len(),
         span: decl.span,
+        bounds: decl
+            .with_bounds
+            .iter()
+            .filter_map(type_ref_name)
+            .map(str::to_string)
+            .collect(),
         fields,
         methods,
         enum_cases,
@@ -1163,9 +1301,12 @@ struct Resolver<'a> {
     method_hint_scopes: Vec<HashSet<String>>,
     getter_hint_scopes: Vec<HashSet<String>>,
     binding_initializer_names: Vec<HashSet<String>>,
+    declared_symbol_types: HashMap<usize, String>,
     current_type_paths: Vec<String>,
     loop_depth: usize,
     current_constructor: bool,
+    definition_offset: Option<usize>,
+    definition: Option<DefinitionTarget>,
 }
 
 impl<'a> Resolver<'a> {
@@ -1198,9 +1339,12 @@ impl<'a> Resolver<'a> {
             method_hint_scopes: Vec::new(),
             getter_hint_scopes: Vec::new(),
             binding_initializer_names: Vec::new(),
+            declared_symbol_types: HashMap::new(),
             current_type_paths: Vec::new(),
             loop_depth: 0,
             current_constructor: false,
+            definition_offset: None,
+            definition: None,
         }
     }
 
@@ -1209,6 +1353,7 @@ impl<'a> Resolver<'a> {
     fn resolve(&mut self) {
         self.install_imports();
         self.collect_top_level_decls();
+        self.resolve_import_definitions();
         self.resolve_globals();
         self.resolve_items();
     }
@@ -1457,6 +1602,16 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    fn resolve_import_definitions(&mut self) {
+        for import in &self.module.program.imports {
+            for symbol in &import.symbols {
+                let local_name = symbol.alias.as_deref().unwrap_or(&symbol.name);
+                let target = self.identifier_definition(local_name);
+                self.record_definition(symbol.span, target);
+            }
+        }
+    }
+
     fn install_imported_nested_types(
         &mut self,
         local_name: &str,
@@ -1508,6 +1663,7 @@ impl<'a> Resolver<'a> {
             }
             for local in &binding.bindings {
                 self.resolve_type_ref(local.ty.as_ref());
+                self.remember_declared_type(local.span, local.ty.as_ref());
                 if local.name == "_" {
                     continue;
                 }
@@ -1657,7 +1813,11 @@ impl<'a> Resolver<'a> {
                         info.kind == TypeKind::Enum && info.enum_cases.contains_key(member_name)
                     }) || self
                         .lookup_object_info(owner_name)
-                        .and_then(|info| info.fields.iter().find(|field| field.name == member_name))
+                        .and_then(|info| {
+                            info.fields
+                                .iter()
+                                .find(|field| field.name.as_str() == member_name)
+                        })
                         .is_some_and(|field| !field.mutable)
                 }
             }
@@ -1665,7 +1825,11 @@ impl<'a> Resolver<'a> {
                 self.modules_by_alias
                     .get(module_name)
                     .and_then(|namespace| namespace.objects.get(object_name))
-                    .and_then(|info| info.fields.iter().find(|field| field.name == field_name))
+                    .and_then(|info| {
+                        info.fields
+                            .iter()
+                            .find(|field| field.name.as_str() == field_name)
+                    })
                     .is_some_and(|field| !field.mutable)
                     || self
                         .modules_by_alias
@@ -1691,6 +1855,7 @@ impl<'a> Resolver<'a> {
         self.push_scope();
         for param in &function.params {
             self.resolve_type_ref(param.ty.as_ref());
+            self.remember_declared_type(param.span, param.ty.as_ref());
             self.define_value(
                 param.name.as_str(),
                 param.span,
@@ -1794,6 +1959,7 @@ impl<'a> Resolver<'a> {
                     if !case.fields.is_empty() {
                         self.push_scope();
                         for field in &case.fields {
+                            self.remember_declared_type(field.span, field.ty.as_ref());
                             self.define_value(
                                 field.name.as_str(),
                                 field.span,
@@ -1832,7 +1998,7 @@ impl<'a> Resolver<'a> {
                 info.fields
                     .iter()
                     .filter(|field| field.visibility != Visibility::Private)
-                    .map(|field| field.name),
+                    .map(|field| field.name.as_str()),
             );
         } else {
             self.push_field_hints(TypeKind::Class, std::iter::empty());
@@ -1962,6 +2128,7 @@ impl<'a> Resolver<'a> {
         let param_kind = self.method_parameter_kind(is_constructor);
         for param in &method.params {
             self.resolve_type_ref(param.ty.as_ref());
+            self.remember_declared_type(param.span, param.ty.as_ref());
             self.define_value(
                 param.name.as_str(),
                 param.span,
@@ -2013,6 +2180,7 @@ impl<'a> Resolver<'a> {
                 self.binding_initializer_names.pop();
                 for local in &binding.bindings {
                     self.resolve_type_ref(local.ty.as_ref());
+                    self.remember_declared_type(local.span, local.ty.as_ref());
                     self.define_binding(local, "duplicate_binding");
                 }
             }
@@ -2110,6 +2278,7 @@ impl<'a> Resolver<'a> {
         self.push_scope();
         for param in &function.params {
             self.resolve_type_ref(param.ty.as_ref());
+            self.remember_declared_type(param.span, param.ty.as_ref());
             self.define_value(
                 param.name.as_str(),
                 param.span,
@@ -2242,6 +2411,7 @@ impl<'a> Resolver<'a> {
         }
         for local in &binding.bindings {
             self.resolve_type_ref(local.ty.as_ref());
+            self.remember_declared_type(local.span, local.ty.as_ref());
             self.define_binding(local, "duplicate_binding");
         }
     }
@@ -2258,6 +2428,8 @@ impl<'a> Resolver<'a> {
     fn resolve_assignment_target(&mut self, target: &Expr, operator: AssignOp) {
         match target {
             Expr::Identifier { name, span } => {
+                let target = self.identifier_definition(name);
+                self.record_definition(*span, target);
                 if let Some(symbol) = self.lookup_scoped_value(name) {
                     if !symbol.mutable {
                         self.add_error(
@@ -2304,11 +2476,20 @@ impl<'a> Resolver<'a> {
     fn resolve_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Identifier { name, span } => {
+                let target = self.identifier_definition(name);
+                self.record_definition(*span, target);
                 if self.lookup_scoped_value(name).is_some()
                     || self.is_field_hint(name)
                     || self.is_getter_hint(name)
                 {
                     return;
+                }
+                if self.lookup_global_value(name).is_none()
+                    && !self.functions.contains_key(name)
+                    && !self.imported_functions.contains_key(name)
+                {
+                    let target = self.named_type_definition(name);
+                    self.record_definition(*span, target);
                 }
                 if self.lookup_global_value(name).is_none()
                     && !self.functions.contains_key(name)
@@ -2389,6 +2570,17 @@ impl<'a> Resolver<'a> {
                 name,
                 span,
             } => {
+                let reference_span = member_reference_span(*span, name);
+                if let Some(segments) = member_segments(expr) {
+                    let target = self
+                        .module_member_definition(&segments)
+                        .or_else(|| self.named_type_definition(&segments.join(".")))
+                        .or_else(|| self.member_definition(receiver, name));
+                    self.record_definition(reference_span, target);
+                } else {
+                    let target = self.member_definition(receiver, name);
+                    self.record_definition(reference_span, target);
+                }
                 if let Some(result) = self.resolve_module_member_chain(expr) {
                     if let Err(message) = result {
                         self.add_error(
@@ -2604,9 +2796,11 @@ impl<'a> Resolver<'a> {
 
     fn resolve_lambda_param(&mut self, param: &crate::ast::LambdaParam) {
         self.resolve_type_ref(param.ty.as_ref());
+        self.remember_declared_type(param.span, param.ty.as_ref());
         if let Some(destructure) = &param.destructure {
             for binding in &destructure.bindings {
                 self.resolve_type_ref(binding.ty.as_ref());
+                self.remember_declared_type(binding.span, binding.ty.as_ref());
                 self.define_value(
                     binding.name.as_str(),
                     binding.span,
@@ -2732,6 +2926,8 @@ impl<'a> Resolver<'a> {
         if path.is_empty() {
             return;
         }
+        let target = self.named_type_definition(&path.join("."));
+        self.record_definition(span, target);
         if path.len() == 1 && self.report_ambiguous_union_alternative(&path[0], span) {
             return;
         }
@@ -2792,6 +2988,7 @@ impl<'a> Resolver<'a> {
                     self.resolve_type_ref(Some(arg));
                 }
                 if self.is_type_param(name) {
+                    self.record_definition(*span, self.type_parameter_definition(name));
                     if !args.is_empty() {
                         self.add_error(
                             "invalid_type_arity",
@@ -2802,6 +2999,7 @@ impl<'a> Resolver<'a> {
                     return;
                 }
                 if let Some(arity) = builtin_type_arity(name) {
+                    self.record_definition(*span, self.ambient_type_definition(name));
                     if args.len() != arity {
                         self.add_error(
                             "invalid_type_arity",
@@ -2816,6 +3014,7 @@ impl<'a> Resolver<'a> {
                     return;
                 }
                 if self.lookup_alias(name).is_some() {
+                    self.record_definition(*span, self.alias_definition(name));
                     if !args.is_empty() {
                         self.add_error(
                             "invalid_type_arity",
@@ -2826,13 +3025,15 @@ impl<'a> Resolver<'a> {
                     return;
                 }
                 if let Some(info) = self.lookup_type(name) {
-                    if args.len() != info.arity {
+                    let arity = info.arity;
+                    self.record_definition(*span, self.type_definition(name));
+                    if args.len() != arity {
                         self.add_error(
                             "invalid_type_arity",
                             format!(
                                 "type '{}' expects {} type arguments",
                                 name,
-                                arity_label(info.arity)
+                                arity_label(arity)
                             ),
                             *span,
                         );
@@ -2992,6 +3193,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn define_binding(&mut self, binding: &Binding, code: &'static str) {
+        self.remember_declared_type(binding.span, binding.ty.as_ref());
         self.define_local_value(
             binding.name.as_str(),
             binding.span,
@@ -3359,6 +3561,394 @@ impl<'a> Resolver<'a> {
             .or_else(|| self.ambient.aliases.get(name))
     }
 
+    fn record_definition(
+        &mut self,
+        reference_span: crate::source::Span,
+        target: Option<DefinitionTarget>,
+    ) {
+        if self.definition.is_some()
+            || !self
+                .definition_offset
+                .is_some_and(|offset| reference_span.start <= offset && offset < reference_span.end)
+        {
+            return;
+        }
+        self.definition = target;
+    }
+
+    fn remember_declared_type(&mut self, span: crate::source::Span, ty: Option<&TypeRef>) {
+        if let Some(name) = ty.and_then(type_ref_name) {
+            self.declared_symbol_types
+                .insert(span.start, name.to_string());
+        }
+    }
+
+    fn identifier_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        if let Some(symbol) = self.lookup_scoped_value(name) {
+            return Some(self.local_definition(symbol.span));
+        }
+        if let Some(symbol) = self.globals.get(name) {
+            return Some(self.local_definition(symbol.span));
+        }
+        if let Some(symbol) = self.imported_values.get(name) {
+            return self.imported_definition(name, symbol.span);
+        }
+        if let Some(span) = self.functions.get(name) {
+            return Some(self.local_definition(*span));
+        }
+        if let Some(span) = self.imported_functions.get(name) {
+            return self.imported_definition(name, *span);
+        }
+        if let Some(target) = self.current_member_definition(name) {
+            return Some(target);
+        }
+        if let Some(owners) = self.enum_case_values.get(name)
+            && let [owner] = owners.as_slice()
+            && let Some(span) = self
+                .types
+                .get(owner)
+                .and_then(|info| info.enum_cases.get(name))
+        {
+            return Some(self.local_definition(*span));
+        }
+        self.named_type_definition(name)
+    }
+
+    fn current_member_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        let owner = self.current_type_paths.last()?;
+        let info = self.types.get(owner).or_else(|| self.objects.get(owner))?;
+        if let Some(field) = info.fields.iter().find(|field| field.name == name) {
+            return Some(self.local_definition(field.span));
+        }
+        info.methods
+            .get(name)
+            .map(|method| self.local_definition(method.span))
+    }
+
+    fn module_member_definition(&self, segments: &[String]) -> Option<DefinitionTarget> {
+        let module_alias = segments.first()?;
+        let module_path = self.module.imports.get(module_alias)?;
+        let namespace = self.modules_by_alias.get(module_alias)?;
+        let member_path = segments.get(1..)?.join(".");
+        if let Some(span) = namespace.functions.get(&member_path) {
+            return self.module_definition(module_path, *span);
+        }
+        if let Some(symbol) = namespace.globals.get(&member_path) {
+            return self.module_definition(module_path, symbol.span);
+        }
+        if let Some(info) = namespace
+            .types
+            .get(&member_path)
+            .or_else(|| namespace.objects.get(&member_path))
+        {
+            return self.module_definition(module_path, info.span);
+        }
+        if let Some(info) = namespace.aliases.get(&member_path) {
+            return self.module_definition(module_path, info.span);
+        }
+        let (owner_path, member) = member_path.rsplit_once('.')?;
+        let info = namespace
+            .types
+            .get(owner_path)
+            .or_else(|| namespace.objects.get(owner_path))?;
+        if let Some(field) = info.fields.iter().find(|field| field.name == member) {
+            return self.module_definition(module_path, field.span);
+        }
+        if let Some(method) = info.methods.get(member) {
+            return self.module_definition(module_path, method.span);
+        }
+        info.enum_cases
+            .get(member)
+            .and_then(|span| self.module_definition(module_path, *span))
+    }
+
+    fn member_definition(&self, receiver: &Expr, name: &str) -> Option<DefinitionTarget> {
+        let owner = self.receiver_type_name(receiver)?;
+        self.named_type_member_definition(&owner, name)
+    }
+
+    fn named_type_member_definition(&self, owner: &str, name: &str) -> Option<DefinitionTarget> {
+        if let Some(info) = self.types.get(owner).or_else(|| self.objects.get(owner)) {
+            return self.local_type_member_definition(info, name);
+        }
+        if !owner.contains('.')
+            && let Some(current) = self.current_type_paths.last()
+        {
+            let mut scope = current.as_str();
+            loop {
+                let candidate = format!("{scope}.{owner}");
+                if let Some(info) = self
+                    .types
+                    .get(&candidate)
+                    .or_else(|| self.objects.get(&candidate))
+                {
+                    return self.local_type_member_definition(info, name);
+                }
+                let Some((parent, _)) = scope.rsplit_once('.') else {
+                    break;
+                };
+                scope = parent;
+            }
+        }
+        if let Some((module_alias, member_path)) = qualified_type_parts(owner)
+            && let Some(module_path) = self.module.imports.get(module_alias)
+            && let Some(namespace) = self.modules_by_alias.get(module_alias)
+            && let Some(info) = namespace
+                .types
+                .get(member_path)
+                .or_else(|| namespace.objects.get(member_path))
+        {
+            return type_member_span(info, name)
+                .and_then(|span| self.module_definition(module_path, span));
+        }
+        if let Some(info) = self
+            .imported_types
+            .get(owner)
+            .or_else(|| self.imported_objects.get(owner))
+            && let Some(span) = type_member_span(info, name)
+        {
+            return self.imported_definition(owner, span);
+        }
+        if let Some(info) = self.ambient.types.get(owner)
+            && let Some(span) = type_member_span(info, name)
+            && let Some(path) = self.ambient.type_origins.get(owner)
+        {
+            return Some(DefinitionTarget {
+                path: path.clone(),
+                span,
+            });
+        }
+        None
+    }
+
+    fn local_type_member_definition(
+        &self,
+        info: &TypeInfo,
+        name: &str,
+    ) -> Option<DefinitionTarget> {
+        type_member_span(info, name).map(|span| self.local_definition(span))
+    }
+
+    fn receiver_type_name(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Identifier { name, .. } if name == "this" => {
+                self.current_type_paths.last().cloned()
+            }
+            Expr::Identifier { name, .. } => self
+                .lookup_value(name)
+                .and_then(|symbol| self.declared_symbol_types.get(&symbol.span.start).cloned())
+                .or_else(|| {
+                    (self.lookup_type(name).is_some() || self.lookup_object_info(name).is_some())
+                        .then(|| name.clone())
+                }),
+            Expr::Group { inner, .. } => self.receiver_type_name(inner),
+            Expr::Member { receiver, name, .. } => {
+                let owner = self.receiver_type_name(receiver)?;
+                self.named_type_member_type(&owner, name)
+            }
+            Expr::Call { callee, .. } => {
+                if let Some(segments) = member_segments(callee) {
+                    let candidate = segments.join(".");
+                    if self.lookup_type(&candidate).is_some()
+                        || self.lookup_object_info(&candidate).is_some()
+                    {
+                        return Some(candidate);
+                    }
+                }
+                let Expr::Member { receiver, name, .. } = callee.as_ref() else {
+                    return None;
+                };
+                let owner = self.receiver_type_name(receiver)?;
+                self.named_type_method_return(&owner, name)
+            }
+            Expr::Try { value, .. } | Expr::ExtractOr { value, .. } => {
+                self.receiver_type_name(value)
+            }
+            _ => None,
+        }
+    }
+
+    fn named_type_member_type(&self, owner: &str, name: &str) -> Option<String> {
+        let info = self
+            .lookup_type(owner)
+            .or_else(|| self.lookup_object_info(owner))?;
+        if let Some(field) = info.fields.iter().find(|field| field.name == name) {
+            return field.type_name.clone();
+        }
+        info.methods
+            .get(name)
+            .and_then(|method| method.getter.then(|| method.return_type.clone()).flatten())
+    }
+
+    fn named_type_method_return(&self, owner: &str, name: &str) -> Option<String> {
+        self.lookup_type(owner)
+            .or_else(|| self.lookup_object_info(owner))?
+            .methods
+            .get(name)?
+            .return_type
+            .clone()
+    }
+
+    fn local_definition(&self, span: crate::source::Span) -> DefinitionTarget {
+        DefinitionTarget {
+            path: self.module.display_path.clone(),
+            span,
+        }
+    }
+
+    fn module_definition(
+        &self,
+        module_path: &Path,
+        span: crate::source::Span,
+    ) -> Option<DefinitionTarget> {
+        self.modules
+            .get(module_path)
+            .map(|module| DefinitionTarget {
+                path: module.display_path.clone(),
+                span,
+            })
+    }
+
+    fn imported_definition(
+        &self,
+        name: &str,
+        span: crate::source::Span,
+    ) -> Option<DefinitionTarget> {
+        let root = name.split('.').next()?;
+        let symbol = self.module.symbol_imports.get(root)?;
+        self.module_definition(&symbol.module_path, span)
+    }
+
+    fn type_parameter_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        self.type_scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied())
+            .map(|span| self.local_definition(span))
+    }
+
+    fn ambient_type_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        let info = self.ambient.types.get(name)?;
+        let path = self.ambient.type_origins.get(name)?.clone();
+        Some(DefinitionTarget {
+            path,
+            span: info.span,
+        })
+    }
+
+    fn type_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        if let Some(info) = self.types.get(name) {
+            return Some(self.local_definition(info.span));
+        }
+        if !name.contains('.')
+            && let Some(owner) = self.current_type_paths.last()
+        {
+            let mut scope = owner.as_str();
+            loop {
+                let candidate = format!("{scope}.{name}");
+                if let Some(info) = self.types.get(&candidate) {
+                    return Some(self.local_definition(info.span));
+                }
+                let Some((parent, _)) = scope.rsplit_once('.') else {
+                    break;
+                };
+                scope = parent;
+            }
+        }
+        if let Some((module_alias, member)) = qualified_type_parts(name)
+            && let Some(info) = self
+                .modules_by_alias
+                .get(module_alias)
+                .and_then(|namespace| namespace.types.get(member))
+            && let Some(module_path) = self.module.imports.get(module_alias)
+        {
+            return self.module_definition(module_path, info.span);
+        }
+        if let Some(info) = self.imported_types.get(name) {
+            return self.imported_definition(name, info.span);
+        }
+        self.ambient_type_definition(name)
+    }
+
+    fn object_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        if let Some(info) = self.objects.get(name) {
+            return Some(self.local_definition(info.span));
+        }
+        if !name.contains('.')
+            && let Some(owner) = self.current_type_paths.last()
+        {
+            let mut scope = owner.as_str();
+            loop {
+                let candidate = format!("{scope}.{name}");
+                if let Some(info) = self.objects.get(&candidate) {
+                    return Some(self.local_definition(info.span));
+                }
+                let Some((parent, _)) = scope.rsplit_once('.') else {
+                    break;
+                };
+                scope = parent;
+            }
+        }
+        if let Some((module_alias, member)) = qualified_type_parts(name)
+            && let Some(info) = self
+                .modules_by_alias
+                .get(module_alias)
+                .and_then(|namespace| namespace.objects.get(member))
+            && let Some(module_path) = self.module.imports.get(module_alias)
+        {
+            return self.module_definition(module_path, info.span);
+        }
+        if let Some(info) = self.imported_objects.get(name) {
+            return self.imported_definition(name, info.span);
+        }
+        None
+    }
+
+    fn alias_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        if let Some(info) = self.aliases.get(name) {
+            return Some(self.local_definition(info.span));
+        }
+        if !name.contains('.')
+            && let Some(owner) = self.current_type_paths.last()
+        {
+            let mut scope = owner.as_str();
+            loop {
+                let candidate = format!("{scope}.{name}");
+                if let Some(info) = self.aliases.get(&candidate) {
+                    return Some(self.local_definition(info.span));
+                }
+                let Some((parent, _)) = scope.rsplit_once('.') else {
+                    break;
+                };
+                scope = parent;
+            }
+        }
+        if let Some((module_alias, member)) = qualified_type_parts(name)
+            && let Some(info) = self
+                .modules_by_alias
+                .get(module_alias)
+                .and_then(|namespace| namespace.aliases.get(member))
+            && let Some(module_path) = self.module.imports.get(module_alias)
+        {
+            return self.module_definition(module_path, info.span);
+        }
+        if let Some(info) = self.imported_aliases.get(name) {
+            return self.imported_definition(name, info.span);
+        }
+        let info = self.ambient.aliases.get(name)?;
+        let path = self.ambient.alias_origins.get(name)?.clone();
+        Some(DefinitionTarget {
+            path,
+            span: info.span,
+        })
+    }
+
+    fn named_type_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        self.alias_definition(name)
+            .or_else(|| self.type_definition(name))
+            .or_else(|| self.object_definition(name))
+    }
+
     fn is_type_param(&self, name: &str) -> bool {
         self.type_scopes
             .iter()
@@ -3442,7 +4032,10 @@ impl<'a> Resolver<'a> {
         if let Some((owner_path, member)) = member_path.rsplit_once('.') {
             if let Some(object) = namespace.objects.get(owner_path) {
                 if object.methods.contains_key(member)
-                    || object.fields.iter().any(|field| field.name == member)
+                    || object
+                        .fields
+                        .iter()
+                        .any(|field| field.name.as_str() == member)
                 {
                     return None;
                 }
@@ -3476,7 +4069,10 @@ impl<'a> Resolver<'a> {
             [module, object_name, member] => {
                 if let Some(object) = namespace.objects.get(object_name) {
                     if object.methods.contains_key(member)
-                        || object.fields.iter().any(|field| field.name == member)
+                        || object
+                            .fields
+                            .iter()
+                            .any(|field| field.name.as_str() == member)
                     {
                         return None;
                     }
@@ -3612,6 +4208,29 @@ fn type_ref_name(reference: &TypeRef) -> Option<&str> {
 fn qualified_type_parts(name: &str) -> Option<(&str, &str)> {
     let (module, member) = name.split_once('.')?;
     (!module.is_empty() && !member.is_empty()).then_some((module, member))
+}
+
+fn type_member_span(info: &TypeInfo, name: &str) -> Option<crate::source::Span> {
+    info.fields
+        .iter()
+        .find(|field| field.name == name)
+        .map(|field| field.span)
+        .or_else(|| info.methods.get(name).map(|method| method.span))
+        .or_else(|| info.enum_cases.get(name).copied())
+}
+
+fn member_reference_span(span: crate::source::Span, name: &str) -> crate::source::Span {
+    let byte_width = name.len().min(span.end.saturating_sub(span.start));
+    let column_width = name.chars().count();
+    crate::source::Span::new(
+        span.end.saturating_sub(byte_width),
+        span.end,
+        crate::source::LineColumn::new(
+            span.end_pos.line,
+            span.end_pos.column.saturating_sub(column_width),
+        ),
+        span.end_pos,
+    )
 }
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
@@ -4037,11 +4656,18 @@ public class Adder {
 "#,
                 ),
                 typecheck_only_types: HashSet::new(),
+                source_path: None,
             },
         );
 
-        let result = resolve_path_with_options(&source, &ModuleLoadOptions { library_modules })
-            .expect("resolve");
+        let result = resolve_path_with_options(
+            &source,
+            &ModuleLoadOptions {
+                library_modules,
+                ..ModuleLoadOptions::default()
+            },
+        )
+        .expect("resolve");
 
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let _ = fs::remove_dir_all(&temp);
@@ -4079,11 +4705,18 @@ public class Namespace {
 "#,
                 ),
                 typecheck_only_types: HashSet::new(),
+                source_path: None,
             },
         );
 
-        let result = resolve_path_with_options(&source, &ModuleLoadOptions { library_modules })
-            .expect("resolve");
+        let result = resolve_path_with_options(
+            &source,
+            &ModuleLoadOptions {
+                library_modules,
+                ..ModuleLoadOptions::default()
+            },
+        )
+        .expect("resolve");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 
         let _ = fs::remove_dir_all(&temp);

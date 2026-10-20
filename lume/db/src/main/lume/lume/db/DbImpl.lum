@@ -50,8 +50,6 @@ private class JdbcRowImpl with Row {
 
     def int(column Str) Result[Int, DbError] = this.backend.intValue(column)
 
-    def int64(column Str) Result[Int, DbError] = this.backend.int64(column)
-
     def intOpt(column Str) Result[Option[Int], DbError] = this.backend.intOpt(column)
 
     def float(column Str) Result[Float, DbError] = this.backend.floatValue(column)

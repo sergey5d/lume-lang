@@ -1,9 +1,9 @@
-use std::{env, fs, path::Path, process::ExitCode};
+use std::{env, fs, io::Read, path::Path, process::ExitCode};
 
 use lume::{
-    Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, format_source,
-    generate_java_path, lex, parse_program, render_diagnostic, render_path_diagnostic,
-    run_path_with_args, test_path,
+    Diagnostic, JavaBackendOptions, LocatedDiagnostic, SourceFile, check_path, definition_at_path,
+    format_source, generate_java_path, lex, parse_program, render_diagnostic,
+    render_path_diagnostic, run_path_with_args, test_path,
 };
 
 fn main() -> ExitCode {
@@ -17,6 +17,7 @@ fn main() -> ExitCode {
         "tokens" => tokens_command(&mut args),
         "parse" => parse_command(&mut args),
         "fmt" => fmt_command(&mut args),
+        "definition" => definition_command(&mut args),
         "check" => check_command(&mut args),
         "run" => run_command(&mut args),
         "test" => test_command(&mut args),
@@ -109,6 +110,74 @@ fn fmt_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
+}
+
+fn definition_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
+    let path = match read_path_arg(args, "definition") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    let mut offset = None;
+    let mut read_stdin = false;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--offset" => {
+                let Some(value) = args.next() else {
+                    eprintln!("missing byte offset after --offset for 'definition'");
+                    return ExitCode::from(2);
+                };
+                match value.parse::<usize>() {
+                    Ok(value) => offset = Some(value),
+                    Err(_) => {
+                        eprintln!("invalid byte offset '{value}' for 'definition'");
+                        return ExitCode::from(2);
+                    }
+                }
+            }
+            "--stdin" => read_stdin = true,
+            _ => {
+                eprintln!("unknown argument '{argument}' for 'definition'");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let Some(offset) = offset else {
+        eprintln!("missing --offset <bytes> for 'definition'");
+        return ExitCode::from(2);
+    };
+
+    let source = if read_stdin {
+        let mut source = String::new();
+        if let Err(error) = std::io::stdin().read_to_string(&mut source) {
+            eprintln!("read definition source from stdin: {error}");
+            return ExitCode::from(1);
+        }
+        Some(source)
+    } else {
+        None
+    };
+
+    match definition_at_path(&path, source.as_deref(), offset) {
+        Ok(Some(target)) => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "path": target.path,
+                    "line": target.span.start_pos.line,
+                    "column": target.span.start_pos.column,
+                })
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(None) => {
+            println!("null");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn check_command(args: &mut impl Iterator<Item = String>) -> ExitCode {
@@ -229,6 +298,7 @@ fn print_usage() {
     eprintln!("  lume tokens <file>");
     eprintln!("  lume parse <file>");
     eprintln!("  lume fmt <file>");
+    eprintln!("  lume definition <file> --offset <bytes> [--stdin]");
     eprintln!("  lume check <file>");
     eprintln!("  lume run <file> [entry] [-- <args>...]");
     eprintln!("  lume test <file>");

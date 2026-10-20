@@ -11,7 +11,6 @@ public interface Row {
     def str(column Str) Result[Str, DbError]
     def strOpt(column Str) Result[Option[Str], DbError]
     def int(column Str) Result[Int, DbError]
-    def int64(column Str) Result[Int, DbError]
     def intOpt(column Str) Result[Option[Int], DbError]
     def float(column Str) Result[Float, DbError]
     def float64(column Str) Result[Float, DbError]

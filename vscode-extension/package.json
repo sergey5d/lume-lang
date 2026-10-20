@@ -1,8 +1,8 @@
 {
   "name": "lume-syntax",
   "displayName": "Lume",
-  "description": "Syntax highlighting, language configuration, and source formatting for Lume.",
-  "version": "0.0.8",
+  "description": "Syntax highlighting, source formatting, and definition navigation for Lume.",
+  "version": "0.0.9",
   "publisher": "sergeyd",
   "license": "UNLICENSED",
   "main": "./extension.js",
@@ -49,16 +49,23 @@
     "configuration": {
       "title": "Lume",
       "properties": {
+        "lume.executable.path": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Path to the Lume executable used for formatting and language features. Defaults to lume on PATH."
+        },
         "lume.formatter.path": {
           "type": "string",
           "default": "lume",
           "scope": "resource",
-          "description": "Path to the Lume executable used for source formatting."
+          "description": "Legacy path to the Lume executable used when lume.executable.path is unset.",
+          "deprecationMessage": "Use lume.executable.path instead."
         }
       }
     }
   },
   "scripts": {
-    "check": "node --check extension.js && node --check formatter.js"
+    "check": "node --check extension.js && node --check formatter.js && node --check navigation.js"
   }
 }

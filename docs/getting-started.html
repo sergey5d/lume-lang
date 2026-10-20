@@ -83,6 +83,7 @@ cargo run --manifest-path rust/Cargo.toml -p lume -- run ./hello.lum</code></pre
             <tr><td><code>tokens file.lum</code></td><td>Print lexer tokens and source spans.</td></tr>
             <tr><td><code>parse file.lum</code></td><td>Parse a file and print its syntax tree.</td></tr>
             <tr><td><code>fmt file.lum</code></td><td>Validate and format a source file in place.</td></tr>
+            <tr><td><code>definition file.lum --offset bytes</code></td><td>Return a compiler-resolved type definition as JSON for editor tooling.</td></tr>
             <tr><td><code>check file.lum</code></td><td>Resolve modules and type-check the program.</td></tr>
             <tr><td><code>run file.lum</code></td><td>Check, lower, and execute a Lume entry point.</td></tr>
             <tr><td><code>gen file.lum --out dir</code></td><td>Validate Lume and generate Java source.</td></tr>
@@ -97,7 +98,7 @@ cargo test --manifest-path rust/Cargo.toml -p lume</code></pre>
         <p>Good starting points include <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/classes.lum">classes</a>, <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/shape.lum">shapes</a>, <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/features/union_declaration.lum">declared unions</a>, and <a href="https://github.com/sergey5d/lume-lang/blob/main/examples/unwrapping.lum">failure handling</a>.</p>
 
         <h2 id="editor">Install VS Code support</h2>
-        <p>The repository includes syntax highlighting and language configuration for VS Code. Run the installer from the extension directory:</p>
+        <p>The repository includes syntax highlighting, formatting, and type-definition navigation for VS Code. Run the installer from the extension directory:</p>
         <pre><code>cd vscode-extension
 ./install.sh</code></pre>
         <p>Restart VS Code after installation, then open a <code>.lum</code> file. See the <a href="https://github.com/sergey5d/lume-lang/tree/main/vscode-extension">extension README</a> for manual installation details.</p>

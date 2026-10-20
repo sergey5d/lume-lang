@@ -2,7 +2,7 @@
 
 `Lume` is an experimental programming language implemented in Rust. The current
 repo focuses on the compiler/interpreter pipeline, language design notes,
-checked examples, a small stdlib, and VS Code syntax support.
+checked examples, a small stdlib, and VS Code editing support.
 
 The language aims to stay direct and readable. It is designed around a few
 separate ideas rather than one large object model trying to do everything.
@@ -116,7 +116,7 @@ More runnable examples live in [examples/](examples/).
 - `rust/` - Rust compiler, resolver, typechecker, lowering, interpreter, and CLI.
 - `examples/` - Lume programs used as samples and parity fixtures.
 - `stdlib/` - Standard library sources loaded by the Rust toolchain.
-- `vscode-extension/` - Editor highlighting support.
+- `vscode-extension/` - Editor highlighting, formatting, and type-definition navigation.
 - `syntax.md` - Current language syntax reference.
 - `features.md` - Unsettled feature notes and design discussion.
 - `ARCHITECTURE.md` - High-level architecture notes for the current pipeline.

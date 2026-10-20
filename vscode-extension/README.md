@@ -7,6 +7,7 @@ This VS Code extension adds:
 - bracket / auto-close rules
 - TextMate-based syntax highlighting for Lume
 - document formatting through `lume fmt`
+- Go to Definition for types and type constructors
 
 ## Format Lume source
 
@@ -19,7 +20,7 @@ To use a compiler at another location, configure its path:
 
 ```json
 {
-  "lume.formatter.path": "/absolute/path/to/lume"
+  "lume.executable.path": "/absolute/path/to/lume"
 }
 ```
 
@@ -34,6 +35,14 @@ Formatting on save uses the standard VS Code settings:
 }
 ```
 
+## Navigate to a type definition
+
+Use **Go to Definition**, `F12`, or Ctrl/Cmd-click on a type annotation or an
+explicit type constructor. Navigation follows local, nested, selectively
+imported, module-qualified, aliased, generic, and standard-library types. The
+lookup uses the current editor contents, so saved and unsaved files behave the
+same way.
+
 ## Install locally
 
 From this repo:
@@ -43,7 +52,7 @@ cd vscode-extension
 ./install.sh
 ```
 
-The script packages the extension as `lume-syntax-0.0.8.vsix` and installs it
+The script packages the extension as `lume-syntax-0.0.9.vsix` and installs it
 with the first VS Code-compatible CLI it finds: `code`, `cursor`, or `codium`.
 It uses `npx @vscode/vsce`, so Node/npm must be available.
 
@@ -63,8 +72,8 @@ Manual install also works:
 
 ```sh
 cd vscode-extension
-npx --yes @vscode/vsce package --allow-missing-repository --out lume-syntax-0.0.8.vsix
-code --install-extension "$(pwd)/lume-syntax-0.0.8.vsix" --force
+npx --yes @vscode/vsce package --allow-missing-repository --out lume-syntax-0.0.9.vsix
+code --install-extension "$(pwd)/lume-syntax-0.0.9.vsix" --force
 ```
 
 Or use the UI:
@@ -73,7 +82,7 @@ Or use the UI:
 2. Open the Extensions view.
 3. Click the `...` menu.
 4. Choose `Install from VSIX...`.
-5. Select `vscode-extension/lume-syntax-0.0.8.vsix`.
+5. Select `vscode-extension/lume-syntax-0.0.9.vsix`.
 
 For development, the easiest path is:
 
@@ -87,4 +96,4 @@ For development, the easiest path is:
 This extension remains intentionally lightweight:
 
 - no language server
-- no semantic analysis
+- definition lookup runs the compiler on demand rather than maintaining a background process

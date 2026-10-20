@@ -62,6 +62,7 @@ pub fn generate_java_path(
 
     let load_options = ModuleLoadOptions {
         library_modules: external_resolution.library_modules.clone(),
+        ..ModuleLoadOptions::default()
     };
     let bundled = build_backend_bundle_with_load_options(path, &load_options)?;
     if !bundled.diagnostics.is_empty() {
@@ -367,6 +368,7 @@ fn java_library_modules(
                         span: Some(span),
                     },
                     typecheck_only_types,
+                    source_path: None,
                 },
             )
         })

@@ -81,10 +81,6 @@ public final class JdbcRow {
         return convert(column, JdbcRow::toLong);
     }
 
-    public Result<Long, DbError> int64(String column) {
-        return intValue(column);
-    }
-
     public Result<Option<Long>, DbError> intOpt(String column) {
         return convertOpt(column, JdbcRow::toLong);
     }

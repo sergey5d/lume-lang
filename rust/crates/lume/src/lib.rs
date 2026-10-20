@@ -33,6 +33,9 @@ pub use java_backend::{JavaBackendOptions, JavaBackendResult, generate_java_path
 pub use lexer::{Keyword, LexResult, Token, TokenKind, lex};
 pub use lower::{LowerResult, lower_program};
 pub use parser::{ParseResult, parse_program};
-pub use resolver::{CheckResult, LocatedDiagnostic, ResolveResult, resolve_path, resolve_program};
+pub use resolver::{
+    CheckResult, DefinitionTarget, LocatedDiagnostic, ResolveResult, definition_at_path,
+    resolve_path, resolve_program,
+};
 pub use source::{LineColumn, SourceFile, Span};
 pub use typecheck::{CheckResult as TypeCheckResult, PathCheckResult, check_path, check_program};
