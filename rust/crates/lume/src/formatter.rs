@@ -80,14 +80,38 @@ fn canonicalize_callable_syntax(source: &str, tokens: &[Token], program: &Progra
 fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut Vec<Span>) {
     for item in &program.items {
         match item {
-            Item::Function(function) => collect_function_rewrites(function, tokens, removals),
+            Item::Function(function) => {
+                collect_redundant_visibility(
+                    tokens,
+                    function.span.start,
+                    Keyword::Private,
+                    removals,
+                );
+                collect_function_rewrites(function, tokens, removals);
+            }
             Item::Type(decl) => {
+                collect_redundant_visibility(
+                    tokens,
+                    decl.span.start,
+                    if decl.name.contains('.') {
+                        Keyword::Public
+                    } else {
+                        Keyword::Private
+                    },
+                    removals,
+                );
                 for annotation in &decl.annotations {
                     collect_annotation_rewrites(annotation, tokens, removals);
                 }
                 for member in &decl.members {
                     match member {
                         TypeMember::Field(field) => {
+                            collect_redundant_visibility(
+                                tokens,
+                                field.span.start,
+                                Keyword::Public,
+                                removals,
+                            );
                             for annotation in &field.annotations {
                                 collect_annotation_rewrites(annotation, tokens, removals);
                             }
@@ -100,6 +124,12 @@ fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut 
                         }
                         TypeMember::Case(case) => {
                             for field in &case.fields {
+                                collect_redundant_visibility(
+                                    tokens,
+                                    field.span.start,
+                                    Keyword::Public,
+                                    removals,
+                                );
                                 for annotation in &field.annotations {
                                     collect_annotation_rewrites(annotation, tokens, removals);
                                 }
@@ -116,9 +146,41 @@ fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut 
                     collect_method_rewrites(method, tokens, removals);
                 }
             }
-            Item::Statement(stmt) => collect_stmt_rewrites(stmt, tokens, removals),
-            Item::TypeAlias(_) => {}
+            Item::Statement(stmt) => {
+                if let Stmt::Binding(binding) = stmt {
+                    collect_redundant_visibility(
+                        tokens,
+                        binding.span.start,
+                        Keyword::Private,
+                        removals,
+                    );
+                }
+                collect_stmt_rewrites(stmt, tokens, removals);
+            }
+            Item::TypeAlias(alias) => collect_redundant_visibility(
+                tokens,
+                alias.span.start,
+                if alias.name.contains('.') {
+                    Keyword::Public
+                } else {
+                    Keyword::Private
+                },
+                removals,
+            ),
         }
+    }
+}
+
+fn collect_redundant_visibility(
+    tokens: &[Token],
+    declaration_start: usize,
+    default_keyword: Keyword,
+    removals: &mut Vec<Span>,
+) {
+    if let Some(token) = token_immediately_before(tokens, declaration_start)
+        && token.kind == TokenKind::Keyword(default_keyword)
+    {
+        removals.push(token.span);
     }
 }
 
@@ -144,6 +206,7 @@ fn collect_function_rewrites(function: &FunctionDecl, tokens: &[Token], removals
 }
 
 fn collect_method_rewrites(method: &MethodDecl, tokens: &[Token], removals: &mut Vec<Span>) {
+    collect_redundant_visibility(tokens, method.span.start, Keyword::Public, removals);
     if !method.getter {
         collect_explicit_unit_return(&method.return_type, removals);
     }
@@ -660,6 +723,14 @@ fn should_write_horizontal_space(
         return false;
     };
 
+    if is_selective_import_line(tokens) {
+        if matches!(previous.kind, TokenKind::Slash | TokenKind::LBrace)
+            || matches!(current.kind, TokenKind::Slash | TokenKind::RBrace)
+        {
+            return false;
+        }
+    }
+
     if matches!(
         current.kind,
         TokenKind::RParen
@@ -683,6 +754,15 @@ fn should_write_horizontal_space(
     }
 
     had_space || requires_horizontal_space(previous.kind, current.kind)
+}
+
+fn is_selective_import_line(tokens: &[&Token]) -> bool {
+    tokens
+        .first()
+        .is_some_and(|token| token.kind == TokenKind::Keyword(Keyword::Use))
+        && tokens
+            .windows(2)
+            .any(|pair| pair[0].kind == TokenKind::Slash && pair[1].kind == TokenKind::LBrace)
 }
 
 fn requires_horizontal_space(previous: TokenKind, current: TokenKind) -> bool {
@@ -1032,8 +1112,49 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "use Models/*\nuse runtime/EventRuntime\n\nprivate def category(value Str?) Bool =\n    EventRuntime.containsRegex(\n        value ?? \"\",\n        raw\"(?i)crypto\"\n    )\n\ndef pairs(left [Int], right [Int]) {\n    for {\n        item <- left\n        other <- right\n    } do {\n        println(item, other)\n    }\n}\n"
+            "use Models/*\nuse runtime/EventRuntime\n\ndef category(value Str?) Bool =\n    EventRuntime.containsRegex(\n        value ?? \"\",\n        raw\"(?i)crypto\"\n    )\n\ndef pairs(left [Int], right [Int]) {\n    for {\n        item <- left\n        other <- right\n    } do {\n        println(item, other)\n    }\n}\n"
         );
+    }
+
+    #[test]
+    fn removes_only_visibility_modifiers_that_match_the_scope_default() {
+        let result = format(
+            "private def helper() Unit {}\npublic def api() Unit {}\nprivate type Name = Str\nprivate class Hidden {\npublic value Int\nprivate secret Int\npublic get visible Int = value\npublic def read() Int = value\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def helper() {}\npublic def api() {}\ntype Name = Str\nclass Hidden {\n    value Int\n    private secret Int\n    get visible Int = value\n    def read() Int = value\n}\n"
+        );
+    }
+
+    #[test]
+    fn preserves_selective_import_syntax() {
+        let result = format(
+            "use providers / common / { canonicalResolution, canonicalStatus, SourceIngestor }\nuse lume/json/{Json, JsonValue}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "use providers/common/{canonicalResolution, canonicalStatus, SourceIngestor}\nuse lume/json/{Json, JsonValue}\n"
+        );
+
+        let reparsed_file = SourceFile::new("formatted.lum", result.text.clone());
+        let reparsed_tokens = lex(&reparsed_file);
+        assert!(
+            reparsed_tokens.diagnostics.is_empty(),
+            "{:#?}",
+            reparsed_tokens.diagnostics
+        );
+        let reparsed = parse_program(&reparsed_tokens.tokens);
+        assert!(
+            reparsed.diagnostics.is_empty(),
+            "{:#?}",
+            reparsed.diagnostics
+        );
+
+        let reformatted = format(&result.text);
+        assert_eq!(reformatted.text, result.text);
     }
 
     #[test]

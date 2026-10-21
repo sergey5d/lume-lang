@@ -394,7 +394,7 @@ struct DeclSpan {
     visibility: Visibility,
     span: crate::source::Span,
     getter: bool,
-    return_type: Option<String>,
+    return_type: Option<TypeRef>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -478,7 +478,7 @@ struct SymbolicField {
     mutable: bool,
     visibility: Visibility,
     span: crate::source::Span,
-    type_name: Option<String>,
+    ty: Option<TypeRef>,
 }
 
 impl SymbolicField {
@@ -488,11 +488,7 @@ impl SymbolicField {
             mutable: field.mutable,
             visibility: field.visibility,
             span: field.span,
-            type_name: field
-                .ty
-                .as_ref()
-                .and_then(type_ref_name)
-                .map(str::to_string),
+            ty: field.ty.clone(),
         }
     }
 }
@@ -1152,11 +1148,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
                         visibility: function.visibility,
                         span: function.span,
                         getter: false,
-                        return_type: function
-                            .return_type
-                            .as_ref()
-                            .and_then(type_ref_name)
-                            .map(str::to_string),
+                        return_type: function.return_type.clone(),
                     },
                 );
             }
@@ -1248,11 +1240,7 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
                         visibility: method.visibility,
                         span: method.span,
                         getter: method.getter,
-                        return_type: method
-                            .return_type
-                            .as_ref()
-                            .and_then(type_ref_name)
-                            .map(str::to_string),
+                        return_type: method.return_type.clone(),
                     },
                 );
             }
@@ -1301,7 +1289,7 @@ struct Resolver<'a> {
     method_hint_scopes: Vec<HashSet<String>>,
     getter_hint_scopes: Vec<HashSet<String>>,
     binding_initializer_names: Vec<HashSet<String>>,
-    declared_symbol_types: HashMap<usize, String>,
+    declared_symbol_types: HashMap<usize, TypeRef>,
     current_type_paths: Vec<String>,
     loop_depth: usize,
     current_constructor: bool,
@@ -1661,6 +1649,7 @@ impl<'a> Resolver<'a> {
             for value in &binding.values {
                 self.resolve_expr(value);
             }
+            self.remember_binding_value_types(&binding.bindings, &binding.values);
             for local in &binding.bindings {
                 self.resolve_type_ref(local.ty.as_ref());
                 self.remember_declared_type(local.span, local.ty.as_ref());
@@ -2178,6 +2167,7 @@ impl<'a> Resolver<'a> {
                     self.resolve_expr(value);
                 }
                 self.binding_initializer_names.pop();
+                self.remember_binding_value_types(&binding.bindings, &binding.values);
                 for local in &binding.bindings {
                     self.resolve_type_ref(local.ty.as_ref());
                     self.remember_declared_type(local.span, local.ty.as_ref());
@@ -2408,6 +2398,17 @@ impl<'a> Resolver<'a> {
         if let Some(pattern) = &binding.pattern {
             self.resolve_pattern(pattern);
             return;
+        }
+        if let [local] = binding.bindings.as_slice()
+            && local.ty.is_none()
+            && let Some(item_type) = binding
+                .iterable
+                .as_ref()
+                .and_then(|iterable| self.receiver_type_ref(iterable))
+                .and_then(iterable_item_type)
+        {
+            self.declared_symbol_types
+                .insert(local.span.start, item_type);
         }
         for local in &binding.bindings {
             self.resolve_type_ref(local.ty.as_ref());
@@ -3577,9 +3578,21 @@ impl<'a> Resolver<'a> {
     }
 
     fn remember_declared_type(&mut self, span: crate::source::Span, ty: Option<&TypeRef>) {
-        if let Some(name) = ty.and_then(type_ref_name) {
-            self.declared_symbol_types
-                .insert(span.start, name.to_string());
+        if let Some(ty) = ty {
+            self.declared_symbol_types.insert(span.start, ty.clone());
+        }
+    }
+
+    fn remember_binding_value_types(&mut self, bindings: &[Binding], values: &[Expr]) {
+        if bindings.len() != values.len() {
+            return;
+        }
+        for (binding, value) in bindings.iter().zip(values) {
+            if binding.ty.is_none()
+                && let Some(ty) = self.receiver_type_ref(value)
+            {
+                self.declared_symbol_types.insert(binding.span.start, ty);
+            }
         }
     }
 
@@ -3730,18 +3743,46 @@ impl<'a> Resolver<'a> {
     }
 
     fn receiver_type_name(&self, expr: &Expr) -> Option<String> {
+        self.receiver_type_ref(expr)
+            .and_then(|ty| type_ref_name(&ty).map(str::to_string))
+    }
+
+    fn receiver_type_ref(&self, expr: &Expr) -> Option<TypeRef> {
         match expr {
-            Expr::Identifier { name, .. } if name == "this" => {
-                self.current_type_paths.last().cloned()
+            Expr::Identifier { name, span } if name == "this" => {
+                self.current_type_paths.last().map(|name| TypeRef::Named {
+                    name: name.clone(),
+                    args: Vec::new(),
+                    span: *span,
+                })
             }
             Expr::Identifier { name, .. } => self
                 .lookup_value(name)
                 .and_then(|symbol| self.declared_symbol_types.get(&symbol.span.start).cloned())
                 .or_else(|| {
                     (self.lookup_type(name).is_some() || self.lookup_object_info(name).is_some())
-                        .then(|| name.clone())
+                        .then(|| TypeRef::Named {
+                            name: name.clone(),
+                            args: Vec::new(),
+                            span: expr.span(),
+                        })
                 }),
-            Expr::Group { inner, .. } => self.receiver_type_name(inner),
+            Expr::Integer { span, .. } => Some(named_type_ref("Int", *span)),
+            Expr::Float { span, .. } => Some(named_type_ref("Float", *span)),
+            Expr::String { span, .. } => Some(named_type_ref("Str", *span)),
+            Expr::Bool { span, .. } => Some(named_type_ref("Bool", *span)),
+            Expr::Unit { span } => Some(named_type_ref("Unit", *span)),
+            Expr::ListLiteral { items, span } => {
+                let item = items
+                    .first()
+                    .and_then(|item| self.receiver_type_ref(item))?;
+                Some(TypeRef::Named {
+                    name: "Vector".to_string(),
+                    args: vec![item],
+                    span: *span,
+                })
+            }
+            Expr::Group { inner, .. } => self.receiver_type_ref(inner),
             Expr::Member { receiver, name, .. } => {
                 let owner = self.receiver_type_name(receiver)?;
                 self.named_type_member_type(&owner, name)
@@ -3752,7 +3793,16 @@ impl<'a> Resolver<'a> {
                     if self.lookup_type(&candidate).is_some()
                         || self.lookup_object_info(&candidate).is_some()
                     {
-                        return Some(candidate);
+                        return Some(TypeRef::Named {
+                            name: candidate,
+                            args: Vec::new(),
+                            span: expr.span(),
+                        });
+                    }
+                }
+                if let Expr::Identifier { name, .. } = callee.as_ref() {
+                    if let Some(function) = self.local_function_return_type(name) {
+                        return Some(function);
                     }
                 }
                 let Expr::Member { receiver, name, .. } = callee.as_ref() else {
@@ -3761,32 +3811,74 @@ impl<'a> Resolver<'a> {
                 let owner = self.receiver_type_name(receiver)?;
                 self.named_type_method_return(&owner, name)
             }
+            Expr::Index {
+                receiver,
+                explicit_type_args,
+                ..
+            } => {
+                if explicit_type_args.is_some() {
+                    return None;
+                }
+                let TypeRef::Named { name, args, .. } = self.receiver_type_ref(receiver)? else {
+                    return None;
+                };
+                match name.as_str() {
+                    "Vector" | "Array" | "Iterable" | "Option" => args.first().cloned(),
+                    "Map" => args.get(1).cloned(),
+                    _ => None,
+                }
+            }
             Expr::Try { value, .. } | Expr::ExtractOr { value, .. } => {
-                self.receiver_type_name(value)
+                let ty = self.receiver_type_ref(value)?;
+                unwrap_container_type(ty).or_else(|| self.receiver_type_ref(value))
             }
             _ => None,
         }
     }
 
-    fn named_type_member_type(&self, owner: &str, name: &str) -> Option<String> {
+    fn named_type_member_type(&self, owner: &str, name: &str) -> Option<TypeRef> {
         let info = self
             .lookup_type(owner)
             .or_else(|| self.lookup_object_info(owner))?;
         if let Some(field) = info.fields.iter().find(|field| field.name == name) {
-            return field.type_name.clone();
+            return field.ty.clone();
         }
         info.methods
             .get(name)
             .and_then(|method| method.getter.then(|| method.return_type.clone()).flatten())
     }
 
-    fn named_type_method_return(&self, owner: &str, name: &str) -> Option<String> {
+    fn named_type_method_return(&self, owner: &str, name: &str) -> Option<TypeRef> {
         self.lookup_type(owner)
             .or_else(|| self.lookup_object_info(owner))?
             .methods
             .get(name)?
             .return_type
             .clone()
+    }
+
+    fn local_function_return_type(&self, name: &str) -> Option<TypeRef> {
+        if let Some(function) = self
+            .module
+            .program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::ast::Item::Function(function) if function.name == name => Some(function),
+                _ => None,
+            })
+        {
+            return function.return_type.clone();
+        }
+        if let Some(symbol) = self.module.symbol_imports.get(name) {
+            let module = self.modules.get(&symbol.module_path)?;
+            let declarations = collect_top_level_decls(&module.program);
+            return declarations
+                .functions
+                .get(&symbol.original_name)
+                .and_then(|function| function.return_type.clone());
+        }
+        None
     }
 
     fn local_definition(&self, span: crate::source::Span) -> DefinitionTarget {
@@ -4203,6 +4295,37 @@ fn type_ref_name(reference: &TypeRef) -> Option<&str> {
         TypeRef::Named { name, .. } => Some(name.as_str()),
         _ => None,
     }
+}
+
+fn named_type_ref(name: &str, span: crate::source::Span) -> TypeRef {
+    TypeRef::Named {
+        name: name.to_string(),
+        args: Vec::new(),
+        span,
+    }
+}
+
+fn unwrap_container_type(ty: TypeRef) -> Option<TypeRef> {
+    let TypeRef::Named { name, args, .. } = ty else {
+        return None;
+    };
+    match name.as_str() {
+        "Option" | "Result" => args.first().cloned(),
+        "Either" => args.get(1).cloned(),
+        _ => None,
+    }
+}
+
+fn iterable_item_type(ty: TypeRef) -> Option<TypeRef> {
+    let TypeRef::Named { name, args, .. } = ty else {
+        return None;
+    };
+    matches!(
+        name.as_str(),
+        "Vector" | "Array" | "Set" | "Iterable" | "LinkedList"
+    )
+    .then(|| args.first().cloned())
+    .flatten()
 }
 
 fn qualified_type_parts(name: &str) -> Option<(&str, &str)> {

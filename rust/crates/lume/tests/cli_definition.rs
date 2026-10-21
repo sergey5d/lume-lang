@@ -232,10 +232,16 @@ fn definition_command_follows_values_functions_and_members() {
         "use helpers/{copyUser}\n\n",
         "def render(value User) Str {\n",
         "    copied User = copyUser(value)\n",
+        "    users [User] = [copied]\n",
+        "    users.add(copied)\n",
+        "    for user <- users {\n",
+        "        println(user.name)\n",
+        "    }\n",
         "    copied.name + copied.label\n",
         "}\n",
     );
     fs::write(&source_path, source).expect("root module should be writable");
+    let stdlib = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../stdlib/vector.lum");
 
     let cases = [
         ("helpers/{copyUser", "copyUser", &helpers, 4usize),
@@ -244,6 +250,8 @@ fn definition_command_follows_values_functions_and_members() {
         ("copied.name", "copied", &source_path, 6usize),
         ("copied.name", "name", &models, 4usize),
         ("copied.label", "label", &models, 5usize),
+        ("users.add", "add", &stdlib, 6usize),
+        ("user.name", "name", &models, 4usize),
     ];
 
     for (context, symbol, expected_path, expected_line) in cases {
