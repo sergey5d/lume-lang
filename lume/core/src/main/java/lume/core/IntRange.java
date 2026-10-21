@@ -25,10 +25,11 @@ public final class IntRange implements Iterable<Long> {
     public LumeIterator<Long> iterator() {
         Iterable<Long> values = () -> new Iterator<>() {
             private long current = start;
+            private boolean exhausted;
 
             @Override
             public boolean hasNext() {
-                return step >= 0 ? current < end : current > end;
+                return !exhausted && (step >= 0 ? current < end : current > end);
             }
 
             @Override
@@ -37,7 +38,12 @@ public final class IntRange implements Iterable<Long> {
                     throw new NoSuchElementException();
                 }
                 var value = current;
-                current += step;
+                // Stepping beyond Int's range exhausts the range, not the program.
+                try {
+                    current = Math.addExact(current, step);
+                } catch (ArithmeticException error) {
+                    exhausted = true;
+                }
                 return value;
             }
         };

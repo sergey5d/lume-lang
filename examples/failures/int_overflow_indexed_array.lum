@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# runtime_error at .*: integer overflow: 9223372036854775807 \* 2
+
+def main() {
+    values Array[Int] = Array.fill(1, Int.MAX)
+    values[0] *= 2
+}

@@ -2324,12 +2324,15 @@ impl<'a> SourceBodyEmitter<'a> {
                     let ir::Type::Named { name, args } = self.expr_type(receiver, bindings)? else {
                         return None;
                     };
-                    if name != "Map" || args.len() != 2 {
-                        return None;
-                    }
+                    let (key_ty, value_ty) = match (name.as_str(), args.as_slice()) {
+                        ("Map", [key, value]) => (key.clone(), value.clone()),
+                        ("Vector" | "Array", [value]) => (ir::Type::Int, value.clone()),
+                        _ => return None,
+                    };
                     let receiver = self.emit_expr(receiver, bindings)?;
-                    let index = self.emit_expr_against(index, bindings, &args[0])?;
-                    let value = self.emit_expr_against(&statement.values[0], bindings, &args[1])?;
+                    let index = self.emit_expr_against(index, bindings, &key_ty)?;
+                    let value =
+                        self.emit_expr_against(&statement.values[0], bindings, &value_ty)?;
                     let current =
                         self.synthetic_name("mapCompoundValue", "mapValue", statement.span.start);
                     let operator = match statement.operator {
@@ -2340,19 +2343,36 @@ impl<'a> SourceBodyEmitter<'a> {
                         ast::AssignOp::ModAssign => "%",
                         ast::AssignOp::Assign | ast::AssignOp::Reassign => unreachable!(),
                     };
+                    let operation =
+                        checked_int_binary_expr(&value_ty, &value_ty, operator, &current, &value)
+                            .unwrap_or_else(|| format!("({current} {operator} {value})"));
+                    if name != "Map" {
+                        let base = self.synthetic_name(
+                            "compoundCollection",
+                            "collection",
+                            statement.span.start,
+                        );
+                        let key =
+                            self.synthetic_name("compoundIndex", "index", statement.span.start);
+                        out.push_str(&format!("{indent}var {base} = {receiver};\n"));
+                        out.push_str(&format!("{indent}long {key} = {index};\n"));
+                        out.push_str(&format!(
+                            "{indent}{} {current} = ({}) lume.core.LumeRuntime.listGet({base}, {key});\n",
+                            self.names.value_type(&value_ty),
+                            self.names.value_type(&value_ty)
+                        ));
+                        out.push_str(&format!("{indent}{base}.set({key}, {operation});\n"));
+                        continue;
+                    }
                     out.push_str(indent);
                     out.push_str(&receiver);
                     out.push_str(".update(");
                     out.push_str(&index);
                     out.push_str(", ");
                     out.push_str(&current);
-                    out.push_str(" -> (");
-                    out.push_str(&current);
-                    out.push(' ');
-                    out.push_str(operator);
-                    out.push(' ');
-                    out.push_str(&value);
-                    out.push_str("));\n");
+                    out.push_str(" -> ");
+                    out.push_str(&operation);
+                    out.push_str(");\n");
                 }
                 core::Stmt::Assignment(statement)
                     if statement.targets.len() == 1
@@ -2457,7 +2477,8 @@ impl<'a> SourceBodyEmitter<'a> {
                 core::Stmt::Assignment(statement)
                     if statement.targets.len() == 1 && statement.values.len() == 1 =>
                 {
-                    let target = self.emit_assignment_target(&statement.targets[0], &bindings)?;
+                    let mut target =
+                        self.emit_assignment_target(&statement.targets[0], &bindings)?;
                     let value = match statement.operator {
                         ast::AssignOp::Assign | ast::AssignOp::Reassign => self
                             .assignment_target_type(
@@ -2479,6 +2500,39 @@ impl<'a> SourceBodyEmitter<'a> {
                         ast::AssignOp::DivAssign => "/=",
                         ast::AssignOp::ModAssign => "%=",
                     };
+                    if operator != "=" {
+                        let target_ty = self.assignment_target_type(
+                            &statement.targets[0],
+                            bindings,
+                            binding_types,
+                        )?;
+                        let value_ty = self.expr_type(&statement.values[0], bindings)?;
+                        if type_is_int_like(&target_ty) && type_is_int_like(&value_ty) {
+                            // Keep effectful member receivers single-evaluation, as with Java's +=.
+                            if let core::Expr::Member { receiver, name, .. } = &statement.targets[0]
+                            {
+                                let local = self.synthetic_name(
+                                    "compoundReceiver",
+                                    "receiver",
+                                    statement.span.start,
+                                );
+                                out.push_str(&format!(
+                                    "{indent}var {local} = {};\n",
+                                    self.emit_expr(receiver, bindings)?
+                                ));
+                                target = format!("{local}.{}", java_member_name(name));
+                            }
+                            let operation = checked_int_binary_expr(
+                                &target_ty,
+                                &value_ty,
+                                &operator[..1],
+                                &target,
+                                &value,
+                            )?;
+                            out.push_str(&format!("{indent}{target} = {operation};\n"));
+                            continue;
+                        }
+                    }
                     out.push_str(indent);
                     out.push_str(&target);
                     out.push(' ');
@@ -6787,8 +6841,15 @@ impl<'a> SourceBodyEmitter<'a> {
                         self.emit_option_wrap_expr(operand, bindings, &option_ty)
                     }
                     ast::UnaryOp::Neg => {
+                        if let core::Expr::Integer { raw, .. } = operand.as_ref() {
+                            return parse_integer_literal(raw, true).map(|value| format!("({value}L)"));
+                        }
                         let value = self.emit_expr(operand, bindings)?;
-                        Some(format!("(-{value})"))
+                        if self.expr_type(operand, bindings).as_ref().is_some_and(type_is_int_like) {
+                            Some(format!("lume.core.LumeRuntime.negInt({value})"))
+                        } else {
+                            Some(format!("(-{value})"))
+                        }
                     }
                     ast::UnaryOp::Not => {
                         let value = self.emit_expr(operand, bindings)?;
@@ -6797,7 +6858,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     ast::UnaryOp::UnsafeExtract => {
                         let value = self.emit_expr(operand, bindings)?;
                         let result_ty = self
-                            .source_expr_type(*span)
+                            .expr_type(expr, bindings)
                             .or_else(|| self.source_expr_expected(*span))
                             .unwrap_or(ir::Type::Unknown);
                         Some(format!(
@@ -6820,6 +6881,8 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
                 ast::BinaryOp::Colon => None,
                 _ => {
+                    let left_ty = self.expr_type(left, bindings);
+                    let right_ty = self.expr_type(right, bindings);
                     let left = self.emit_expr(left, bindings)?;
                     let right = self.emit_expr(right, bindings)?;
                     let operator = match op {
@@ -6838,6 +6901,11 @@ impl<'a> SourceBodyEmitter<'a> {
                         | ast::BinaryOp::Greater
                         | ast::BinaryOp::GreaterEq => unreachable!(),
                     };
+                    if let (Some(left_ty), Some(right_ty)) = (&left_ty, &right_ty)
+                        && let Some(checked) = checked_int_binary_expr(left_ty, right_ty, operator, &left, &right)
+                    {
+                        return Some(checked);
+                    }
                     Some(format!("({left} {operator} {right})"))
                 }
             },
@@ -10288,6 +10356,9 @@ impl<'a> SourceBodyEmitter<'a> {
                 core::Expr::Float { .. } => Some(ir::Type::Float),
                 core::Expr::String { .. } => Some(ir::Type::Str),
                 core::Expr::Unit { .. } => Some(ir::Type::Unit),
+                core::Expr::Unary { op: ast::UnaryOp::UnsafeExtract, expr, .. } => {
+                    lifted_success_type(&self.expr_type(expr, bindings)?)
+                }
                 core::Expr::Unary { expr, .. } => self.expr_type(expr, bindings),
                 core::Expr::Member { receiver, name, .. }
                     if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "this") =>
@@ -12509,6 +12580,17 @@ fn builtin_method_param_types(
     method: &str,
     arg_len: usize,
 ) -> Option<Vec<ir::Type>> {
+    if type_is_int_like(receiver) {
+        return match (method, arg_len) {
+            (
+                "checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow" | "wrappingAdd"
+                | "wrappingSub" | "wrappingMul" | "pow" | "compareTo",
+                1,
+            ) => Some(vec![ir::Type::Int]),
+            ("wrappingNeg" | "abs" | "sqrt" | "toFloat", 0) => Some(Vec::new()),
+            _ => None,
+        };
+    }
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
             (
@@ -12609,6 +12691,17 @@ fn builtin_method_return_type(
     method: &str,
     arg_len: usize,
 ) -> Option<ir::Type> {
+    if type_is_int_like(receiver) {
+        return match (method, arg_len) {
+            ("checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow", 1) => {
+                Some(ir::Type::option(ir::Type::Int))
+            }
+            ("wrappingAdd" | "wrappingSub" | "wrappingMul" | "pow" | "compareTo", 1)
+            | ("wrappingNeg" | "abs", 0) => Some(ir::Type::Int),
+            ("sqrt" | "toFloat", 0) => Some(ir::Type::Float),
+            _ => None,
+        };
+    }
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
             ("split" | "splitRegex", 1) => Some(ir::Type::list(ir::Type::Str)),
@@ -12880,6 +12973,29 @@ fn format_java_intrinsic_member_call(
             args[0]
         ));
     }
+    if is_int
+        && ((args.is_empty() && method == "wrappingNeg")
+            || (args.len() == 1
+                && matches!(
+                    method,
+                    "wrappingAdd"
+                        | "wrappingSub"
+                        | "wrappingMul"
+                        | "checkedAdd"
+                        | "checkedSub"
+                        | "checkedMul"
+                        | "checkedPow"
+                )))
+    {
+        let suffix = if args.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", args[0])
+        };
+        return Some(format!(
+            "lume.core.LumeRuntime.{method}({receiver}{suffix})"
+        ));
+    }
     if args.is_empty() && matches!(method, "floor" | "ceil" | "round") && is_float {
         return Some(format!("lume.core.LumeRuntime.{method}({receiver})"));
     }
@@ -12994,6 +13110,31 @@ fn source_literal_type(expr: &core::Expr) -> Option<ir::Type> {
         core::Expr::Spread { value, .. } => source_literal_type(value),
         _ => None,
     }
+}
+
+fn type_is_int_like(ty: &ir::Type) -> bool {
+    type_is_named_or_primitive(ty, "Int", |ty| matches!(ty, ir::Type::Int))
+}
+
+fn checked_int_binary_expr(
+    left_ty: &ir::Type,
+    right_ty: &ir::Type,
+    operator: &str,
+    left: &str,
+    right: &str,
+) -> Option<String> {
+    if !type_is_int_like(left_ty) || !type_is_int_like(right_ty) {
+        return None;
+    }
+    let helper = match operator {
+        "+" => "addInt",
+        "-" => "subInt",
+        "*" => "mulInt",
+        "/" => "divInt",
+        "%" => "remInt",
+        _ => return None,
+    };
+    Some(format!("lume.core.LumeRuntime.{helper}({left}, {right})"))
 }
 
 fn emit_pattern_literal(expr: &ast::Expr) -> Option<String> {

@@ -10316,6 +10316,26 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         return Some(ty);
     }
 
+    if matches!(receiver, ir::Type::Int)
+        || matches!(receiver, ir::Type::Named { name, args } if name == "Int" && args.is_empty())
+    {
+        let (params, ret) = match name {
+            "checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow" => {
+                (vec![ir::Type::Int], ir::Type::option(ir::Type::Int))
+            }
+            "wrappingAdd" | "wrappingSub" | "wrappingMul" | "pow" | "compareTo" => {
+                (vec![ir::Type::Int], ir::Type::Int)
+            }
+            "wrappingNeg" | "abs" => (Vec::new(), ir::Type::Int),
+            "sqrt" | "toFloat" => (Vec::new(), ir::Type::Float),
+            _ => return None,
+        };
+        return Some(ir::Type::Function {
+            params,
+            ret: Box::new(ret),
+        });
+    }
+
     let ir::Type::Named {
         name: type_name,
         args,

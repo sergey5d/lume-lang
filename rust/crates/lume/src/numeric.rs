@@ -25,6 +25,22 @@ pub(crate) fn parse_float_literal(raw: &str) -> Option<f64> {
     without_digit_separators(raw).parse::<f64>().ok()
 }
 
+pub(crate) fn checked_int_pow(value: i64, exponent: i64) -> Option<i64> {
+    let mut remaining = u64::try_from(exponent).ok()?;
+    let mut result = 1_i64;
+    let mut factor = value;
+    while remaining != 0 {
+        if remaining & 1 != 0 {
+            result = result.checked_mul(factor)?;
+        }
+        remaining >>= 1;
+        if remaining != 0 {
+            factor = factor.checked_mul(factor)?;
+        }
+    }
+    Some(result)
+}
+
 pub(crate) fn render_float(value: f64) -> String {
     if value.is_nan() {
         return "NaN".to_string();
@@ -58,7 +74,32 @@ pub(crate) fn render_float(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_float_literal, parse_integer_literal, render_float};
+    use super::{checked_int_pow, parse_float_literal, parse_integer_literal, render_float};
+
+    #[test]
+    fn checked_integer_powers_preserve_signed_boundaries() {
+        for (value, exponent, expected) in [
+            (3, 39, Some(4_052_555_153_018_976_267)),
+            (3, 40, None),
+            (3, 41, None),
+            (2, 62, Some(1_i64 << 62)),
+            (2, 63, None),
+            (-2, 63, Some(i64::MIN)),
+            (i64::MIN, 1, Some(i64::MIN)),
+            (i64::MIN, 2, None),
+            (0, 0, Some(1)),
+            (0, i64::MAX, Some(0)),
+            (1, i64::MAX, Some(1)),
+            (-1, i64::MAX, Some(-1)),
+            (2, -1, None),
+        ] {
+            assert_eq!(
+                checked_int_pow(value, exponent),
+                expected,
+                "{value}^{exponent}"
+            );
+        }
+    }
 
     #[test]
     fn parses_complete_signed_integer_literal_boundary() {

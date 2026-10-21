@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# runtime_error at .*: integer overflow: 9223372036854775807 \+ 1
+
+def main() {
+    println([Int.MAX, 1].fold(0, (acc, item) => acc + item))
+}

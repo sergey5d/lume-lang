@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# runtime_error at .*: integer division by zero
+
+def main() { println(1 / 0) }

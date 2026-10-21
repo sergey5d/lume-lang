@@ -724,8 +724,8 @@ up Float = 2.25.ceil()
 nearest Float = 2.5.round()
 ```
 
-`Int.pow(exponent)` requires a non-negative `Int` exponent. Its multiplication,
-like other `Int` arithmetic, wraps on overflow. `Float.pow` accepts an `Int` or
+`Int.pow(exponent)` requires a non-negative `Int` exponent and panics on
+overflow; use `checkedPow` to handle overflow as `None`. `Float.pow` accepts an `Int` or
 `Float` exponent and follows IEEE-754 behavior. `floor`, `ceil`, and `round`
 return integral-valued `Float`s; halfway values round away from zero.
 
@@ -3609,8 +3609,8 @@ evidence.makeStr(", ", value => value.label())
 A comparator returns a negative value when `left` belongs before `right`, zero
 when they compare equally, and a positive value when `left` belongs after
 `right`. `Int`, `Float`, and `Str` implement `Comparable` directly. Prefer
-`left.compareTo(right)` to subtracting numeric sort keys: subtraction can wrap
-for `Int` values near the limits of its range.
+`left.compareTo(right)` to subtracting numeric sort keys: subtraction can
+overflow and panic for `Int` values near the limits of its range.
 
 `flatten()` removes one iterable layer. The vector element type must implement
 `Iterable[X]`; this includes nested vectors, sets, and `Option[X]`. An absent
@@ -5417,11 +5417,30 @@ Use the same name-based rule after binding an item in a `for` body or a
 silently change representation:
 
 - `Int` versus `Int` arithmetic and ordering operate directly on 64-bit integers
-- integer `+`, `-`, `*`, and unary `-` wrap modulo 2^64 on overflow
+- integer `+`, `-`, `*`, unary `-`, and their compound assignments panic when
+  the mathematical result does not fit in a signed 64-bit integer
 - integer `/` truncates toward zero and `%` has the sign of the dividend
 - integer division or remainder by zero is a runtime error
-- the overflowing `Int.MIN / -1` case wraps to `Int.MIN`; `Int.MIN % -1` is zero
+- `Int.MIN / -1` panics; `Int.MIN % -1` is zero
+- `Int.abs()` panics for `Int.MIN`; `Int.pow` panics when the result overflows
+- `wrappingAdd`, `wrappingSub`, `wrappingMul`, and `wrappingNeg` perform explicit
+  two's-complement wrapping modulo 2^64
+- `checkedAdd`, `checkedSub`, `checkedMul`, and `checkedPow` return `None` on
+  overflow; `checkedPow` also returns `None` for a negative exponent
 - integer literals outside the signed 64-bit range are rejected
+
+Overflow is an ordinary runtime panic, independent of build mode, with messages
+such as `integer overflow: 9223372036854775807 + 1`. Use explicit checking when
+failure is recoverable, or wrapping when modular arithmetic is intentional:
+
+```txt
+total = amount.checkedAdd(fee) ?? return Err("total too large")
+hash = name.hash().wrappingMul(31).wrappingAdd(age)
+```
+
+Each checked binary method accepts one `Int` and returns `Int?`; `checkedPow`
+accepts an `Int` exponent and returns `Int?`. The wrapping binary methods accept
+one `Int` and return `Int`; `wrappingNeg()` takes no arguments and returns `Int`.
 
 Decimal numeric literals may use `_` separators between digits. Separators do
 not change the value and may appear independently in the integer, fractional,

@@ -6,6 +6,14 @@ public interface Int with Comparable[Int] {
     def compareTo(other Int) Int
     def abs() Int
     def pow(exponent Int) Int
+    def wrappingAdd(other Int) Int
+    def wrappingSub(other Int) Int
+    def wrappingMul(other Int) Int
+    def wrappingNeg() Int
+    def checkedAdd(other Int) Int?
+    def checkedSub(other Int) Int?
+    def checkedMul(other Int) Int?
+    def checkedPow(exponent Int) Int?
     def sqrt() Float
     def toFloat() Float
 }

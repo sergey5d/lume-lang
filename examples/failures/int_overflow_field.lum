@@ -1,0 +1,9 @@
+# FAIL_REGEX:
+# runtime_error at .*: integer overflow: -9223372036854775808 / -1
+
+class Counter { var value Int }
+
+def main() {
+    counter = Counter(Int.MIN)
+    counter.value /= -1
+}

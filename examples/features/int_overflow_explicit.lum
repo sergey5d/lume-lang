@@ -1,0 +1,88 @@
+# EXPECT:
+# ok
+
+module examples/int_overflow_explicit
+
+class Counter {
+    var value Int
+    var reads Int = 0
+
+    def receiver() Counter {
+        reads += 1
+        this
+    }
+}
+
+def main() {
+    assert(Int.MAX.wrappingAdd(1) == Int.MIN)
+    assert(Int.MIN.wrappingSub(1) == Int.MAX)
+    assert(Int.MAX.wrappingMul(2) == -2)
+    assert(Int.MIN.wrappingMul(-1) == Int.MIN)
+    assert(Int.MIN.wrappingNeg() == Int.MIN)
+    assert(7.wrappingNeg() == -7)
+
+    assert(7.checkedAdd(5)! == 12)
+    assert(7.checkedSub(5)! == 2)
+    assert(7.checkedMul(5)! == 35)
+    assert(Int.MAX.checkedAdd(1).isEmpty)
+    assert(Int.MIN.checkedAdd(-1).isEmpty)
+    assert(Int.MIN.checkedSub(1).isEmpty)
+    assert(Int.MAX.checkedSub(-1).isEmpty)
+    assert(Int.MAX.checkedMul(2).isEmpty)
+    assert(Int.MIN.checkedMul(-1).isEmpty)
+    assert(Int.MIN.checkedMul(1)! == Int.MIN)
+
+    assert(3.pow(39) == 4_052_555_153_018_976_267)
+    assert(2.pow(62) == 4_611_686_018_427_387_904)
+    assert((-2).pow(63) == Int.MIN)
+    assert(Int.MIN.pow(1) == Int.MIN)
+    assert(3.checkedPow(39)! == 4_052_555_153_018_976_267)
+    assert(3.checkedPow(40).isEmpty)
+    assert(2.checkedPow(63).isEmpty)
+    assert((-2).checkedPow(63)! == Int.MIN)
+    assert(2.checkedPow(-1).isEmpty)
+    assert(0.checkedPow(0)! == 1)
+    assert(0.checkedPow(Int.MAX)! == 0)
+    assert(1.checkedPow(Int.MAX)! == 1)
+    assert((-1).checkedPow(Int.MAX)! == -1)
+    assert((Int.MAX.checkedAdd(1) ?? 42) == 42)
+
+    assert(Int.MIN % -1 == 0)
+    assert(Int.MIN / 1 == Int.MIN)
+    assert((-7).abs() == 7)
+    assert(-7 / 2 == -3)
+    assert(-7 % 2 == -1)
+    assert(Float.MAX * 2.0 > Float.MAX)
+
+    var value = 10
+    value += 5
+    value -= 2
+    value *= 2
+    value /= 2
+    value %= 5
+    assert(value == 3)
+    counter = Counter(1)
+    counter.receiver().value += 2
+    assert(counter.reads == 1 && counter.value == 3)
+    vector = [1]
+    vector[0] += 2
+    assert(vector[0] == 3)
+    array Array[Int] = Array.fill(1, 1)
+    array[0] *= 3
+    assert(array[0] == 3)
+    map = ["value": 1]
+    map["value"] += 2
+    assert(map["value"]! == 3)
+
+    ascending [Int] = []
+    descending [Int] = []
+    for item <- Range(Int.MAX - 2, Int.MAX) { ascending.add(item) }
+    for item <- Range(Int.MIN + 1, Int.MIN, -1) { descending.add(item) }
+    assert(ascending.size == 2 && ascending[1] == Int.MAX - 1)
+    assert(descending.size == 1 && descending[0] == Int.MIN + 1)
+    var count = 0
+    for item <- Range(Int.MAX - 1, Int.MAX, 2) { count += 1 }
+    for item <- Range(Int.MIN + 1, Int.MIN, -2) { count += 1 }
+    assert(count == 2)
+    println("ok")
+}

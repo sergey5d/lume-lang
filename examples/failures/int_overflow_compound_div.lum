@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# runtime_error at .*: integer overflow: -9223372036854775808 / -1
+
+def main() {
+    var value = Int.MIN
+    value /= -1
+}

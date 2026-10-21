@@ -1,6 +1,9 @@
 # Proposal: `Int` overflow panics by default
 
-Status: proposal. Observed behaviour is as of commit `f208f747`.
+Status: implemented (runtime checking, explicit wrapping/checking APIs, and
+backend parity tests). Optional compile-time constant-expression detection is
+not implemented. The historical behaviour described below is as of commit
+`f208f747`; current numeric semantics are authoritative in `syntax.md`.
 
 ## Summary
 

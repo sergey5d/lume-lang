@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# runtime_error at .*: integer remainder by zero
+
+def main() {
+    var value = 1
+    value %= 0
+}

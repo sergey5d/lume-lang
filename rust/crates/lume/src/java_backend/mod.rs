@@ -3749,15 +3749,15 @@ def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
         let relative = Path::new("demo/readable/ReadableModule.java");
         let readable_java = fs::read_to_string(out.join(relative)).expect("read readable Java");
 
-        assert!(readable_java.contains("Long total = (left + right);"));
+        assert!(readable_java.contains("Long total = LumeRuntime.addInt(left, right);"));
         assert!(readable_java.contains("return total;"));
         assert!(readable_java.contains("return add(value, value);"));
         assert!(readable_java.contains("if (flag) {"));
         assert!(readable_java.contains("return 10L;"));
         assert!(readable_java.contains("return 20L;"));
         assert!(readable_java.contains("while ((index < limit)) {"));
-        assert!(readable_java.contains("total += index;"));
-        assert!(readable_java.contains("return (value) -> (value + 1L);"));
+        assert!(readable_java.contains("total = LumeRuntime.addInt(total, index);"));
+        assert!(readable_java.contains("return (value) -> LumeRuntime.addInt(value, 1L);"));
         assert!(readable_java.contains("Objects.equals(__match"));
         assert!(readable_java.contains("result = 10L;"));
         assert!(!readable_java.contains("__block"));
@@ -4292,7 +4292,7 @@ def handler(offset Int) Handler = object with Handler {
         );
         assert!(module.contains("if ((value > 0L))"), "{module}");
         assert!(
-            module.contains("return (value + this.source());"),
+            module.contains("return LumeRuntime.addInt(value, this.source());"),
             "{module}"
         );
         assert!(!module.contains("__block"), "{module}");
@@ -4553,7 +4553,10 @@ def main() Int = withOffset(4)
             .expect("read module Java");
         assert!(module.contains("(value) -> {"), "{module}");
         assert!(module.contains("Long doubled"), "{module}");
-        assert!(module.contains("return (doubled"), "{module}");
+        assert!(
+            module.contains("return LumeRuntime.addInt(doubled, offset);"),
+            "{module}"
+        );
         assert!(!module.contains("__block"), "{module}");
 
         if command_available("javac") && command_available("java") {
@@ -5305,6 +5308,124 @@ def main() Unit {
             "-3 8\n1.25 7.5\ntrue true true\ntrue true\ntrue true true\ntrue true\ntrue true\ntrue true true\n-9223372036854775808 9223372036854775807\ntrue true true\ntrue\n"
         );
 
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn int_overflow_examples_have_java_interpreter_parity() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping integer overflow Java test because a JDK tool is not available");
+            return;
+        }
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let temp = temp_path("lume-java-int-overflow");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+
+        let success = root.join("examples/features/int_overflow_explicit.lum");
+        let interpreted = run_path(&success, None).expect("run interpreter");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:#?}",
+            interpreted.diagnostics
+        );
+        let expected = interpreter_stdout(interpreted);
+        let generated =
+            generate_java_path(&success, JavaBackendOptions::new(&out)).expect("generate Java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+
+        let mut cases = Vec::new();
+        for entry in fs::read_dir(root.join("examples/failures")).expect("read failure fixtures") {
+            let path = entry.expect("fixture entry").path();
+            let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !stem.starts_with("int_overflow_")
+                && !matches!(
+                    stem,
+                    "int_division_by_zero"
+                        | "int_remainder_by_zero"
+                        | "int_compound_division_by_zero"
+                        | "int_compound_remainder_by_zero"
+                )
+            {
+                continue;
+            }
+            let source = temp.join(path.file_name().unwrap());
+            fs::write(
+                &source,
+                format!(
+                    "module demo/overflow/{stem}\n{}",
+                    fs::read_to_string(&path).expect("read fixture")
+                ),
+            )
+            .expect("write fixture module");
+            let interpreted = run_path(&source, None).expect("run failing interpreter fixture");
+            assert_eq!(
+                interpreted.diagnostics.len(),
+                1,
+                "{stem}: {:#?}",
+                interpreted.diagnostics
+            );
+            let diagnostic = &interpreted.diagnostics[0].diagnostic;
+            assert_eq!(diagnostic.code, "runtime_error", "{stem}: {diagnostic:?}");
+            let generated = generate_java_path(&source, JavaBackendOptions::new(&out))
+                .expect("generate failing Java fixture");
+            assert!(
+                generated.diagnostics.is_empty(),
+                "{stem}: {:#?}",
+                generated.diagnostics
+            );
+            let mut chars = stem.chars();
+            let class_name =
+                chars.next().unwrap().to_uppercase().collect::<String>() + chars.as_str();
+            cases.push((
+                format!("demo.overflow.{stem}.{class_name}Main"),
+                diagnostic.message.clone(),
+            ));
+        }
+        assert!(cases.len() >= 14, "missing integer overflow fixtures");
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated Java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.int_overflow_explicit.Int_overflow_explicitMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("Java stdout utf8"),
+            expected
+        );
+        for (main, message) in cases {
+            let output = Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg(&main)
+                .output()
+                .expect("run failing Java fixture");
+            assert!(!output.status.success(), "{main} must panic");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(
+                stderr.lines().next(),
+                Some(
+                    format!("Exception in thread \"main\" lume.core.LumePanic: {message}").as_str()
+                ),
+                "{main}: {stderr}"
+            );
+            assert!(!stderr.contains("ArithmeticException"), "{main}: {stderr}");
+        }
         let _ = fs::remove_dir_all(temp);
     }
 
@@ -6999,7 +7120,7 @@ def main() Unit {
             fs::read_to_string(out.join("demo/body/BodyModule.java")).expect("read module");
         assert!(!module.contains("UnsupportedOperationException"));
         assert!(module.contains("static Long add(Long left, Long right)"));
-        assert!(module.contains("Long result = (left + right);"));
+        assert!(module.contains("Long result = LumeRuntime.addInt(left, right);"));
         assert!(module.contains("return result;"));
         assert!(module.contains("if (flag)"));
         assert!(module.contains("return 10L;"));
@@ -8819,8 +8940,8 @@ def main() Int {
     println(low < high, high > low, high <= low)
 
     maximum Int = 9223372036854775807
-    minimum Int = maximum + 1
-    println(minimum, minimum / -1, minimum % -1)
+    minimum Int = maximum.wrappingAdd(1)
+    println(minimum, minimum / 1, minimum % -1)
     println(maximum.compareTo(minimum), minimum.compareTo(maximum))
     boundaries = [maximum, minimum]
     boundaries.sort()

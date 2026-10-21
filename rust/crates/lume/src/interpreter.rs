@@ -13,7 +13,7 @@ use crate::{
     diagnostic::Diagnostic,
     ir,
     lower::lower_program,
-    numeric::render_float,
+    numeric::{checked_int_pow, render_float},
     resolver::{LoadedModule, LocatedDiagnostic, ModuleGraph, load_module_graph},
     runtime,
     source::{LineColumn, Span},
@@ -5488,9 +5488,9 @@ impl<'a> Interpreter<'a> {
                         *index += 1;
                         Ok(self.clone_value(value))
                     }
-                    IteratorState::Range { current, step, .. } => {
+                    IteratorState::Range { current, end, step } => {
                         let value = *current;
-                        *current += *step;
+                        *current = current.checked_add(*step).unwrap_or(*end);
                         Ok(Value::Int(value))
                     }
                 }
@@ -5717,7 +5717,12 @@ impl<'a> Interpreter<'a> {
                     ));
                 }
                 match receiver {
-                    Value::Int(value) => Ok(Some(Value::Int(value.wrapping_abs()))),
+                    Value::Int(value) => value
+                        .checked_abs()
+                        .map(|value| Some(Value::Int(value)))
+                        .ok_or_else(|| {
+                            self.runtime_error(span, format!("integer overflow: ({value}).abs()"))
+                        }),
                     Value::Float(value) => Ok(Some(Value::Float(value.abs()))),
                     _ => Ok(None),
                 }
@@ -5736,19 +5741,14 @@ impl<'a> Interpreter<'a> {
                                 self.runtime_error(span, "Int.pow exponent must be non-negative")
                             );
                         }
-                        let mut result = 1_i64;
-                        let mut factor = value;
-                        let mut remaining = *exponent as u64;
-                        while remaining != 0 {
-                            if remaining & 1 != 0 {
-                                result = result.wrapping_mul(factor);
-                            }
-                            remaining >>= 1;
-                            if remaining != 0 {
-                                factor = factor.wrapping_mul(factor);
-                            }
-                        }
-                        Ok(Some(Value::Int(result)))
+                        checked_int_pow(value, *exponent)
+                            .map(|value| Some(Value::Int(value)))
+                            .ok_or_else(|| {
+                                self.runtime_error(
+                                    span,
+                                    format!("integer overflow: {value}.pow({exponent})"),
+                                )
+                            })
                     }
                     (Value::Float(value), Value::Int(exponent)) => {
                         Ok(Some(Value::Float(value.powf(*exponent as f64))))
@@ -5758,6 +5758,35 @@ impl<'a> Interpreter<'a> {
                     }
                     _ => Ok(None),
                 }
+            }
+            "wrappingNeg" => {
+                expect_runtime_arity(self, method, args, 0, span)?;
+                match receiver {
+                    Value::Int(value) => Ok(Some(Value::Int(value.wrapping_neg()))),
+                    _ => Ok(None),
+                }
+            }
+            "wrappingAdd" | "wrappingSub" | "wrappingMul" | "checkedAdd" | "checkedSub"
+            | "checkedMul" | "checkedPow" => {
+                expect_runtime_arity(self, method, args, 1, span)?;
+                let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else {
+                    return Ok(None);
+                };
+                let result = match method {
+                    "wrappingAdd" => return Ok(Some(Value::Int(value.wrapping_add(*other)))),
+                    "wrappingSub" => return Ok(Some(Value::Int(value.wrapping_sub(*other)))),
+                    "wrappingMul" => return Ok(Some(Value::Int(value.wrapping_mul(*other)))),
+                    "checkedAdd" => value.checked_add(*other),
+                    "checkedSub" => value.checked_sub(*other),
+                    "checkedMul" => value.checked_mul(*other),
+                    "checkedPow" => checked_int_pow(value, *other),
+                    _ => unreachable!(),
+                };
+                Ok(Some(
+                    result
+                        .map(|value| self.option_some(Value::Int(value)))
+                        .unwrap_or_else(|| self.option_none()),
+                ))
             }
             "floor" | "ceil" | "round" => {
                 if !args.is_empty() {
@@ -6723,7 +6752,9 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match op {
             ir::UnaryOp::Neg => match operand {
-                Value::Int(value) => Ok(Value::Int(value.wrapping_neg())),
+                Value::Int(value) => value.checked_neg().map(Value::Int).ok_or_else(|| {
+                    self.runtime_error(span, format!("integer overflow: -({value})"))
+                }),
                 Value::Float(value) => Ok(Value::Float(-value)),
                 other => self.invoke_method(other, "-", Vec::new(), span),
             },
@@ -6740,7 +6771,11 @@ impl<'a> Interpreter<'a> {
     ) -> Result<Value, Diagnostic> {
         match op {
             ir::BinaryOp::Add => match (&left, &right) {
-                (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs.wrapping_add(*rhs))),
+                (Value::Int(lhs), Value::Int(rhs)) => {
+                    lhs.checked_add(*rhs).map(Value::Int).ok_or_else(|| {
+                        self.runtime_error(span, format!("integer overflow: {lhs} + {rhs}"))
+                    })
+                }
                 (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
                 (Value::Int(lhs), Value::Float(rhs)) => Ok(Value::Float(*lhs as f64 + rhs)),
                 (Value::Float(lhs), Value::Int(rhs)) => Ok(Value::Float(lhs + *rhs as f64)),
@@ -6756,7 +6791,7 @@ impl<'a> Interpreter<'a> {
                 right,
                 span,
                 "-",
-                i64::wrapping_sub,
+                i64::checked_sub,
                 |lhs, rhs| lhs - rhs,
                 self,
             ),
@@ -6765,7 +6800,7 @@ impl<'a> Interpreter<'a> {
                 right,
                 span,
                 "*",
-                i64::wrapping_mul,
+                i64::checked_mul,
                 |lhs, rhs| lhs * rhs,
                 self,
             ),
@@ -7541,7 +7576,7 @@ fn iterator_values(
                     break;
                 }
                 let value = *current;
-                *current += *step;
+                *current = current.checked_add(*step).unwrap_or(*end);
                 out.push(Value::Int(value));
             }
         }
@@ -7684,12 +7719,14 @@ fn numeric_binary_or_method(
     right: Value,
     span: Option<Span>,
     method: &str,
-    int_op: impl FnOnce(i64, i64) -> i64,
+    int_op: impl FnOnce(i64, i64) -> Option<i64>,
     float_op: impl FnOnce(f64, f64) -> f64,
     in_: &mut Interpreter<'_>,
 ) -> Result<Value, Diagnostic> {
     match (left.clone(), right.clone()) {
-        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(int_op(lhs, rhs))),
+        (Value::Int(lhs), Value::Int(rhs)) => int_op(lhs, rhs).map(Value::Int).ok_or_else(|| {
+            in_.runtime_error(span, format!("integer overflow: {lhs} {method} {rhs}"))
+        }),
         (lhs, rhs)
             if matches!(lhs, Value::Float(_) | Value::Int(_))
                 && matches!(rhs, Value::Float(_) | Value::Int(_)) =>
@@ -7711,7 +7748,10 @@ fn numeric_division_or_method(
 ) -> Result<Value, Diagnostic> {
     match (left.clone(), right.clone()) {
         (Value::Int(_), Value::Int(0)) => Err(in_.runtime_error(span, "integer division by zero")),
-        (Value::Int(lhs), Value::Int(rhs)) => Ok(Value::Int(lhs.wrapping_div(rhs))),
+        (Value::Int(lhs), Value::Int(rhs)) => lhs
+            .checked_div(rhs)
+            .map(Value::Int)
+            .ok_or_else(|| in_.runtime_error(span, format!("integer overflow: {lhs} / {rhs}"))),
         (lhs, rhs)
             if matches!(lhs, Value::Float(_) | Value::Int(_))
                 && matches!(rhs, Value::Float(_) | Value::Int(_)) =>
@@ -9886,10 +9926,10 @@ mod tests {
                 println(high <= low)
 
                 maximum Int = 9223372036854775807
-                minimum = maximum + 1
+                minimum = maximum.wrappingAdd(1)
                 println(minimum)
                 println(-9223372036854775808)
-                println(minimum / -1)
+                println(minimum / 1)
                 println(minimum % -1)
 
                 println(1.0 / 0.0 > 0.0)
@@ -9931,6 +9971,58 @@ mod tests {
                     .any(|diagnostic| diagnostic.message.contains(expected)),
                 "expected '{expected}', got {:#?}",
                 run.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn reports_integer_overflow_for_all_arithmetic_paths() {
+        for (statement, expected) in [
+            ("println(Int.MAX + 1)", "9223372036854775807 + 1"),
+            ("println(Int.MIN - 1)", "-9223372036854775808 - 1"),
+            ("println(Int.MAX * 2)", "9223372036854775807 * 2"),
+            (
+                "value = Int.MIN\nprintln(-value)",
+                "-(-9223372036854775808)",
+            ),
+            ("println(Int.MIN / -1)", "-9223372036854775808 / -1"),
+            ("println(Int.MIN.abs())", "(-9223372036854775808).abs()"),
+            ("println(3.pow(40))", "3.pow(40)"),
+            ("println(2.pow(63))", "2.pow(63)"),
+            ("var value = Int.MAX\nvalue += 1", "9223372036854775807 + 1"),
+            (
+                "var value = Int.MIN\nvalue -= 1",
+                "-9223372036854775808 - 1",
+            ),
+            ("var value = Int.MAX\nvalue *= 2", "9223372036854775807 * 2"),
+            (
+                "var value = Int.MIN\nvalue /= -1",
+                "-9223372036854775808 / -1",
+            ),
+            (
+                "values = [\"x\": Int.MAX]\nvalues[\"x\"] += 1",
+                "9223372036854775807 + 1",
+            ),
+            (
+                "values = [Int.MAX]\nvalues[0] += 1",
+                "9223372036854775807 + 1",
+            ),
+            (
+                "println([Int.MAX, 1].fold(0, (acc, item) => acc + item))",
+                "9223372036854775807 + 1",
+            ),
+        ] {
+            let program = lower_inline(&format!("def main() {{\n{statement}\n}}"));
+            let run = run_program(&program);
+            assert_eq!(
+                run.diagnostics.len(),
+                1,
+                "{statement}: {:#?}",
+                run.diagnostics
+            );
+            assert_eq!(
+                run.diagnostics[0].message,
+                format!("integer overflow: {expected}")
             );
         }
     }

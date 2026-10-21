@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# runtime_error at .*: integer overflow: 3\.pow\(41\)
+
+def main() { println(3.pow(41)) }

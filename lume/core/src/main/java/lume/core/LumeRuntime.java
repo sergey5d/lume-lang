@@ -37,7 +37,98 @@ public final class LumeRuntime {
         return Math.log(value);
     }
 
+    public static long addInt(long left, long right) {
+        try {
+            return Math.addExact(left, right);
+        } catch (ArithmeticException error) {
+            throw new LumePanic("integer overflow: " + left + " + " + right);
+        }
+    }
+
+    public static long subInt(long left, long right) {
+        try {
+            return Math.subtractExact(left, right);
+        } catch (ArithmeticException error) {
+            throw new LumePanic("integer overflow: " + left + " - " + right);
+        }
+    }
+
+    public static long mulInt(long left, long right) {
+        try {
+            return Math.multiplyExact(left, right);
+        } catch (ArithmeticException error) {
+            throw new LumePanic("integer overflow: " + left + " * " + right);
+        }
+    }
+
+    public static long negInt(long value) {
+        if (value == Long.MIN_VALUE) {
+            throw new LumePanic("integer overflow: -(" + value + ")");
+        }
+        return -value;
+    }
+
+    public static long divInt(long left, long right) {
+        if (right == 0) {
+            throw new LumePanic("integer division by zero");
+        }
+        if (left == Long.MIN_VALUE && right == -1) {
+            throw new LumePanic("integer overflow: " + left + " / " + right);
+        }
+        return left / right;
+    }
+
+    public static long remInt(long left, long right) {
+        if (right == 0) {
+            throw new LumePanic("integer remainder by zero");
+        }
+        return left % right;
+    }
+
+    public static long wrappingAdd(long value, long other) {
+        return value + other;
+    }
+
+    public static long wrappingSub(long value, long other) {
+        return value - other;
+    }
+
+    public static long wrappingMul(long value, long other) {
+        return value * other;
+    }
+
+    public static long wrappingNeg(long value) {
+        return -value;
+    }
+
+    public static Option<Long> checkedAdd(long value, long other) {
+        try {
+            return optionSome(Math.addExact(value, other));
+        } catch (ArithmeticException error) {
+            return optionNone();
+        }
+    }
+
+    public static Option<Long> checkedSub(long value, long other) {
+        try {
+            return optionSome(Math.subtractExact(value, other));
+        } catch (ArithmeticException error) {
+            return optionNone();
+        }
+    }
+
+    public static Option<Long> checkedMul(long value, long other) {
+        try {
+            return optionSome(Math.multiplyExact(value, other));
+        } catch (ArithmeticException error) {
+            return optionNone();
+        }
+    }
+
     public static long abs(long value) {
+        if (value == Long.MIN_VALUE) {
+            throw new LumePanic("integer overflow: (" + value + ").abs()");
+        }
         return Math.abs(value);
     }
 
@@ -49,16 +140,35 @@ public final class LumeRuntime {
         if (exponent < 0) {
             throw new LumePanic("Int.pow exponent must be non-negative");
         }
+        try {
+            return powExact(value, exponent);
+        } catch (ArithmeticException error) {
+            throw new LumePanic("integer overflow: " + value + ".pow(" + exponent + ")");
+        }
+    }
+
+    public static Option<Long> checkedPow(long value, long exponent) {
+        if (exponent < 0) {
+            return optionNone();
+        }
+        try {
+            return optionSome(powExact(value, exponent));
+        } catch (ArithmeticException error) {
+            return optionNone();
+        }
+    }
+
+    private static long powExact(long value, long exponent) {
         long result = 1;
         long factor = value;
         long remaining = exponent;
         while (remaining != 0) {
             if ((remaining & 1) != 0) {
-                result *= factor;
+                result = Math.multiplyExact(result, factor);
             }
             remaining >>>= 1;
             if (remaining != 0) {
-                factor *= factor;
+                factor = Math.multiplyExact(factor, factor);
             }
         }
         return result;
