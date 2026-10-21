@@ -71,6 +71,10 @@ The shorthand may not be repeated. `Int??` is rejected because `??` is the
 extract-or-fallback expression operator. Write `Option[Int?]` when a nested
 optional type is intentional.
 
+`lume fmt` prefers `T?` over `Option[T]`, adding parentheses for function or
+union payloads, such as `(fn(Int) Str)?` and `(Int | Str)?`. Explicit wrappers
+remain where needed for nested options, such as `Option[Int?]`.
+
 ### Qualified Type Paths
 
 A module imported without a symbol selector exposes its visible types through

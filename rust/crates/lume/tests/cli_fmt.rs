@@ -41,6 +41,30 @@ fn fmt_command_rewrites_a_valid_file_in_place() {
 }
 
 #[test]
+fn fmt_command_uses_optional_type_shorthand() {
+    let path = temp_source(
+        "optional-types",
+        "def echo(value Option[Int]) Option[Int] = value\n",
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_lume"))
+        .arg("fmt")
+        .arg(&path)
+        .output()
+        .expect("lume fmt should run");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&path).expect("formatted source should be readable"),
+        "def echo(value Int?) Int? = value\n"
+    );
+    fs::remove_file(path).expect("temporary source should be removable");
+}
+
+#[test]
 fn fmt_command_preserves_invalid_source() {
     let source = "def main( Unit {\n";
     let path = temp_source("invalid", source);

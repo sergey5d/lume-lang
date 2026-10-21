@@ -2,8 +2,8 @@ use crate::{
     Diagnostic, Keyword, SourceFile, Token, TokenKind,
     ast::{
         Annotation, CallableBody, DeferAction, ElseBranch, ElseExprBranch, Expr, ForBinding,
-        FunctionDecl, IfConditionClause, Item, LambdaBody, MatchCase, MatchCaseBody, MethodDecl,
-        Program, Stmt, TypeMember, TypeRef,
+        FunctionDecl, GenericCondition, IfConditionClause, Item, LambdaBody, MatchCase,
+        MatchCaseBody, MethodDecl, Pattern, Program, Stmt, TypeMember, TypeParam, TypeRef,
     },
     lex, parse_program,
     source::Span,
@@ -26,8 +26,8 @@ impl FormatResult {
 /// Formats one syntactically valid Lume source file.
 ///
 /// This preserves comments, literal spelling, and multiline string contents,
-/// while applying the language's canonical callable spelling. Invalid input is
-/// returned unchanged so callers can safely avoid overwriting the source file.
+/// while applying the language's canonical callable and type spelling. Invalid
+/// input is returned unchanged so callers can safely avoid overwriting the source file.
 pub fn format_source(file: &SourceFile) -> FormatResult {
     let lexed = lex(file);
     if lexed.has_errors() {
@@ -48,7 +48,7 @@ pub fn format_source(file: &SourceFile) -> FormatResult {
     let program = parsed
         .program
         .expect("a successful parse always produces a program");
-    let canonical_source = canonicalize_callable_syntax(&file.text, &lexed.tokens, &program);
+    let canonical_source = canonicalize_syntax(&file.text, &lexed.tokens, &program);
     let canonical_file = SourceFile::new(file.name.clone(), canonical_source);
     let canonical_lexed = lex(&canonical_file);
     if canonical_lexed.has_errors() {
@@ -64,20 +64,200 @@ pub fn format_source(file: &SourceFile) -> FormatResult {
     }
 }
 
-fn canonicalize_callable_syntax(source: &str, tokens: &[Token], program: &Program) -> String {
-    let mut removals = Vec::new();
-    collect_program_rewrites(program, tokens, &mut removals);
-    removals.sort_by_key(|span| (span.start, span.end));
-    removals.dedup_by_key(|span| (span.start, span.end));
+struct SourceEdit {
+    start: usize,
+    end: usize,
+    replacement: &'static str,
+    speculative_type_argument: bool,
+}
+
+struct SourceRewrites<'a> {
+    source: &'a str,
+    edits: Vec<SourceEdit>,
+    speculative_type_argument: bool,
+    option_value_declared: bool,
+}
+
+impl SourceRewrites<'_> {
+    fn bind_value_name(&mut self, name: &str) {
+        self.option_value_declared |= name == "Option";
+    }
+
+    fn push(&mut self, span: Span) {
+        self.replace(span.start, span.end, "");
+    }
+
+    fn replace(&mut self, start: usize, end: usize, replacement: &'static str) {
+        self.edits.push(SourceEdit {
+            start,
+            end,
+            replacement,
+            speculative_type_argument: self.speculative_type_argument,
+        });
+    }
+}
+
+fn canonicalize_syntax(source: &str, tokens: &[Token], program: &Program) -> String {
+    let mut rewrites = SourceRewrites {
+        source,
+        edits: Vec::new(),
+        speculative_type_argument: false,
+        option_value_declared: false,
+    };
+    collect_program_rewrites(program, tokens, &mut rewrites);
+    // Bracket applications can also be indexing. Without name resolution, leave
+    // speculative types alone when Option can denote a value in this file.
+    if rewrites.option_value_declared {
+        rewrites
+            .edits
+            .retain(|edit| !edit.speculative_type_argument);
+    }
+    rewrites.edits.sort_by_key(|edit| (edit.start, edit.end));
+    rewrites.edits.dedup_by_key(|edit| (edit.start, edit.end));
 
     let mut result = source.to_string();
-    for span in removals.into_iter().rev() {
-        result.replace_range(span.start..span.end, "");
+    for edit in rewrites.edits.into_iter().rev() {
+        result.replace_range(edit.start..edit.end, edit.replacement);
     }
     result
 }
 
-fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut Vec<Span>) {
+fn collect_type_rewrites(ty: &TypeRef, tokens: &[Token], rewrites: &mut SourceRewrites<'_>) {
+    match ty {
+        TypeRef::Named { name, args, span } => {
+            if name == "Option"
+                && let [payload] = args.as_slice()
+            {
+                collect_optional_shorthand(payload, *span, tokens, rewrites);
+            }
+            for arg in args {
+                collect_type_rewrites(arg, tokens, rewrites);
+            }
+        }
+        TypeRef::Tuple { fields, .. } => {
+            for field in fields {
+                collect_type_rewrites(&field.ty, tokens, rewrites);
+            }
+        }
+        TypeRef::Record { fields, .. } => {
+            for field in fields {
+                collect_type_rewrites(&field.ty, tokens, rewrites);
+            }
+        }
+        TypeRef::Function { params, ret, .. } => {
+            for param in params {
+                collect_type_rewrites(param, tokens, rewrites);
+            }
+            collect_type_rewrites(ret, tokens, rewrites);
+        }
+        TypeRef::Union { members, .. } => {
+            for member in members {
+                collect_type_rewrites(member, tokens, rewrites);
+            }
+        }
+        TypeRef::Wildcard { .. } => {}
+    }
+}
+
+fn collect_optional_shorthand(
+    payload: &TypeRef,
+    span: Span,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    if matches!(payload, TypeRef::Named { name, args, .. } if name == "Option" && args.len() == 1) {
+        return;
+    }
+    let start = tokens.partition_point(|token| token.span.start < span.start);
+    let end = tokens.partition_point(|token| token.span.start < span.end);
+    let type_tokens = &tokens[start..end];
+    if type_tokens.len() < 4
+        || type_tokens[0].lexeme != "Option"
+        || type_tokens[1].kind != TokenKind::LBracket
+        || type_tokens
+            .last()
+            .is_none_or(|token| token.kind != TokenKind::RBracket)
+        || tokens
+            .get(end)
+            .is_some_and(|token| token.kind == TokenKind::Question)
+    {
+        return;
+    }
+    let payload_tokens = type_tokens[2..type_tokens.len() - 1]
+        .iter()
+        .filter(|token| token.kind != TokenKind::Newline)
+        .collect::<Vec<_>>();
+    let Some(first) = payload_tokens.first() else {
+        return;
+    };
+    let last_index = payload_tokens.len()
+        - 1
+        - usize::from(
+            payload_tokens
+                .last()
+                .is_some_and(|token| token.kind == TokenKind::Comma),
+        );
+    let last = payload_tokens[last_index];
+    let opening = &type_tokens[1];
+    let closing = type_tokens.last().unwrap();
+    // Keep comments outside the payload in place rather than deleting them.
+    if !rewrites.source[type_tokens[0].span.end..opening.span.start]
+        .chars()
+        .all(char::is_whitespace)
+        || !rewrites.source[opening.span.end..first.span.start]
+            .chars()
+            .all(char::is_whitespace)
+        || !rewrites.source[last.span.end..closing.span.start]
+            .chars()
+            .all(|ch| ch.is_whitespace() || ch == ',')
+    {
+        return;
+    }
+    let grouped = first.kind == TokenKind::LParen && first.span.start < payload.span().start;
+    let needs_group =
+        matches!(payload, TypeRef::Function { .. } | TypeRef::Union { .. }) && !grouped;
+    rewrites.replace(
+        span.start,
+        first.span.start,
+        if needs_group { "(" } else { "" },
+    );
+    rewrites.replace(
+        last.span.end,
+        span.end,
+        if needs_group { ")?" } else { "?" },
+    );
+}
+
+fn collect_generic_rewrites(
+    params: &[TypeParam],
+    conditions: &[GenericCondition],
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    for param in params {
+        for bound in &param.bounds {
+            collect_type_rewrites(bound, tokens, rewrites);
+        }
+    }
+    for condition in conditions {
+        match condition {
+            GenericCondition::Bound { subject, bound, .. } => {
+                collect_type_rewrites(subject, tokens, rewrites);
+                collect_type_rewrites(bound, tokens, rewrites);
+            }
+            GenericCondition::Equal { left, right, .. } => {
+                collect_type_rewrites(left, tokens, rewrites);
+                collect_type_rewrites(right, tokens, rewrites);
+            }
+        }
+    }
+}
+
+fn collect_program_rewrites(
+    program: &Program,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
     for item in &program.items {
         match item {
             Item::Function(function) => {
@@ -85,11 +265,23 @@ fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut 
                     tokens,
                     function.span.start,
                     Keyword::Private,
-                    removals,
+                    rewrites,
                 );
-                collect_function_rewrites(function, tokens, removals);
+                collect_function_rewrites(function, tokens, rewrites);
             }
             Item::Type(decl) => {
+                if decl.kind == crate::ast::TypeKind::Object {
+                    rewrites.bind_value_name(&decl.name);
+                }
+                collect_generic_rewrites(
+                    &decl.type_params,
+                    &decl.type_conditions,
+                    tokens,
+                    rewrites,
+                );
+                for bound in &decl.with_bounds {
+                    collect_type_rewrites(bound, tokens, rewrites);
+                }
                 collect_redundant_visibility(
                     tokens,
                     decl.span.start,
@@ -98,43 +290,54 @@ fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut 
                     } else {
                         Keyword::Private
                     },
-                    removals,
+                    rewrites,
                 );
                 for annotation in &decl.annotations {
-                    collect_annotation_rewrites(annotation, tokens, removals);
+                    collect_annotation_rewrites(annotation, tokens, rewrites);
                 }
                 for member in &decl.members {
                     match member {
                         TypeMember::Field(field) => {
+                            rewrites.bind_value_name(&field.name);
+                            if let Some(ty) = &field.ty {
+                                collect_type_rewrites(ty, tokens, rewrites);
+                            }
                             collect_redundant_visibility(
                                 tokens,
                                 field.span.start,
                                 Keyword::Public,
-                                removals,
+                                rewrites,
                             );
                             for annotation in &field.annotations {
-                                collect_annotation_rewrites(annotation, tokens, removals);
+                                collect_annotation_rewrites(annotation, tokens, rewrites);
                             }
                             if let Some(initializer) = &field.initializer {
-                                collect_expr_rewrites(initializer, tokens, removals);
+                                collect_expr_rewrites(initializer, tokens, rewrites);
                             }
                         }
                         TypeMember::Method(method) => {
-                            collect_method_rewrites(method, tokens, removals)
+                            collect_method_rewrites(method, tokens, rewrites)
                         }
                         TypeMember::Case(case) => {
+                            for annotation in &case.annotations {
+                                collect_annotation_rewrites(annotation, tokens, rewrites);
+                            }
                             for field in &case.fields {
+                                rewrites.bind_value_name(&field.name);
+                                if let Some(ty) = &field.ty {
+                                    collect_type_rewrites(ty, tokens, rewrites);
+                                }
                                 collect_redundant_visibility(
                                     tokens,
                                     field.span.start,
                                     Keyword::Public,
-                                    removals,
+                                    rewrites,
                                 );
                                 for annotation in &field.annotations {
-                                    collect_annotation_rewrites(annotation, tokens, removals);
+                                    collect_annotation_rewrites(annotation, tokens, rewrites);
                                 }
                                 if let Some(initializer) = &field.initializer {
-                                    collect_expr_rewrites(initializer, tokens, removals);
+                                    collect_expr_rewrites(initializer, tokens, rewrites);
                                 }
                             }
                         }
@@ -142,8 +345,9 @@ fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut 
                 }
             }
             Item::Extension(extension) => {
+                collect_type_rewrites(&extension.target, tokens, rewrites);
                 for method in &extension.methods {
-                    collect_method_rewrites(method, tokens, removals);
+                    collect_method_rewrites(method, tokens, rewrites);
                 }
             }
             Item::Statement(stmt) => {
@@ -152,21 +356,24 @@ fn collect_program_rewrites(program: &Program, tokens: &[Token], removals: &mut 
                         tokens,
                         binding.span.start,
                         Keyword::Private,
-                        removals,
+                        rewrites,
                     );
                 }
-                collect_stmt_rewrites(stmt, tokens, removals);
+                collect_stmt_rewrites(stmt, tokens, rewrites);
             }
-            Item::TypeAlias(alias) => collect_redundant_visibility(
-                tokens,
-                alias.span.start,
-                if alias.name.contains('.') {
-                    Keyword::Public
-                } else {
-                    Keyword::Private
-                },
-                removals,
-            ),
+            Item::TypeAlias(alias) => {
+                collect_redundant_visibility(
+                    tokens,
+                    alias.span.start,
+                    if alias.name.contains('.') {
+                        Keyword::Public
+                    } else {
+                        Keyword::Private
+                    },
+                    rewrites,
+                );
+                collect_type_rewrites(&alias.target, tokens, rewrites);
+            }
         }
     }
 }
@@ -175,60 +382,96 @@ fn collect_redundant_visibility(
     tokens: &[Token],
     declaration_start: usize,
     default_keyword: Keyword,
-    removals: &mut Vec<Span>,
+    rewrites: &mut SourceRewrites<'_>,
 ) {
     if let Some(token) = token_immediately_before(tokens, declaration_start)
         && token.kind == TokenKind::Keyword(default_keyword)
     {
-        removals.push(token.span);
+        rewrites.push(token.span);
     }
 }
 
 fn collect_annotation_rewrites(
     annotation: &Annotation,
     tokens: &[Token],
-    removals: &mut Vec<Span>,
+    rewrites: &mut SourceRewrites<'_>,
 ) {
-    collect_expr_rewrites(&annotation.value, tokens, removals);
+    collect_expr_rewrites(&annotation.value, tokens, rewrites);
 }
 
-fn collect_function_rewrites(function: &FunctionDecl, tokens: &[Token], removals: &mut Vec<Span>) {
-    collect_explicit_unit_return(&function.return_type, removals);
+fn collect_function_rewrites(
+    function: &FunctionDecl,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    rewrites.bind_value_name(&function.name);
+    collect_generic_rewrites(
+        &function.type_params,
+        &function.type_conditions,
+        tokens,
+        rewrites,
+    );
+    if let Some(ty) = &function.return_type {
+        collect_type_rewrites(ty, tokens, rewrites);
+    }
+    collect_explicit_unit_return(&function.return_type, rewrites);
     for annotation in &function.annotations {
-        collect_annotation_rewrites(annotation, tokens, removals);
+        collect_annotation_rewrites(annotation, tokens, rewrites);
     }
     for param in &function.params {
+        rewrites.bind_value_name(&param.name);
+        if let Some(ty) = &param.ty {
+            collect_type_rewrites(ty, tokens, rewrites);
+        }
         if let Some(initializer) = &param.initializer {
-            collect_expr_rewrites(initializer, tokens, removals);
+            collect_expr_rewrites(initializer, tokens, rewrites);
         }
     }
-    collect_callable_body_rewrites(&function.body, function.span, tokens, removals);
+    collect_callable_body_rewrites(&function.body, function.span, tokens, rewrites);
 }
 
-fn collect_method_rewrites(method: &MethodDecl, tokens: &[Token], removals: &mut Vec<Span>) {
-    collect_redundant_visibility(tokens, method.span.start, Keyword::Public, removals);
+fn collect_method_rewrites(
+    method: &MethodDecl,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    rewrites.bind_value_name(&method.name);
+    collect_generic_rewrites(
+        &method.type_params,
+        &method.type_conditions,
+        tokens,
+        rewrites,
+    );
+    if let Some(ty) = &method.return_type {
+        collect_type_rewrites(ty, tokens, rewrites);
+    }
+    collect_redundant_visibility(tokens, method.span.start, Keyword::Public, rewrites);
     if !method.getter {
-        collect_explicit_unit_return(&method.return_type, removals);
+        collect_explicit_unit_return(&method.return_type, rewrites);
     }
     for annotation in &method.annotations {
-        collect_annotation_rewrites(annotation, tokens, removals);
+        collect_annotation_rewrites(annotation, tokens, rewrites);
     }
     for param in &method.params {
+        rewrites.bind_value_name(&param.name);
+        if let Some(ty) = &param.ty {
+            collect_type_rewrites(ty, tokens, rewrites);
+        }
         if let Some(initializer) = &param.initializer {
-            collect_expr_rewrites(initializer, tokens, removals);
+            collect_expr_rewrites(initializer, tokens, rewrites);
         }
     }
     if let Some(body) = &method.body {
-        collect_callable_body_rewrites(body, method.span, tokens, removals);
+        collect_callable_body_rewrites(body, method.span, tokens, rewrites);
     }
 }
 
-fn collect_explicit_unit_return(return_type: &Option<TypeRef>, removals: &mut Vec<Span>) {
+fn collect_explicit_unit_return(return_type: &Option<TypeRef>, rewrites: &mut SourceRewrites<'_>) {
     if let Some(TypeRef::Named { name, args, span }) = return_type
         && name == "Unit"
         && args.is_empty()
     {
-        removals.push(*span);
+        rewrites.push(*span);
     }
 }
 
@@ -236,7 +479,7 @@ fn collect_callable_body_rewrites(
     body: &CallableBody,
     callable_span: Span,
     tokens: &[Token],
-    removals: &mut Vec<Span>,
+    rewrites: &mut SourceRewrites<'_>,
 ) {
     match body {
         CallableBody::Block(block) => {
@@ -244,11 +487,11 @@ fn collect_callable_body_rewrites(
                 && equals.kind == TokenKind::Eq
                 && equals.span.start >= callable_span.start
             {
-                removals.push(equals.span);
+                rewrites.push(equals.span);
             }
-            collect_block_rewrites(block, tokens, removals);
+            collect_block_rewrites(block, tokens, rewrites);
         }
-        CallableBody::Expr(expr) => collect_expr_rewrites(expr, tokens, removals),
+        CallableBody::Expr(expr) => collect_expr_rewrites(expr, tokens, rewrites),
     }
 }
 
@@ -260,138 +503,211 @@ fn token_immediately_before(tokens: &[Token], offset: usize) -> Option<&Token> {
         .last()
 }
 
-fn collect_block_rewrites(block: &crate::ast::Block, tokens: &[Token], removals: &mut Vec<Span>) {
+fn collect_block_rewrites(
+    block: &crate::ast::Block,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
     for statement in &block.statements {
-        collect_stmt_rewrites(statement, tokens, removals);
+        collect_stmt_rewrites(statement, tokens, rewrites);
     }
 }
 
 fn collect_clause_rewrites(
     clause: &crate::ast::RefutableClause,
     tokens: &[Token],
-    removals: &mut Vec<Span>,
+    rewrites: &mut SourceRewrites<'_>,
 ) {
-    collect_expr_rewrites(&clause.value, tokens, removals);
+    collect_pattern_rewrites(&clause.pattern, tokens, rewrites);
+    collect_expr_rewrites(&clause.value, tokens, rewrites);
+}
+
+fn collect_pattern_rewrites(
+    pattern: &Pattern,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    for name in crate::ast::pattern_binding_names(pattern) {
+        rewrites.bind_value_name(&name);
+    }
+    match pattern {
+        Pattern::Type { target, .. } => collect_type_rewrites(target, tokens, rewrites),
+        Pattern::Extract { inner, .. } | Pattern::Alias { inner, .. } => {
+            collect_pattern_rewrites(inner, tokens, rewrites);
+        }
+        Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+            for element in elements {
+                collect_pattern_rewrites(element, tokens, rewrites);
+            }
+        }
+        Pattern::Record { fields, .. } => {
+            for field in fields {
+                collect_pattern_rewrites(&field.pattern, tokens, rewrites);
+            }
+        }
+        Pattern::Constructor { args, .. } => {
+            for arg in args {
+                collect_pattern_rewrites(arg, tokens, rewrites);
+            }
+        }
+        Pattern::Literal { value, .. } => collect_expr_rewrites(value, tokens, rewrites),
+        Pattern::Wildcard { .. } | Pattern::Binding { .. } => {}
+    }
 }
 
 fn collect_condition_clause_rewrites(
     clause: &IfConditionClause,
     tokens: &[Token],
-    removals: &mut Vec<Span>,
+    rewrites: &mut SourceRewrites<'_>,
 ) {
     match clause {
-        IfConditionClause::Let(clause) => collect_clause_rewrites(clause, tokens, removals),
-        IfConditionClause::Expr(expr) => collect_expr_rewrites(expr, tokens, removals),
+        IfConditionClause::Let(clause) => collect_clause_rewrites(clause, tokens, rewrites),
+        IfConditionClause::Expr(expr) => collect_expr_rewrites(expr, tokens, rewrites),
     }
 }
 
-fn collect_match_case_rewrites(case: &MatchCase, tokens: &[Token], removals: &mut Vec<Span>) {
+fn collect_match_case_rewrites(
+    case: &MatchCase,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    collect_pattern_rewrites(&case.pattern, tokens, rewrites);
     if let Some(guard) = &case.guard {
-        collect_expr_rewrites(guard, tokens, removals);
+        collect_expr_rewrites(guard, tokens, rewrites);
     }
     match &case.body {
-        MatchCaseBody::Block(block) => collect_block_rewrites(block, tokens, removals),
-        MatchCaseBody::Expr(expr) => collect_expr_rewrites(expr, tokens, removals),
+        MatchCaseBody::Block(block) => collect_block_rewrites(block, tokens, rewrites),
+        MatchCaseBody::Expr(expr) => collect_expr_rewrites(expr, tokens, rewrites),
     }
 }
 
-fn collect_for_binding_rewrites(binding: &ForBinding, tokens: &[Token], removals: &mut Vec<Span>) {
+fn collect_for_binding_rewrites(
+    binding: &ForBinding,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    for item in &binding.bindings {
+        rewrites.bind_value_name(&item.name);
+        if let Some(ty) = &item.ty {
+            collect_type_rewrites(ty, tokens, rewrites);
+        }
+    }
+    if let Some(pattern) = &binding.pattern {
+        collect_pattern_rewrites(pattern, tokens, rewrites);
+    }
     if let Some(iterable) = &binding.iterable {
-        collect_expr_rewrites(iterable, tokens, removals);
+        collect_expr_rewrites(iterable, tokens, rewrites);
     }
     for value in &binding.values {
-        collect_expr_rewrites(value, tokens, removals);
+        collect_expr_rewrites(value, tokens, rewrites);
     }
 }
 
-fn collect_stmt_rewrites(stmt: &Stmt, tokens: &[Token], removals: &mut Vec<Span>) {
+fn collect_stmt_rewrites(stmt: &Stmt, tokens: &[Token], rewrites: &mut SourceRewrites<'_>) {
     match stmt {
         Stmt::Binding(stmt) => {
+            for binding in &stmt.bindings {
+                rewrites.bind_value_name(&binding.name);
+                if let Some(ty) = &binding.ty {
+                    collect_type_rewrites(ty, tokens, rewrites);
+                }
+            }
             for value in &stmt.values {
-                collect_expr_rewrites(value, tokens, removals);
+                collect_expr_rewrites(value, tokens, rewrites);
             }
         }
         Stmt::PatternBinding(stmt) => {
+            collect_pattern_rewrites(&stmt.pattern, tokens, rewrites);
             for clause in &stmt.clauses {
-                collect_clause_rewrites(clause, tokens, removals);
+                collect_clause_rewrites(clause, tokens, rewrites);
             }
-            collect_expr_rewrites(&stmt.value, tokens, removals);
+            collect_expr_rewrites(&stmt.value, tokens, rewrites);
         }
         Stmt::Assignment(stmt) => {
             for target in &stmt.targets {
-                collect_expr_rewrites(target, tokens, removals);
+                collect_expr_rewrites(target, tokens, rewrites);
             }
             for value in &stmt.values {
-                collect_expr_rewrites(value, tokens, removals);
+                collect_expr_rewrites(value, tokens, rewrites);
             }
         }
         Stmt::Defer(stmt) => match &stmt.action {
-            DeferAction::Call(expr) => collect_expr_rewrites(expr, tokens, removals),
-            DeferAction::Block(block) => collect_block_rewrites(block, tokens, removals),
+            DeferAction::Call(expr) => collect_expr_rewrites(expr, tokens, rewrites),
+            DeferAction::Block(block) => collect_block_rewrites(block, tokens, rewrites),
         },
         Stmt::If(stmt) => {
+            if let Some(pattern) = &stmt.pattern {
+                collect_pattern_rewrites(pattern, tokens, rewrites);
+            }
+            for binding in &stmt.bindings {
+                rewrites.bind_value_name(&binding.name);
+                if let Some(ty) = &binding.ty {
+                    collect_type_rewrites(ty, tokens, rewrites);
+                }
+            }
             if let Some(condition) = &stmt.condition {
-                collect_expr_rewrites(condition, tokens, removals);
+                collect_expr_rewrites(condition, tokens, rewrites);
             }
             for clause in &stmt.condition_clauses {
-                collect_condition_clause_rewrites(clause, tokens, removals);
+                collect_condition_clause_rewrites(clause, tokens, rewrites);
             }
             if let Some(value) = &stmt.pattern_value {
-                collect_expr_rewrites(value, tokens, removals);
+                collect_expr_rewrites(value, tokens, rewrites);
             }
             for clause in &stmt.pattern_clauses {
-                collect_clause_rewrites(clause, tokens, removals);
+                collect_clause_rewrites(clause, tokens, rewrites);
             }
             if let Some(value) = &stmt.binding_value {
-                collect_expr_rewrites(value, tokens, removals);
+                collect_expr_rewrites(value, tokens, rewrites);
             }
-            collect_block_rewrites(&stmt.then_block, tokens, removals);
+            collect_block_rewrites(&stmt.then_block, tokens, rewrites);
             if let Some(branch) = &stmt.else_branch {
                 match branch {
                     ElseBranch::If(stmt) => {
-                        collect_stmt_rewrites(&Stmt::If((**stmt).clone()), tokens, removals)
+                        collect_stmt_rewrites(&Stmt::If((**stmt).clone()), tokens, rewrites)
                     }
-                    ElseBranch::Block(block) => collect_block_rewrites(block, tokens, removals),
+                    ElseBranch::Block(block) => collect_block_rewrites(block, tokens, rewrites),
                 }
             }
         }
         Stmt::Match(stmt) => {
-            collect_expr_rewrites(&stmt.value, tokens, removals);
+            collect_expr_rewrites(&stmt.value, tokens, rewrites);
             for case in &stmt.cases {
-                collect_match_case_rewrites(case, tokens, removals);
+                collect_match_case_rewrites(case, tokens, rewrites);
             }
         }
         Stmt::While(stmt) => {
             for clause in &stmt.condition_clauses {
-                collect_condition_clause_rewrites(clause, tokens, removals);
+                collect_condition_clause_rewrites(clause, tokens, rewrites);
             }
-            collect_block_rewrites(&stmt.body, tokens, removals);
+            collect_block_rewrites(&stmt.body, tokens, rewrites);
         }
         Stmt::For(stmt) => {
             for binding in &stmt.bindings {
-                collect_for_binding_rewrites(binding, tokens, removals);
+                collect_for_binding_rewrites(binding, tokens, rewrites);
             }
-            collect_block_rewrites(&stmt.body, tokens, removals);
+            collect_block_rewrites(&stmt.body, tokens, rewrites);
         }
         Stmt::LetElse(stmt) => {
+            collect_pattern_rewrites(&stmt.pattern, tokens, rewrites);
             for clause in &stmt.clauses {
-                collect_clause_rewrites(clause, tokens, removals);
+                collect_clause_rewrites(clause, tokens, rewrites);
             }
-            collect_expr_rewrites(&stmt.value, tokens, removals);
-            collect_block_rewrites(&stmt.else_block, tokens, removals);
+            collect_expr_rewrites(&stmt.value, tokens, rewrites);
+            collect_block_rewrites(&stmt.else_block, tokens, rewrites);
         }
         Stmt::Return(stmt) => {
             if let Some(value) = &stmt.value {
-                collect_expr_rewrites(value, tokens, removals);
+                collect_expr_rewrites(value, tokens, rewrites);
             }
         }
-        Stmt::Expr(stmt) => collect_expr_rewrites(&stmt.expr, tokens, removals),
-        Stmt::LocalFunction(function) => collect_function_rewrites(function, tokens, removals),
+        Stmt::Expr(stmt) => collect_expr_rewrites(&stmt.expr, tokens, rewrites),
+        Stmt::LocalFunction(function) => collect_function_rewrites(function, tokens, rewrites),
         Stmt::Break(_) | Stmt::Continue(_) => {}
     }
 }
 
-fn collect_expr_rewrites(expr: &Expr, tokens: &[Token], removals: &mut Vec<Span>) {
+fn collect_expr_rewrites(expr: &Expr, tokens: &[Token], rewrites: &mut SourceRewrites<'_>) {
     match expr {
         Expr::Identifier { .. }
         | Expr::Placeholder { .. }
@@ -401,76 +717,109 @@ fn collect_expr_rewrites(expr: &Expr, tokens: &[Token], removals: &mut Vec<Span>
         | Expr::Bool { .. }
         | Expr::Unit { .. }
         | Expr::Break { .. }
-        | Expr::Continue { .. }
-        | Expr::TypeOf { .. } => {}
+        | Expr::Continue { .. } => {}
+        Expr::TypeOf { ty, .. } => collect_type_rewrites(ty, tokens, rewrites),
         Expr::Spread { value, .. } | Expr::Try { value, .. } => {
-            collect_expr_rewrites(value, tokens, removals)
+            collect_expr_rewrites(value, tokens, rewrites)
         }
         Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
             for item in items {
-                collect_expr_rewrites(item, tokens, removals);
+                collect_expr_rewrites(item, tokens, rewrites);
             }
         }
         Expr::Call { callee, args, .. } => {
-            collect_expr_rewrites(callee, tokens, removals);
+            collect_expr_rewrites(callee, tokens, rewrites);
             for arg in args {
-                collect_expr_rewrites(&arg.value, tokens, removals);
+                if let Some(ty) = &arg.ty {
+                    collect_type_rewrites(ty, tokens, rewrites);
+                }
+                collect_expr_rewrites(&arg.value, tokens, rewrites);
             }
         }
         Expr::ContextualNew { args, .. } => {
             for arg in args {
-                collect_expr_rewrites(&arg.value, tokens, removals);
+                if let Some(ty) = &arg.ty {
+                    collect_type_rewrites(ty, tokens, rewrites);
+                }
+                collect_expr_rewrites(&arg.value, tokens, rewrites);
             }
         }
-        Expr::Member { receiver, .. } => collect_expr_rewrites(receiver, tokens, removals),
+        Expr::Member { receiver, .. } => collect_expr_rewrites(receiver, tokens, rewrites),
         Expr::Index {
-            receiver, index, ..
+            receiver,
+            index,
+            explicit_type_args,
+            ..
         } => {
-            collect_expr_rewrites(receiver, tokens, removals);
-            collect_expr_rewrites(index, tokens, removals);
+            collect_expr_rewrites(receiver, tokens, rewrites);
+            collect_expr_rewrites(index, tokens, rewrites);
+            if let Some(args) = explicit_type_args {
+                let previous = rewrites.speculative_type_argument;
+                rewrites.speculative_type_argument |= !matches!(index.as_ref(), Expr::Unit { .. });
+                for arg in args {
+                    collect_type_rewrites(arg, tokens, rewrites);
+                }
+                rewrites.speculative_type_argument = previous;
+            }
         }
         Expr::RecordLiteral { fields, values, .. } => {
             for field in fields {
-                collect_expr_rewrites(&field.value, tokens, removals);
+                if let Some(ty) = &field.ty {
+                    collect_type_rewrites(ty, tokens, rewrites);
+                }
+                collect_expr_rewrites(&field.value, tokens, rewrites);
             }
             for value in values {
-                collect_expr_rewrites(value, tokens, removals);
+                collect_expr_rewrites(value, tokens, rewrites);
             }
         }
         Expr::AnonymousObject {
-            fields, methods, ..
+            fields,
+            methods,
+            interfaces,
+            ..
         } => {
+            for interface in interfaces {
+                collect_type_rewrites(interface, tokens, rewrites);
+            }
             for field in fields {
+                rewrites.bind_value_name(&field.name);
+                if let Some(ty) = &field.ty {
+                    collect_type_rewrites(ty, tokens, rewrites);
+                }
                 for annotation in &field.annotations {
-                    collect_annotation_rewrites(annotation, tokens, removals);
+                    collect_annotation_rewrites(annotation, tokens, rewrites);
                 }
                 if let Some(initializer) = &field.initializer {
-                    collect_expr_rewrites(initializer, tokens, removals);
+                    collect_expr_rewrites(initializer, tokens, rewrites);
                 }
             }
             for method in methods {
-                collect_method_rewrites(method, tokens, removals);
+                collect_method_rewrites(method, tokens, rewrites);
             }
         }
         Expr::ExtractOr {
             value, fallback, ..
         } => {
-            collect_expr_rewrites(value, tokens, removals);
-            collect_expr_rewrites(fallback, tokens, removals);
+            collect_expr_rewrites(value, tokens, rewrites);
+            collect_expr_rewrites(fallback, tokens, rewrites);
         }
         Expr::Return { value, .. } => {
             if let Some(value) = value {
-                collect_expr_rewrites(value, tokens, removals);
+                collect_expr_rewrites(value, tokens, rewrites);
             }
         }
         Expr::Unary { expr, .. } | Expr::Group { inner: expr, .. } => {
-            collect_expr_rewrites(expr, tokens, removals)
+            collect_expr_rewrites(expr, tokens, rewrites)
         }
         Expr::Binary { left, right, .. } => {
-            collect_expr_rewrites(left, tokens, removals);
-            collect_expr_rewrites(right, tokens, removals);
+            collect_expr_rewrites(left, tokens, rewrites);
+            collect_expr_rewrites(right, tokens, rewrites);
         }
-        Expr::Is { left, .. } => collect_expr_rewrites(left, tokens, removals),
+        Expr::Is { left, target, .. } => {
+            collect_expr_rewrites(left, tokens, rewrites);
+            collect_type_rewrites(target, tokens, rewrites);
+        }
         Expr::If {
             condition_clauses,
             then_block,
@@ -478,19 +827,19 @@ fn collect_expr_rewrites(expr: &Expr, tokens: &[Token], removals: &mut Vec<Span>
             ..
         } => {
             for clause in condition_clauses {
-                collect_condition_clause_rewrites(clause, tokens, removals);
+                collect_condition_clause_rewrites(clause, tokens, rewrites);
             }
-            collect_block_rewrites(then_block, tokens, removals);
+            collect_block_rewrites(then_block, tokens, rewrites);
             match else_branch.as_ref() {
-                ElseExprBranch::If(expr) => collect_expr_rewrites(expr, tokens, removals),
-                ElseExprBranch::Block(block) => collect_block_rewrites(block, tokens, removals),
+                ElseExprBranch::If(expr) => collect_expr_rewrites(expr, tokens, rewrites),
+                ElseExprBranch::Block(block) => collect_block_rewrites(block, tokens, rewrites),
             }
         }
-        Expr::Block { body, .. } => collect_block_rewrites(body, tokens, removals),
+        Expr::Block { body, .. } => collect_block_rewrites(body, tokens, rewrites),
         Expr::Match { value, cases, .. } => {
-            collect_expr_rewrites(value, tokens, removals);
+            collect_expr_rewrites(value, tokens, rewrites);
             for case in cases {
-                collect_match_case_rewrites(case, tokens, removals);
+                collect_match_case_rewrites(case, tokens, rewrites);
             }
         }
         Expr::ForYield {
@@ -499,14 +848,30 @@ fn collect_expr_rewrites(expr: &Expr, tokens: &[Token], removals: &mut Vec<Span>
             ..
         } => {
             for binding in bindings {
-                collect_for_binding_rewrites(binding, tokens, removals);
+                collect_for_binding_rewrites(binding, tokens, rewrites);
             }
-            collect_block_rewrites(yield_body, tokens, removals);
+            collect_block_rewrites(yield_body, tokens, rewrites);
         }
-        Expr::Lambda { body, .. } => match body {
-            LambdaBody::Expr(expr) => collect_expr_rewrites(expr, tokens, removals),
-            LambdaBody::Block(block) => collect_block_rewrites(block, tokens, removals),
-        },
+        Expr::Lambda { params, body, .. } => {
+            for param in params {
+                rewrites.bind_value_name(&param.name);
+                if let Some(ty) = &param.ty {
+                    collect_type_rewrites(ty, tokens, rewrites);
+                }
+                if let Some(destructure) = &param.destructure {
+                    for binding in &destructure.bindings {
+                        rewrites.bind_value_name(&binding.name);
+                        if let Some(ty) = &binding.ty {
+                            collect_type_rewrites(ty, tokens, rewrites);
+                        }
+                    }
+                }
+            }
+            match body {
+                LambdaBody::Expr(expr) => collect_expr_rewrites(expr, tokens, rewrites),
+                LambdaBody::Block(block) => collect_block_rewrites(block, tokens, rewrites),
+            }
+        }
     }
 }
 
@@ -984,6 +1349,70 @@ mod tests {
 
     fn format(text: &str) -> FormatResult {
         format_source(&SourceFile::new("test.lum", text))
+    }
+
+    fn assert_formatted(source: &str, expected: &str) {
+        let result = format(source);
+        assert!(!result.has_errors(), "{:#?}", result.diagnostics);
+        assert_eq!(result.text, expected);
+        let file = SourceFile::new("formatted.lum", result.text.clone());
+        let lexed = lex(&file);
+        assert!(!lexed.has_errors(), "{:#?}", lexed.diagnostics);
+        let parsed = parse_program(&lexed.tokens);
+        assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+        let second = format(&result.text);
+        assert!(!second.has_errors(), "{:#?}", second.diagnostics);
+        assert_eq!(second.text, result.text);
+    }
+
+    #[test]
+    fn canonicalizes_option_type_annotations() {
+        assert_formatted(
+            "type MaybeId = Option[Int]\nshape Envelope {\nvalue Option[Str]\nget optionalValue Option[Str] = value\ndef echo(input Option[Int]) Option[Int] = input\n}\ndef keep[T](value T) T = value\ndef main() {\nvalues [Option[Int]] = [None]\nlocal Option[Int] = keep[Option[Int]](values[0])\nreader fn(Option[Int]) Option[Str] =\n(item Option[Int]) => None\nprintln(typeOf[Option[Int]])\n}\n",
+            "type MaybeId = Int?\nshape Envelope {\n    value Str?\n    get optionalValue Str? = value\n    def echo(input Int?) Int? = input\n}\ndef keep[T](value T) T = value\ndef main() {\n    values [Int?] = [None]\n    local Int? = keep[Int?](values[0])\n    reader fn(Int?) Str? =\n        (item Int?) => None\n    println(typeOf[Int?])\n}\n",
+        );
+    }
+
+    #[test]
+    fn optional_shorthand_preserves_type_grouping_and_nesting() {
+        for (source, expected) in [
+            ("Option[fn(Int) Str]", "(fn(Int) Str)?"),
+            ("Option[fn(Option[Int]) Option[Str]]", "(fn(Int?) Str?)?"),
+            ("Option[(fn() Int)]", "(fn() Int)?"),
+            ("Option[Int | Str]", "(Int | Str)?"),
+            ("Option[(Int | Str)]", "(Int | Str)?"),
+            ("Option[(Option[Int], Option[Str])]", "(Int?, Str?)?"),
+            ("Option[[Option[Int]]]", "[Int?]?"),
+            ("Option[{ value Option[Int] }]", "{ value Int? }?"),
+            ("Option[Option[Int]]", "Option[Int?]"),
+            ("Option[Option[Option[Int]]]", "Option[Option[Int?]]"),
+            ("Option[Int]?", "Option[Int]?"),
+            ("Option[Int?]", "Option[Int?]"),
+            ("Option[Unit]", "Unit?"),
+            ("Option[Int,]", "Int?"),
+            ("models.Option[Int]", "models.Option[Int]"),
+        ] {
+            assert_formatted(
+                &format!("type Value = {source}"),
+                &format!("type Value = {expected}\n"),
+            );
+        }
+    }
+
+    #[test]
+    fn optional_shorthand_preserves_comments_and_literal_text() {
+        assert_formatted(
+            "# Option[Int] stays in this comment\ntype Multiline = Option[\nInt,\n]\ntype Commented = Option[\n# payload comment\nInt,\n]\ndef text() Str = \"Option[Int]\"\n",
+            "# Option[Int] stays in this comment\ntype Multiline = Int?\ntype Commented = Option[\n    # payload comment\n    Int,\n]\ndef text() Str = \"Option[Int]\"\n",
+        );
+    }
+
+    #[test]
+    fn optional_shorthand_does_not_rewrite_value_indexing() {
+        assert_formatted(
+            "def main() {\nOption = [0]\nInt = 0\nhandlers = [() => 5]\nvalue Option[Str] = None\nprintln(handlers[Option[Int]]())\n}\n",
+            "def main() {\n    Option = [0]\n    Int = 0\n    handlers = [() => 5]\n    value Str? = None\n    println(handlers[Option[Int]]())\n}\n",
+        );
     }
 
     #[test]
