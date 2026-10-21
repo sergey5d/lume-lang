@@ -3207,6 +3207,81 @@ def main() Unit {
     }
 
     #[test]
+    fn generated_java_compares_getter_values_in_sort_callbacks() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping getter comparison Java test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-getter-sort");
+        let source = temp.join("getter_sort.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/gettersort
+
+class Candidate {
+    score Float
+    id Int
+    label Str
+
+    get confidence Float = score
+    get priority Int = id
+    get name Str = label
+}
+
+def orderedCandidates(candidates [Candidate]) [Candidate] {
+    ordered [Candidate] = candidates.slice()
+    ordered.sort((left, right) => right.confidence.compareTo(left.confidence))
+    println(ordered[0].label, ordered[1].label, ordered[2].label)
+    ordered.sort((left, right) => left.priority.compareTo(right.priority))
+    println(ordered[0].id, ordered[1].id, ordered[2].id)
+    ordered.sort((left, right) => left.name.compareTo(right.name))
+    ordered
+}
+
+def main() {
+    ordered = orderedCandidates([
+        Candidate(0.5, 2, "low"),
+        Candidate(0.9, 1, "high"),
+        Candidate(0.7, 3, "middle")
+    ])
+    println(ordered[0].label, ordered[1].label, ordered[2].label)
+}
+"#,
+        )
+        .expect("write source");
+
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.gettersort.GettersortMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("java stdout utf8"),
+            "high middle low\n1 2 3\nhigh low middle\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_compiles_negative_numeric_comparison() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping negative comparison Java test because a JDK tool is unavailable");
@@ -3252,6 +3327,102 @@ def main() Unit {
         assert_eq!(
             String::from_utf8(output.stdout).expect("java stdout utf8"),
             "true\n"
+        );
+
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn generated_java_matches_interpreter_float_rendering() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping float rendering Java test because a JDK tool is unavailable");
+            return;
+        }
+
+        let temp = temp_path("lume-java-float-rendering");
+        let source = temp.join("float_rendering.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/floatrendering
+
+def main() {
+    values [Float] = [
+        0.0, -0.0, 1.0, -1.25,
+        0.001, 0.0001, -0.0001,
+        9999999.0, 1e7, 1.25e20, 1e-9,
+        Float.MIN, Float.MAX,
+        2.2250738585072014e-308, 5e-324, 1e-323, 771558860699787.25,
+        1.0 / 0.0, -1.0 / 0.0, 0.0 / 0.0
+    ]
+    for value <- values {
+        println(value, value.toStr(), "${value}", "" + value)
+    }
+}
+"#,
+        )
+        .expect("write source");
+
+        let expected = [
+            "0.0",
+            "-0.0",
+            "1.0",
+            "-1.25",
+            "0.001",
+            "1.0E-4",
+            "-1.0E-4",
+            "9999999.0",
+            "1.0E7",
+            "1.25E20",
+            "1.0E-9",
+            "-1.7976931348623157E308",
+            "1.7976931348623157E308",
+            "2.2250738585072014E-308",
+            "4.9E-324",
+            "9.9E-324",
+            "7.715588606997872E14",
+            "Infinity",
+            "-Infinity",
+            "NaN",
+        ]
+        .map(|value| format!("{value} {value} {value} {value}\n"))
+        .concat();
+        let interpreted = run_path(&source, None).expect("run interpreter");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:#?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreter_stdout(interpreted), expected);
+
+        let generated =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate Java");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:?}",
+            generated.diagnostics
+        );
+
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated Java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.floatrendering.FloatrenderingMain"),
+            "java",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).expect("Java stdout utf8"),
+            expected
         );
 
         let _ = fs::remove_dir_all(temp);

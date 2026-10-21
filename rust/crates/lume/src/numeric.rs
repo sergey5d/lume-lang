@@ -25,9 +25,40 @@ pub(crate) fn parse_float_literal(raw: &str) -> Option<f64> {
     without_digit_separators(raw).parse::<f64>().ok()
 }
 
+pub(crate) fn render_float(value: f64) -> String {
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    if value.is_infinite() {
+        return if value.is_sign_negative() {
+            "-Infinity".to_string()
+        } else {
+            "Infinity".to_string()
+        };
+    }
+
+    let magnitude = value.abs();
+    if magnitude != 0.0 && !(0.001..10_000_000.0).contains(&magnitude) {
+        let rendered = format!("{value:E}");
+        let (mantissa, _) = rendered.split_once('E').expect("scientific float");
+        // Use the shortest digit count, with at least two significant digits.
+        // Explicit precision gives the JVM's even rounding at decimal ties.
+        let precision = mantissa
+            .split_once('.')
+            .map_or(1, |(_, fraction)| fraction.len());
+        return format!("{value:.precision$E}");
+    }
+
+    let mut rendered = value.to_string();
+    if !rendered.contains('.') {
+        rendered.push_str(".0");
+    }
+    rendered
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_float_literal, parse_integer_literal};
+    use super::{parse_float_literal, parse_integer_literal, render_float};
 
     #[test]
     fn parses_complete_signed_integer_literal_boundary() {
@@ -49,5 +80,40 @@ mod tests {
         assert_eq!(parse_float_literal("12.345_678"), Some(12.345_678));
         assert_eq!(parse_float_literal("1e-9"), Some(1e-9));
         assert_eq!(parse_float_literal("2.5e6"), Some(2.5e6));
+    }
+
+    #[test]
+    fn renders_floats_at_notation_and_binary64_boundaries() {
+        for (value, expected) in [
+            (0.0, "0.0"),
+            (-0.0, "-0.0"),
+            (1.0, "1.0"),
+            (-1.25, "-1.25"),
+            (0.001, "0.001"),
+            (0.0001, "1.0E-4"),
+            (-0.0001, "-1.0E-4"),
+            (9_999_999.0, "9999999.0"),
+            (10_000_000.0, "1.0E7"),
+            (1.25e20, "1.25E20"),
+            (1e-9, "1.0E-9"),
+            (f64::MIN, "-1.7976931348623157E308"),
+            (f64::MAX, "1.7976931348623157E308"),
+            (f64::MIN_POSITIVE, "2.2250738585072014E-308"),
+            (f64::from_bits(1), "4.9E-324"),
+            (f64::from_bits(2), "9.9E-324"),
+            (
+                f64::from_bits(0x4305_edd4_5e85_c45a),
+                "7.715588606997872E14",
+            ),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+            (f64::NAN, "NaN"),
+        ] {
+            let rendered = render_float(value);
+            assert_eq!(rendered, expected);
+            if !value.is_nan() {
+                assert_eq!(rendered.parse::<f64>().unwrap().to_bits(), value.to_bits());
+            }
+        }
     }
 }

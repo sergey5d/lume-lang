@@ -9692,15 +9692,20 @@ impl<'a> SourceBodyEmitter<'a> {
         if method != name {
             return None;
         }
-        let receiver_ty = JavaIrSupport::new(self.bundle, self.function, self.names)
-            .operand_type(lowered_receiver);
-        let java_method = self.java_instance_method_name(receiver, name, bindings);
-
         let resolved_function = self
             .bundle
             .ir
             .function(call.function)
             .unwrap_or(self.function);
+        let receiver_ty = self
+            .expr_type(receiver, bindings)
+            .filter(|ty| !matches!(ty, ir::Type::Unknown))
+            .or_else(|| {
+                // Callback receiver operands belong to the lowered callback's locals.
+                JavaIrSupport::new(self.bundle, resolved_function, self.names)
+                    .operand_type(lowered_receiver)
+            });
+        let java_method = self.java_instance_method_name(receiver, name, bindings);
         let ordered_args = self.ordered_source_args(args, call).or_else(|| {
             if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
                 eprintln!(

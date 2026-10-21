@@ -11,6 +11,7 @@ public interface Int with Comparable[Int] {
 }
 
 public object Int {
+    # Fixed value constants use UPPER_CASE; runtime properties use camelCase.
     get MIN Int = panic("Int.MIN is provided by the active runtime")
     get MAX Int = panic("Int.MAX is provided by the active runtime")
 

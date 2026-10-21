@@ -13,6 +13,7 @@ use crate::{
     diagnostic::Diagnostic,
     ir,
     lower::lower_program,
+    numeric::render_float,
     resolver::{LoadedModule, LocatedDiagnostic, ModuleGraph, load_module_graph},
     runtime,
     source::{LineColumn, Span},
@@ -1008,13 +1009,7 @@ impl Value {
             Value::Unit => "()".to_string(),
             Value::Bool(value) => value.to_string(),
             Value::Int(value) => value.to_string(),
-            Value::Float(value) => {
-                let mut rendered = value.to_string();
-                if !rendered.contains('.') && !rendered.contains('e') && !rendered.contains('E') {
-                    rendered.push_str(".0");
-                }
-                rendered
-            }
+            Value::Float(value) => render_float(*value),
             Value::String(value) => value.clone(),
             Value::Rune(value) => value.to_string(),
             Value::Tuple(items) => format!(

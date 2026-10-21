@@ -20,6 +20,19 @@ They are not ordinary identifiers. A grammar rule may explicitly reuse a
 keyword spelling in a limited name position; otherwise using one as a name is
 an error. In particular, `do` introduces an explicit imperative `for` body.
 
+## Naming Conventions
+
+Fixed named value constants use `UPPER_CASE`, with underscores between words,
+whether exposed by a module or a named object. Examples include `Int.MIN`,
+`Float.MAX`, and an application-defined `DEFAULT_TIMEOUT`. This is a naming
+convention, not an additional declaration form; constants may use ordinary
+immutable bindings or getters.
+
+Ordinary fields, getters, functions, and parameters use `camelCase`. Runtime
+properties such as `OS.args` and `OS.env` are not fixed value constants. Types,
+named objects, and declared-union alternatives use `PascalCase`, including
+singleton alternatives such as `None`.
+
 ## Built-In Data Types
 
 Primitive types:
@@ -853,19 +866,19 @@ annotation Metadata {
     nested { name Str, value Int }
 }
 
-routePath Str = "/status"
+ROUTE_PATH Str = "/status"
 
 object Routes {
-    health Str = "/health"
+    HEALTH Str = "/health"
 }
 
-@Route { path: routePath }
+@Route { path: ROUTE_PATH }
 def status() Str = "ok"
 
 @Route { path: "/health" }
 def health() Str = "ok"
 
-@Route { path: Routes.health }
+@Route { path: Routes.HEALTH }
 def healthFromObject() Str = "ok"
 
 @Route { path: "/health", method: "POST" }
@@ -879,19 +892,19 @@ def health2() Str = "ok"
     joinedPath: "/api" + "/health",
     total: 1 + 2,
     tags: ["a", "b"],
-    nested: { name: Routes.health, value: 1 }
+    nested: { name: Routes.HEALTH, value: 1 }
 }
 def richMetadata() Str = "ok"
 ```
 
-`object Routes { ... }` declares one shared value named `Routes`, so `Routes.health`
+`object Routes { ... }` declares one shared value named `Routes`, so `Routes.HEALTH`
 is ordinary field access on that stable object value.
 
 Annotation arguments are compile-time metadata values. They may only be literals, stable constants, aggregate literals made from allowed values, or constant expressions composed from allowed values:
 
 - immutable top-level constants, including constants brought in with `use`
-- immutable fields on named `object` values, such as `Routes.health`
-- immutable constants through a module alias, such as `routes.healthPath`
+- immutable fields on named `object` values, such as `Routes.HEALTH`
+- immutable constants through a module alias, such as `routes.HEALTH_PATH`
 - declared-union object alternatives, such as `RouteVisibility.External`
 - arithmetic, comparison, boolean, and string-concatenation expressions whose operands are also annotation-safe
 
@@ -5428,6 +5441,16 @@ and ordering follow IEEE-754 behavior. Division by zero may produce positive or
 negative infinity, `0.0 / 0.0` produces NaN, and NaN is unordered: every
 ordering comparison with NaN is false. Float equality with NaN is false and
 float inequality with NaN is true.
+
+Default float rendering, including `toStr()`, printing, and string
+interpolation, uses decimal notation for zero and magnitudes from `0.001`
+inclusive to `10_000_000` exclusive. Other finite values use scientific
+notation with uppercase `E`, no redundant exponent sign or leading zeroes,
+and a decimal point in the mantissa. Finite output preserves enough digits to
+parse back to the same binary64 value; negative zero renders as `-0.0`.
+Non-finite values render as `NaN`, `Infinity`, or `-Infinity`, without a `.0`
+suffix. For example, `Float.MAX.toStr()` is `"1.7976931348623157E308"` and
+`(1e-9).toStr()` is `"1.0E-9"`.
 
 Scientific notation uses `e` or `E`, an optional exponent sign, and at least
 one exponent digit. An exponent makes the literal a `Float`, even when the
