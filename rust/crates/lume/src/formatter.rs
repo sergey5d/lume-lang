@@ -603,6 +603,81 @@ fn collect_for_binding_rewrites(
     }
 }
 
+fn collect_extraction_binding_rewrite(
+    stmt: &crate::ast::LetElseStmt,
+    tokens: &[Token],
+    rewrites: &mut SourceRewrites<'_>,
+) {
+    if !stmt.clauses.is_empty() {
+        return;
+    }
+    let Pattern::Extract { inner, .. } = &stmt.pattern else {
+        return;
+    };
+    let Pattern::Binding { name, .. } = inner.as_ref() else {
+        return;
+    };
+    let value_span = stmt.value.span();
+    let start = tokens.partition_point(|token| token.span.start < stmt.span.start);
+    let value_start = tokens.partition_point(|token| token.span.start < value_span.start);
+    let head = tokens[start..value_start]
+        .iter()
+        .filter(|token| token.kind != TokenKind::Newline)
+        .collect::<Vec<_>>();
+    let [keyword, binding, arrow] = head.as_slice() else {
+        return;
+    };
+    if keyword.kind != TokenKind::Keyword(Keyword::Let)
+        || binding.lexeme != *name
+        || arrow.kind != TokenKind::LeftArrow
+    {
+        return;
+    }
+    let value_end = tokens.partition_point(|token| token.span.start < value_span.end);
+    let fallback_start =
+        tokens.partition_point(|token| token.span.start < stmt.else_block.span.start);
+    let Some(fallback) = tokens.get(fallback_start) else {
+        return;
+    };
+    if fallback.kind != TokenKind::LBrace
+        && !matches!(
+            stmt.else_block.statements.as_slice(),
+            [Stmt::Return(_) | Stmt::Break(_) | Stmt::Continue(_) | Stmt::Expr(_)]
+        )
+    {
+        return;
+    }
+    let Some(otherwise) = tokens[value_end..fallback_start]
+        .iter()
+        .find(|token| token.kind == TokenKind::Keyword(Keyword::Else))
+    else {
+        return;
+    };
+    let needs_group = matches!(
+        stmt.value,
+        Expr::ExtractOr { .. }
+            | Expr::If { .. }
+            | Expr::ForYield { .. }
+            | Expr::Lambda { .. }
+            | Expr::Binary { .. }
+            | Expr::Unary { .. }
+            | Expr::Try { .. }
+            | Expr::Return { .. }
+    );
+    rewrites.push(keyword.span);
+    rewrites.replace(arrow.span.start, arrow.span.end, "=");
+    rewrites.push(otherwise.span);
+    if needs_group {
+        rewrites.replace(value_span.start, value_span.start, "(");
+    }
+    // Attach ?? before any trailing comments/newlines, which may precede else.
+    rewrites.replace(
+        value_span.end,
+        value_span.end,
+        if needs_group { ") ??" } else { " ??" },
+    );
+}
+
 fn collect_stmt_rewrites(stmt: &Stmt, tokens: &[Token], rewrites: &mut SourceRewrites<'_>) {
     match stmt {
         Stmt::Binding(stmt) => {
@@ -689,6 +764,7 @@ fn collect_stmt_rewrites(stmt: &Stmt, tokens: &[Token], rewrites: &mut SourceRew
             collect_block_rewrites(&stmt.body, tokens, rewrites);
         }
         Stmt::LetElse(stmt) => {
+            collect_extraction_binding_rewrite(stmt, tokens, rewrites);
             collect_pattern_rewrites(&stmt.pattern, tokens, rewrites);
             for clause in &stmt.clauses {
                 collect_clause_rewrites(clause, tokens, rewrites);
@@ -1009,7 +1085,9 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
             &mut brace_continuations,
             &mut delimiters,
         );
-        continuation_pending = line_requests_continuation(line_tokens);
+        if !line_tokens.is_empty() {
+            continuation_pending = line_requests_continuation(line_tokens);
+        }
     }
 
     if !output.is_empty() && !output.ends_with(['\n', '\r']) {
@@ -1375,6 +1453,108 @@ mod tests {
     }
 
     #[test]
+    fn canonicalizes_simple_extraction_bindings_to_extract_or() {
+        assert_formatted(
+            "def parse(minutesText Str) Int? {\nlet minutes <- Int.parse(minutesText) else return None\nSome(minutes)\n}\ndef fallback(value Int?) Int {\nlet item <- value else 42\nitem\n}\ndef main() {\nfor value <- [Some(1), None] {\nlet item <- value else continue\nlet next <- value else break\nprintln(item, next)\n}\n}\n",
+            "def parse(minutesText Str) Int? {\n    minutes = Int.parse(minutesText) ?? return None\n    Some(minutes)\n}\ndef fallback(value Int?) Int {\n    item = value ?? 42\n    item\n}\ndef main() {\n    for value <- [Some(1), None] {\n        item = value ?? continue\n        next = value ?? break\n        println(item, next)\n    }\n}\n",
+        );
+    }
+
+    #[test]
+    fn extraction_rewrites_preserve_comments_and_fallback_blocks() {
+        assert_formatted(
+            "def parse(text Str) Int? {\nlet minutes <-\nInt.parse(text) # source comment\n# fallback comment\nelse return None # exit comment\nlet next <- Int.parse(text) else {\nprintln(\"missing\")\nreturn None\n}\nSome(minutes + next)\n}\n",
+            "def parse(text Str) Int? {\n    minutes =\n        Int.parse(text) ?? # source comment\n        # fallback comment\n        return None # exit comment\n    next = Int.parse(text) ?? {\n        println(\"missing\")\n        return None\n    }\n    Some(minutes + next)\n}\n",
+        );
+    }
+
+    #[test]
+    fn extraction_rewrites_keep_the_complete_source_expression() {
+        assert_formatted(
+            "def nested(left Option[Int?], right Int?, ready Bool) Int {\nlet first <- left ?? right else return -1\nlet second <- if ready { right } else right else 2\nlet third <- for value <- right yield value + 1 else 3\nfirst + second + third\n}\n",
+            "def nested(left Option[Int?], right Int?, ready Bool) Int {\n    first = (left ?? right) ?? return -1\n    second = (if ready { right } else right) ?? 2\n    third = (for value <- right yield value + 1) ?? 3\n    first + second + third\n}\n",
+        );
+    }
+
+    #[test]
+    fn keeps_destructuring_typed_and_grouped_extractions_as_patterns() {
+        assert_formatted(
+            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\nlet item Int <- value else return\nlet Some(item) = left else return\nlet (a, b) <- pair else return\nlet _ <- left else return\nlet {\nx <- left\ny <- right\n} else return\n}\n",
+            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\n    let item Int <- value else return\n    let Some(item) = left else return\n    let (a, b) <- pair else return\n    let _ <- left else return\n    let {\n        x <- left\n        y <- right\n    } else return\n}\n",
+        );
+    }
+
+    #[test]
+    fn extraction_rewrites_preserve_runtime_behavior() {
+        let source = r#"
+def early(value Int?) Int {
+    let item <- value else return -1
+    item
+}
+def resultValue(value Result[Int, Str]) Int {
+    let item <- value else 42
+    item
+}
+def eitherValue(value Either[Str, Int]) Int {
+    let item <- value else 0
+    item
+}
+def nested(left Option[Int?], right Int?) Int {
+    let item <- left ?? right else return -1
+    item
+}
+def conditional(ready Bool, left Int?, right Int?) Int {
+    let item <- if ready { left } else right else 7
+    item
+}
+def yielded(value Int?) Int {
+    let item <- for number <- value yield number + 1 else 0
+    item
+}
+def loops(values [Int?]) Int {
+    var total = 0
+    for value <- values {
+        let item <- value else continue
+        total += item
+    }
+    for value <- values {
+        let item <- value else break
+        total += item
+    }
+    total
+}
+def main() {
+    println(
+        early(None), early(Some(5)), resultValue(Err("missing")),
+        eitherValue(Right(3)), nested(Some(None), Some(9)),
+        conditional(true, None, Some(9)), yielded(Some(2)),
+        loops([Some(1), None, Some(3)])
+    )
+}
+"#;
+        fn run(source: &str) -> String {
+            let file = SourceFile::new("test.lum", source);
+            let lexed = lex(&file);
+            assert!(!lexed.has_errors(), "{:#?}", lexed.diagnostics);
+            let parsed = parse_program(&lexed.tokens);
+            assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+            let program = parsed.program.unwrap();
+            let checked = crate::check_program(&program);
+            assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+            let lowered = crate::lower_program(&program);
+            assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+            let result = crate::run_program(&lowered.program.unwrap());
+            assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+            result.output
+        }
+        let formatted = format(source);
+        assert!(!formatted.has_errors(), "{:#?}", formatted.diagnostics);
+        let expected = "-1 5 42 3 -1 7 3 5\n";
+        assert_eq!(run(source), expected);
+        assert_eq!(run(&formatted.text), expected);
+    }
+
+    #[test]
     fn optional_shorthand_preserves_type_grouping_and_nesting() {
         for (source, expected) in [
             ("Option[fn(Int) Str]", "(fn(Int) Str)?"),
@@ -1506,7 +1686,7 @@ mod tests {
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "class Aggregator {\n    private def get_rollup(key Str, range IntRange?) Rollup? {\n        def notInRange(record Record) {\n            let r <- range else return false\n            record.timestamp < r.start || record.timestamp >= r.end\n        }\n        maybeRollup = rollupMap[key].map { records =>\n            records.fold(Rollup(0, 0), (acc, record) => {\n                if record.void || notInRange(record) {\n                    return acc\n                }\n                Rollup {\n                    total: record.amount + acc.total\n                    count: acc.count + 1\n                }\n            })\n        }\n        if let rollup <- maybeRollup && rollup.count == 0 {\n            return None\n        }\n        return maybeRollup\n    }\n}\n"
+            "class Aggregator {\n    private def get_rollup(key Str, range IntRange?) Rollup? {\n        def notInRange(record Record) {\n            r = range ?? return false\n            record.timestamp < r.start || record.timestamp >= r.end\n        }\n        maybeRollup = rollupMap[key].map { records =>\n            records.fold(Rollup(0, 0), (acc, record) => {\n                if record.void || notInRange(record) {\n                    return acc\n                }\n                Rollup {\n                    total: record.amount + acc.total\n                    count: acc.count + 1\n                }\n            })\n        }\n        if let rollup <- maybeRollup && rollup.count == 0 {\n            return None\n        }\n        return maybeRollup\n    }\n}\n"
         );
     }
 

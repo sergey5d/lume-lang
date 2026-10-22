@@ -4081,6 +4081,17 @@ This is equivalent to:
 The shorthand requires the source type to be statically known as one of these
 forms. If the source type is unknown, use an explicit pattern instead.
 
+For a single untyped name, the formatter prefers an ordinary binding with `??`:
+
+```txt
+let minutes <- Int.parse(minutesText) else return None
+# formats as:
+minutes = Int.parse(minutesText) ?? return None
+```
+
+Both spellings remain valid. Typed patterns, destructuring, and grouped `let`
+bindings retain their pattern syntax.
+
 Type-pattern binding is also supported:
 
 ```txt
