@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*invalid_primitive_conversion.*
+
+def main() { println(Decimal(0.1)) }

@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*primitive.*
+
+class Fake with Decimal {}

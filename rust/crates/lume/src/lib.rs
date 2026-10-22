@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod backend;
 pub mod core;
+mod decimal;
 pub mod desugar;
 pub mod diagnostic;
 pub mod diagnostic_render;

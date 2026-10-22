@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*decimal arithmetic exceeds implementation resource limits.*
+
+def main() {
+    println(1d + 1e-1000001d)
+}

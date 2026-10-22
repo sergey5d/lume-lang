@@ -39,6 +39,7 @@ Primitive types:
 
 - `Int`
 - `Float`
+- `Decimal`
 - `Bool`
 - `Str`
 - `Rune`
@@ -1569,7 +1570,7 @@ point Point = new { x: 1, y: 2 }
 
 `default { ... }` explicitly fills omitted immediate construction fields. A
 declared field initializer is preserved. Otherwise, `Bool`, `Int`, `Float`,
-`Str`, and `Rune` receive their primitive defaults, `Option[T]` receives
+`Decimal`, `Str`, and `Rune` receive their primitive defaults (`Decimal` uses `0d`), `Option[T]` receives
 `None`, and another concrete field type is constructed only when its ordinary
 accessible constructor accepts zero supplied arguments:
 
@@ -5476,8 +5477,8 @@ suffix. For example, `Float.MAX.toStr()` is `"1.7976931348623157E308"` and
 `(1e-9).toStr()` is `"1.0E-9"`.
 
 Scientific notation uses `e` or `E`, an optional exponent sign, and at least
-one exponent digit. An exponent makes the literal a `Float`, even when the
-mantissa has no decimal point:
+one exponent digit. Without the decimal suffix `d`, an exponent makes the literal
+a `Float`, even when the mantissa has no decimal point:
 
 ```txt
 1e3
@@ -5491,6 +5492,87 @@ the result of mixed arithmetic is `Float`. That conversion can lose integer
 precision. Equality remains stricter: `==` and `!=` require the same static
 equality domain, so an `Int` and a `Float` are not directly comparable for
 equality.
+
+### Decimal Arithmetic
+
+`Decimal` is an immutable arbitrary-precision decimal value, separate from
+binary64 `Float`. A `d` suffix constructs a decimal directly from the source
+digits, without an intermediate float. Separators and exponents are supported:
+
+```txt
+price = 19.99d
+quantity = 3d
+total = price * quantity             # exactly 59.97
+small = 1e-9d
+large = 1_000_000.00d
+```
+
+Addition, subtraction, multiplication, unary negation, and remainder are exact.
+`/` is exact too: `1d / 8d` is `0.125d`, but `1d / 3d` panics because its
+expansion does not terminate. Division and remainder by zero panic.
+Rounded division and rescaling require an explicit scale and rounding mode:
+
+```txt
+third = 1d.divide(3d, scale = 2, rounding = Rounding.HalfEven)
+rounded = 2.345d.round(2, HalfUp)     # 2.35
+```
+
+Scale counts digits after the decimal point; a negative scale rounds to tens,
+hundreds, and so on. `Rounding` has these singleton alternatives:
+
+- `Up`: away from zero.
+- `Down`: toward zero.
+- `Ceiling`: toward positive infinity.
+- `Floor`: toward negative infinity.
+- `HalfUp`: nearest, with ties away from zero.
+- `HalfDown`: nearest, with ties toward zero.
+- `HalfEven`: nearest, with ties to an even final digit.
+- `Unnecessary`: panic if any nonzero digits must be discarded.
+
+There is no ambient precision or rounding context. Scale is stored metadata:
+`1.00d.scale` is `2`, and `1.00d.toStr()` is `"1.00"`. Arithmetic preserves
+scale: addition and remainder use the larger operand scale, multiplication adds
+scales, and exact division uses the scale difference, increasing it only as
+needed for an exact result. Printing uses plain notation when scale is
+nonnegative and the adjusted exponent is at least `-6`; otherwise it uses
+scientific notation with uppercase `E` and an explicit exponent sign.
+
+`Decimal` satisfies `Eq[Decimal]`, `Hashed[Decimal]`, and `Comparable[Decimal]`.
+Equality and ordering are numeric, not scale-sensitive: `1.0d == 1.00d`, and
+their hashes agree. This also applies inside shapes, tuples, sets, and map keys.
+`abs()` returns a decimal; `compareTo(other)` returns a negative, zero, or
+positive `Int`.
+
+Construction and conversions are explicit:
+
+```txt
+parsed Decimal? = Decimal.parse("12345678901234567890.12345")
+whole Decimal = 42.toDecimal()
+converted Decimal? = 0.1.toDecimal()
+integer Int? = 12.00d.toInt()        # Some(12); fractions/overflow yield None
+approximation Float = 1.25d.toFloat()
+```
+
+`Decimal.parse` accepts signed decimal text with an optional exponent; invalid
+text, separators, whitespace, NaN, infinities, or an out-of-range scale yield
+`None`. `Float.toDecimal()` returns `None` for non-finite values. For finite
+values it uses the ordinary round-trip `Float` rendering and removes redundant
+trailing zeroes; it does not recover decimal digits already lost in a float.
+`Decimal.toFloat()` may lose precision, underflow to zero, or overflow to infinity.
+Mixed arithmetic, ordering, equality, and assignments involving `Decimal` and
+`Int` or `Float` require explicit conversion. `Decimal(0.1)` is not a conversion.
+The mechanical default for a `Decimal` field in `default {}` is `0d`; a declared
+field initializer still takes precedence.
+
+`Json.decode[Decimal](text)` and `Json.stringify(value)` preserve decimal digits
+without an intermediate binary float, including decimal fields in models.
+
+The coefficient has arbitrary precision, subject to memory limits. Scale is a
+signed 32-bit integer; scale overflow panics. Both runtimes bound temporary
+power-of-ten alignment and exact-division expansion to 1,000,000 digits and
+report a resource-limit panic instead of silently rounding. This does not cap
+the stored coefficient precision or exponent: `1e1000001d` can be represented
+and printed without constructing a million zeroes.
 
 ## Operators
 

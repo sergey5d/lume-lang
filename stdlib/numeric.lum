@@ -16,6 +16,7 @@ public interface Int with Comparable[Int] {
     def checkedPow(exponent Int) Int?
     def sqrt() Float
     def toFloat() Float
+    def toDecimal() Decimal
 }
 
 public object Int {
@@ -38,6 +39,7 @@ public interface Float with Comparable[Float] {
     def sqrt() Float
     def log() Float
     def toInt() Int
+    def toDecimal() Decimal?
 }
 
 public object Float {

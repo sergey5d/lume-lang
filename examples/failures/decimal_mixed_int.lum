@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*invalid_binary_operand.*
+
+def main() {
+    println(1d * 2)
+}

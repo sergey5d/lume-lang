@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*decimal division by zero.*
+
+def main() {
+    println(1d / 0d)
+}

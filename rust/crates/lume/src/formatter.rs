@@ -713,6 +713,7 @@ fn collect_expr_rewrites(expr: &Expr, tokens: &[Token], rewrites: &mut SourceRew
         | Expr::Placeholder { .. }
         | Expr::Integer { .. }
         | Expr::Float { .. }
+        | Expr::Decimal { .. }
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. }

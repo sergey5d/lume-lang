@@ -1,0 +1,30 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+public interface Decimal with Hashed[Decimal], Comparable[Decimal] {
+    get scale Int
+    def compareTo(other Decimal) Int
+    def equals(other Decimal) Bool
+    def hash() Int
+    def abs() Decimal
+    def divide(other Decimal, scale Int, rounding Rounding) Decimal
+    def round(scale Int, rounding Rounding) Decimal
+    def toInt() Int?
+    def toFloat() Float
+}
+
+public object Decimal {
+    def parse(value Str) Decimal? =
+        panic("Decimal.parse is provided by the active runtime")
+}
+
+public type Rounding =
+    object Up {}
+    | object Down {}
+    | object Ceiling {}
+    | object Floor {}
+    | object HalfUp {}
+    | object HalfDown {}
+    | object HalfEven {}
+    | object Unnecessary {}

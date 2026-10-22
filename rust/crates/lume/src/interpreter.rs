@@ -10,6 +10,7 @@ use std::{
 
 use crate::{
     ast,
+    decimal::Decimal,
     diagnostic::Diagnostic,
     ir,
     lower::lower_program,
@@ -607,6 +608,7 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
         ast::Expr::Placeholder { .. }
         | ast::Expr::Integer { .. }
         | ast::Expr::Float { .. }
+        | ast::Expr::Decimal { .. }
         | ast::Expr::String { .. }
         | ast::Expr::Bool { .. }
         | ast::Expr::Unit { .. } => {}
@@ -900,6 +902,7 @@ pub(crate) enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
+    Decimal(Decimal),
     String(String),
     Rune(char),
     Tuple(Vec<Value>),
@@ -1010,6 +1013,7 @@ impl Value {
             Value::Bool(value) => value.to_string(),
             Value::Int(value) => value.to_string(),
             Value::Float(value) => render_float(*value),
+            Value::Decimal(value) => value.to_string(),
             Value::String(value) => value.clone(),
             Value::Rune(value) => value.to_string(),
             Value::Tuple(items) => format!(
@@ -1939,6 +1943,9 @@ impl<'a> Interpreter<'a> {
             ir::Constant::Bool(value) => Value::Bool(*value),
             ir::Constant::Int(value) => Value::Int(*value),
             ir::Constant::Float(value) => Value::Float(*value),
+            ir::Constant::Decimal(value) => {
+                Value::Decimal(Decimal::parse(value).expect("validated decimal constant"))
+            }
             ir::Constant::String(value) => Value::String(decode_string_literal(value)),
             ir::Constant::List(items) => {
                 Value::list(items.iter().map(|item| self.constant_value(item)).collect())
@@ -1952,6 +1959,9 @@ impl<'a> Interpreter<'a> {
             ir::Type::Bool => Value::Bool(false),
             ir::Type::Int => Value::Int(0),
             ir::Type::Float => Value::Float(0.0),
+            ir::Type::Named { name, .. } if name == "Decimal" => {
+                Value::Decimal(Decimal::from_int(0))
+            }
             ir::Type::Str => Value::String(String::new()),
             ir::Type::Tuple(items) => Value::Tuple(
                 items
@@ -2110,6 +2120,7 @@ impl<'a> Interpreter<'a> {
         match value {
             Value::Int(_) => RuntimeTypeValue::Primitive("Int".to_string()),
             Value::Float(_) => RuntimeTypeValue::Primitive("Float".to_string()),
+            Value::Decimal(_) => RuntimeTypeValue::Primitive("Decimal".to_string()),
             Value::Bool(_) => RuntimeTypeValue::Primitive("Bool".to_string()),
             Value::Unit => RuntimeTypeValue::Primitive("Unit".to_string()),
             Value::Rune(_) => RuntimeTypeValue::Primitive("Rune".to_string()),
@@ -2165,6 +2176,9 @@ impl<'a> Interpreter<'a> {
             Value::Float(_) => self
                 .runtime
                 .type_id_by_name_kind("Float", crate::ast::TypeKind::Class),
+            Value::Decimal(_) => self
+                .runtime
+                .type_id_by_name_kind("Decimal", crate::ast::TypeKind::Class),
             Value::Rune(_) => self
                 .runtime
                 .type_id_by_name_kind("Rune", crate::ast::TypeKind::Class),
@@ -3164,6 +3178,15 @@ impl<'a> Interpreter<'a> {
             return Ok(Value::set(self.unique_values(values, span)?));
         }
 
+        if path[0] == "Decimal" && path.len() == 2 && path[1] == "parse" {
+            expect_runtime_arity(self, "Decimal.parse", &args, 1, span)?;
+            let Value::String(text) = &args[0] else {
+                return Err(self.runtime_error(span, "Decimal.parse expects Str"));
+            };
+            return Ok(Decimal::parse(text)
+                .map(|value| self.option_some(Value::Decimal(value)))
+                .unwrap_or_else(|| self.option_none()));
+        }
         if path[0] == "Int" && path.len() == 2 && path[1] == "parse" {
             if args.len() != 1 {
                 return Err(self.runtime_error(
@@ -3285,6 +3308,14 @@ impl<'a> Interpreter<'a> {
         if name == "None" {
             return Ok(Some(self.option_none()));
         }
+        if crate::decimal::is_rounding_name(name) {
+            return Ok(Some(self.builtin_enum_variant(
+                "Rounding",
+                name,
+                &[],
+                vec![],
+            )));
+        }
         match self.construct_enum_case(None, name, Vec::new(), span, false) {
             Ok(value) => Ok(Some(value)),
             Err(error) if error.code == "runtime_error" => Ok(None),
@@ -3344,6 +3375,14 @@ impl<'a> Interpreter<'a> {
         }
         let type_name = &path[0];
         let member = &path[1];
+        if type_name == "Rounding" && crate::decimal::is_rounding_name(member) && args.is_empty() {
+            return Ok(Some(self.builtin_enum_variant(
+                "Rounding",
+                member,
+                &[],
+                vec![],
+            )));
+        }
 
         if type_name == "OS" && matches!(member.as_str(), "stdout" | "stderr") && args.is_empty() {
             return self.lookup_singleton("OS", span);
@@ -4693,6 +4732,7 @@ impl<'a> Interpreter<'a> {
             }
             Value::Int(value) => self.json_number(value.to_string()),
             Value::Float(value) => self.json_number(render_json_float(*value)),
+            Value::Decimal(value) => self.json_number(value.to_string()),
             Value::String(value) => {
                 self.json_variant("JsonString", &["value"], vec![Value::String(value.clone())])
             }
@@ -5041,6 +5081,16 @@ impl<'a> Interpreter<'a> {
             "Float" | "Float64" => json_f64(value)
                 .map(Value::Float)
                 .ok_or_else(|| format!("expected JSON number for {name}")),
+            "Decimal" => {
+                let text = match value {
+                    serde_json::Value::Number(value) => value.to_string(),
+                    serde_json::Value::String(value) => value.clone(),
+                    _ => return Err("expected JSON number for Decimal".to_string()),
+                };
+                Decimal::parse(&text)
+                    .map(Value::Decimal)
+                    .ok_or_else(|| "expected JSON number for Decimal".to_string())
+            }
             "Bool" => json_bool(value)
                 .map(Value::Bool)
                 .ok_or_else(|| "expected JSON boolean for Bool".to_string()),
@@ -5075,7 +5125,7 @@ impl<'a> Interpreter<'a> {
             .cloned()
             .ok_or_else(|| "JSON target type metadata is unavailable".to_string())?;
         match runtime_type.name.as_str() {
-            "Str" | "Int" | "Int64" | "Float" | "Float64" | "Bool" | "Rune" => {
+            "Str" | "Int" | "Int64" | "Float" | "Float64" | "Decimal" | "Bool" | "Rune" => {
                 return self.decode_json_primitive(value, &runtime_type.name, span);
             }
             "Option" => {
@@ -5274,7 +5324,14 @@ impl<'a> Interpreter<'a> {
             ir::Type::Named { name, .. }
                 if matches!(
                     name.as_str(),
-                    "Rune" | "Option" | "Vector" | "Array" | "LinkedList" | "Set" | "Map"
+                    "Rune"
+                        | "Decimal"
+                        | "Option"
+                        | "Vector"
+                        | "Array"
+                        | "LinkedList"
+                        | "Set"
+                        | "Map"
                 ) =>
             {
                 Some(self.default_value_for_type(ty))
@@ -5674,6 +5731,7 @@ impl<'a> Interpreter<'a> {
                 let comparison = match (&receiver, &args[0]) {
                     (Value::Int(left), Value::Int(right)) => left.cmp(right),
                     (Value::Float(left), Value::Float(right)) => left.total_cmp(right),
+                    (Value::Decimal(left), Value::Decimal(right)) => left.cmp(right),
                     (Value::String(left), Value::String(right)) => left.cmp(right),
                     _ => return Ok(None),
                 };
@@ -5724,6 +5782,7 @@ impl<'a> Interpreter<'a> {
                             self.runtime_error(span, format!("integer overflow: ({value}).abs()"))
                         }),
                     Value::Float(value) => Ok(Some(Value::Float(value.abs()))),
+                    Value::Decimal(value) => Ok(Some(Value::Decimal(value.abs()))),
                     _ => Ok(None),
                 }
             }
@@ -5789,6 +5848,19 @@ impl<'a> Interpreter<'a> {
                 ))
             }
             "floor" | "ceil" | "round" => {
+                if let Value::Decimal(value) = &receiver {
+                    if method != "round" {
+                        return Ok(None);
+                    }
+                    expect_runtime_arity(self, method, args, 2, span)?;
+                    let scale = args[0].as_int(self, span, "decimal scale")?;
+                    let rounding = decimal_rounding_name(&args[1])
+                        .ok_or_else(|| self.runtime_error(span, "expected a Rounding value"))?;
+                    return value
+                        .divide(&Decimal::from_int(1), scale, &rounding)
+                        .map(|value| Some(Value::Decimal(value)))
+                        .map_err(|message| self.runtime_error(span, message));
+                }
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -5815,6 +5887,12 @@ impl<'a> Interpreter<'a> {
                 }
                 match receiver {
                     Value::Float(value) => Ok(Some(Value::Int(value as i64))),
+                    Value::Decimal(value) => Ok(Some(
+                        value
+                            .to_int()
+                            .map(|value| self.option_some(Value::Int(value)))
+                            .unwrap_or_else(|| self.option_none()),
+                    )),
                     _ => Ok(None),
                 }
             }
@@ -5827,8 +5905,41 @@ impl<'a> Interpreter<'a> {
                 }
                 match receiver {
                     Value::Int(value) => Ok(Some(Value::Float(value as f64))),
+                    Value::Decimal(value) => Ok(Some(Value::Float(value.to_float()))),
                     _ => Ok(None),
                 }
+            }
+            "scale" => match receiver {
+                Value::Decimal(value) => Ok(Some(Value::Int(value.scale as i64))),
+                _ => Ok(None),
+            },
+            "toDecimal" => {
+                expect_runtime_arity(self, method, args, 0, span)?;
+                match receiver {
+                    Value::Int(value) => Ok(Some(Value::Decimal(Decimal::from_int(value)))),
+                    Value::Float(value) => Ok(Some(
+                        Decimal::from_float(value)
+                            .map(|value| self.option_some(Value::Decimal(value)))
+                            .unwrap_or_else(|| self.option_none()),
+                    )),
+                    _ => Ok(None),
+                }
+            }
+            "divide" => {
+                let Value::Decimal(value) = receiver else {
+                    return Ok(None);
+                };
+                expect_runtime_arity(self, method, args, 3, span)?;
+                let Value::Decimal(other) = &args[0] else {
+                    return Err(self.runtime_error(span, "divide expects Decimal"));
+                };
+                let scale = args[1].as_int(self, span, "decimal scale")?;
+                let rounding = decimal_rounding_name(&args[2])
+                    .ok_or_else(|| self.runtime_error(span, "expected a Rounding value"))?;
+                value
+                    .divide(other, scale, &rounding)
+                    .map(|value| Some(Value::Decimal(value)))
+                    .map_err(|message| self.runtime_error(span, message))
             }
             _ => Ok(None),
         }
@@ -5921,6 +6032,7 @@ impl<'a> Interpreter<'a> {
             (Value::Bool(lhs), Value::Bool(rhs)) => Ok(lhs == rhs),
             (Value::Int(lhs), Value::Int(rhs)) => Ok(lhs == rhs),
             (Value::Float(lhs), Value::Float(rhs)) => Ok(lhs == rhs),
+            (Value::Decimal(lhs), Value::Decimal(rhs)) => Ok(lhs == rhs),
             (Value::String(lhs), Value::String(rhs)) => Ok(lhs == rhs),
             (Value::Rune(lhs), Value::Rune(rhs)) => Ok(lhs == rhs),
             (Value::Tuple(lhs), Value::Tuple(rhs)) => {
@@ -6093,6 +6205,10 @@ impl<'a> Interpreter<'a> {
                 "Float".hash(&mut hasher);
                 let normalized = if *value == 0.0 { 0.0 } else { *value };
                 normalized.to_bits().hash(&mut hasher);
+            }
+            Value::Decimal(value) => {
+                "Decimal".hash(&mut hasher);
+                value.canonical_key().hash(&mut hasher);
             }
             Value::String(value) => {
                 "Str".hash(&mut hasher);
@@ -6756,6 +6872,7 @@ impl<'a> Interpreter<'a> {
                     self.runtime_error(span, format!("integer overflow: -({value})"))
                 }),
                 Value::Float(value) => Ok(Value::Float(-value)),
+                Value::Decimal(value) => Ok(Value::Decimal(value.neg())),
                 other => self.invoke_method(other, "-", Vec::new(), span),
             },
             ir::UnaryOp::Not => Ok(Value::Bool(!operand.as_bool(self, span, "logical not")?)),
@@ -6769,6 +6886,21 @@ impl<'a> Interpreter<'a> {
         right: Value,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        if let (Value::Decimal(lhs), Value::Decimal(rhs)) = (&left, &right) {
+            let result = match op {
+                ir::BinaryOp::Add => Some(lhs.add(rhs)),
+                ir::BinaryOp::Sub => Some(lhs.sub(rhs)),
+                ir::BinaryOp::Mul => Some(lhs.mul(rhs)),
+                ir::BinaryOp::Div => Some(lhs.div(rhs)),
+                ir::BinaryOp::Mod => Some(lhs.rem(rhs)),
+                _ => None,
+            };
+            if let Some(result) = result {
+                return result
+                    .map(Value::Decimal)
+                    .map_err(|message| self.runtime_error(span, message));
+            }
+        }
         match op {
             ir::BinaryOp::Add => match (&left, &right) {
                 (Value::Int(lhs), Value::Int(rhs)) => {
@@ -6921,6 +7053,7 @@ impl<'a> Interpreter<'a> {
                 Value::Rune(_) => name == "Rune",
                 Value::Int(_) => name == "Int",
                 Value::Float(_) => name == "Float",
+                Value::Decimal(_) => name == "Decimal",
                 Value::Bool(_) => name == "Bool",
                 Value::Unit => name == "Unit",
                 Value::RuntimeType(runtime_type) => match name.as_str() {
@@ -8236,7 +8369,20 @@ fn runtime_type_kind_name(kind: crate::ast::TypeKind) -> &'static str {
 }
 
 fn is_primitive_type_name(name: &str) -> bool {
-    matches!(name, "Bool" | "Float" | "Int" | "Never" | "Rune" | "Unit")
+    matches!(
+        name,
+        "Bool" | "Decimal" | "Float" | "Int" | "Never" | "Rune" | "Unit"
+    )
+}
+
+fn decimal_rounding_name(value: &Value) -> Option<String> {
+    let Value::Aggregate(value) = value else {
+        return None;
+    };
+    let value = value.borrow();
+    (value.type_name == "Rounding")
+        .then(|| value.case_name.clone())
+        .flatten()
 }
 
 fn render_ir_type(ty: &ir::Type) -> String {

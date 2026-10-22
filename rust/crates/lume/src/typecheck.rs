@@ -13,6 +13,7 @@ use crate::{
         MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt, TypeDecl,
         TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
+    decimal::Decimal,
     numeric::{parse_float_literal, parse_integer_literal},
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
@@ -311,7 +312,11 @@ impl Ty {
     }
 
     fn is_numeric(&self) -> bool {
-        self.is_int_like() || self.is_float_like()
+        self.is_int_like() || self.is_float_like() || self.is_decimal()
+    }
+
+    fn is_decimal(&self) -> bool {
+        matches!(self, Ty::Named(name, args) if name == "Decimal" && args.is_empty())
     }
 }
 
@@ -1210,7 +1215,7 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
 }
 
 fn is_builtin_primitive_type_name(name: &str) -> bool {
-    matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str")
+    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Rune" | "Str")
 }
 
 fn primitive_implementation_diagnostic(name: &str, span: crate::source::Span) -> Diagnostic {
@@ -3094,6 +3099,7 @@ impl<'a> Checker<'a> {
             | Expr::Placeholder { .. }
             | Expr::Integer { .. }
             | Expr::Float { .. }
+            | Expr::Decimal { .. }
             | Expr::String { .. }
             | Expr::Bool { .. }
             | Expr::Unit { .. } => {}
@@ -4468,6 +4474,9 @@ impl<'a> Checker<'a> {
             (Expr::Float { raw: left, .. }, Expr::Float { raw: right, .. }) => {
                 parse_float_literal(left) == parse_float_literal(right)
             }
+            (Expr::Decimal { raw: left, .. }, Expr::Decimal { raw: right, .. }) => {
+                Decimal::literal(left) == Decimal::literal(right)
+            }
             (Expr::String { raw: left, .. }, Expr::String { raw: right, .. }) => left == right,
             _ => false,
         }
@@ -5288,6 +5297,12 @@ impl<'a> Checker<'a> {
                 Ty::int()
             }
             Expr::Float { .. } => Ty::float(),
+            Expr::Decimal { raw, span } => {
+                if Decimal::literal(raw).is_none() {
+                    self.add_error("invalid_decimal_literal", "decimal literal has invalid digits or a scale outside the signed 32-bit range", *span);
+                }
+                Ty::named("Decimal")
+            }
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),
             Expr::Unit { .. } => Ty::unit(),
@@ -6664,6 +6679,9 @@ impl<'a> Checker<'a> {
                     "use value.toFloat() for Int input or Float.parse(text) for string input; contextual construction does not perform primitive conversions"
                 }
                 "Str" => "use value.toStr() to convert a value to Str",
+                "Decimal" => {
+                    "use a decimal literal such as 0.1d, Decimal.parse(text), or an explicit toDecimal() conversion"
+                }
                 _ => {
                     "use an explicit operation that produces the primitive value; primitive types are not construction targets"
                 }
@@ -6980,7 +6998,7 @@ impl<'a> Checker<'a> {
             Ty::Named(name, _)
                 if matches!(
                     name.as_str(),
-                    "Bool" | "Int" | "Float" | "Str" | "Rune" | "Unit"
+                    "Bool" | "Int" | "Float" | "Decimal" | "Str" | "Rune" | "Unit"
                 ) =>
             {
                 true
@@ -8443,6 +8461,9 @@ impl<'a> Checker<'a> {
                     "use value.toFloat() for Int input or Float.parse(text) for string input"
                 }
                 "Str" => "use value.toStr() to convert a value to Str",
+                "Decimal" => {
+                    "use a decimal literal such as 0.1d, Decimal.parse(text), or an explicit toDecimal() conversion"
+                }
                 _ => {
                     "use an explicit operation that produces the primitive value; primitive types are not constructors"
                 }
@@ -9466,6 +9487,20 @@ impl<'a> Checker<'a> {
         right: &Ty,
         span: crate::source::Span,
     ) -> Ty {
+        if matches!(
+            op,
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
+        ) && (left.is_decimal() || right.is_decimal())
+            && !(op == BinaryOp::Add && (left.is_str() || right.is_str()))
+        {
+            if left.is_decimal() && right.is_decimal() {
+                return Ty::named("Decimal");
+            }
+            if !matches!(left, Ty::Unknown) && !matches!(right, Ty::Unknown) {
+                self.add_error("invalid_binary_operand", "Decimal arithmetic requires two Decimal operands; use an explicit toDecimal() conversion", span);
+            }
+            return Ty::Unknown;
+        }
         match op {
             BinaryOp::Add => {
                 if left.is_str() || right.is_str() {
@@ -9564,7 +9599,7 @@ impl<'a> Checker<'a> {
         if matches!(left, Ty::Unknown) || matches!(right, Ty::Unknown) {
             return;
         }
-        if (left.is_numeric() && right.is_numeric())
+        if (left.is_numeric() && right.is_numeric() && left.is_decimal() == right.is_decimal())
             || (left.is_str() && right.is_str())
             || self.is_assignable(
                 left,
@@ -9735,7 +9770,7 @@ impl<'a> Checker<'a> {
         };
         if matches!(
             name.as_str(),
-            "Any" | "Bool" | "Float" | "Int" | "ReferenceId" | "Rune" | "Str" | "Unit"
+            "Any" | "Bool" | "Decimal" | "Float" | "Int" | "ReferenceId" | "Rune" | "Str" | "Unit"
         ) {
             return false;
         }
@@ -11929,6 +11964,7 @@ impl<'a> Checker<'a> {
                 .unwrap_or(Ty::Unknown),
             Expr::Integer { .. } => Ty::int(),
             Expr::Float { .. } => Ty::float(),
+            Expr::Decimal { .. } => Ty::named("Decimal"),
             Expr::String { .. } => Ty::str(),
             Expr::Bool { .. } => Ty::bool(),
             Expr::Unit { .. } => Ty::unit(),
@@ -12396,6 +12432,16 @@ impl<'a> Checker<'a> {
         }
         match op {
             BinaryOp::Add if left.is_str() || right.is_str() => Ty::str(),
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
+                if left.is_decimal() && right.is_decimal() =>
+            {
+                Ty::named("Decimal")
+            }
+            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
+                if left.is_decimal() || right.is_decimal() =>
+            {
+                Ty::Unknown
+            }
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
                 if left.is_numeric() && right.is_numeric() =>
             {
@@ -13726,7 +13772,7 @@ impl<'a> Checker<'a> {
                 if args.is_empty()
                     && matches!(
                         name.as_str(),
-                        "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                        "Bool" | "Float" | "Decimal" | "Int" | "Rune" | "Str" | "Unit"
                     ) =>
             {
                 true
@@ -13794,7 +13840,7 @@ impl<'a> Checker<'a> {
                 if args.is_empty()
                     && matches!(
                         name.as_str(),
-                        "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                        "Bool" | "Float" | "Decimal" | "Int" | "Rune" | "Str" | "Unit"
                     ) =>
             {
                 true
@@ -14568,6 +14614,7 @@ fn loop_control_targeting_current_loop_in_expr(expr: &Expr) -> Option<LoopContro
         | Expr::Placeholder { .. }
         | Expr::Integer { .. }
         | Expr::Float { .. }
+        | Expr::Decimal { .. }
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. }
@@ -14705,6 +14752,7 @@ fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Sp
         | Expr::Placeholder { .. }
         | Expr::Integer { .. }
         | Expr::Float { .. }
+        | Expr::Decimal { .. }
         | Expr::String { .. }
         | Expr::Bool { .. }
         | Expr::Unit { .. }
@@ -15210,6 +15258,7 @@ fn infer_literal_type(expr: &Expr) -> Option<Ty> {
         Expr::Group { inner, .. } => infer_literal_type(inner),
         Expr::Integer { .. } => Some(Ty::int()),
         Expr::Float { .. } => Some(Ty::float()),
+        Expr::Decimal { .. } => Some(Ty::named("Decimal")),
         Expr::String { .. } => Some(Ty::str()),
         Expr::Bool { .. } => Some(Ty::bool()),
         Expr::Unit { .. } => Some(Ty::unit()),
@@ -15569,7 +15618,9 @@ fn format_factory_help_args(args: &[crate::ast::CallArg]) -> Option<String> {
 fn format_help_expr(expr: &Expr) -> String {
     match expr {
         Expr::Identifier { name, .. } => name.clone(),
-        Expr::Integer { raw, .. } | Expr::Float { raw, .. } => raw.clone(),
+        Expr::Integer { raw, .. } | Expr::Float { raw, .. } | Expr::Decimal { raw, .. } => {
+            raw.clone()
+        }
         Expr::String { raw, .. } if raw.starts_with('"') || raw.starts_with("raw\"") => raw.clone(),
         Expr::String { raw, .. } => format!("{raw:?}"),
         Expr::Bool { value, .. } => value.to_string(),

@@ -52,6 +52,7 @@ pub enum TokenKind {
     Identifier,
     Integer,
     Float,
+    Decimal,
     String,
     Newline,
     LParen,
@@ -335,6 +336,10 @@ impl<'a> Lexer<'a> {
             separators_valid &= exponent_separators_valid;
         }
 
+        if self.peek() == Some('d') {
+            self.bump();
+            kind = TokenKind::Decimal;
+        }
         let end = self.mark();
         self.push_token(kind, start, self.mark());
         if !separators_valid {
@@ -588,6 +593,25 @@ mod tests {
 
     fn source(text: &str) -> SourceFile {
         SourceFile::new("test.lum", text)
+    }
+
+    #[test]
+    fn lexes_exact_decimal_literals_without_consuming_member_access() {
+        let result = lex(&source("19.99d 3d 1_000.00d 1e-9d 3d.toStr()"));
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let decimals = result
+            .tokens
+            .iter()
+            .filter(|token| token.kind == TokenKind::Decimal)
+            .map(|token| token.lexeme.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(decimals, ["19.99d", "3d", "1_000.00d", "1e-9d", "3d"]);
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Dot)
+        );
     }
 
     #[test]

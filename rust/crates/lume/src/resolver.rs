@@ -302,8 +302,8 @@ impl AmbientRegistry {
     fn with_builtin_values() -> Self {
         let mut registry = AmbientRegistry::default();
         for value in [
-            "Vector", "Map", "Int", "Bool", "Rune", "Float", "Str", "Unit", "Never", "print",
-            "println", "printf", "panic", "assert", "ensure", "identity", "Math",
+            "Vector", "Map", "Int", "Bool", "Rune", "Float", "Decimal", "Str", "Unit", "Never",
+            "print", "println", "printf", "panic", "assert", "ensure", "identity", "Math",
         ] {
             registry.values.insert(value.to_string());
         }
@@ -1747,6 +1747,7 @@ impl<'a> Resolver<'a> {
         match expr {
             Expr::Integer { .. }
             | Expr::Float { .. }
+            | Expr::Decimal { .. }
             | Expr::String { .. }
             | Expr::Bool { .. }
             | Expr::Unit { .. } => true,
@@ -2506,6 +2507,7 @@ impl<'a> Resolver<'a> {
             Expr::Placeholder { .. }
             | Expr::Integer { .. }
             | Expr::Float { .. }
+            | Expr::Decimal { .. }
             | Expr::String { .. }
             | Expr::Bool { .. }
             | Expr::Unit { .. } => {}
@@ -3769,6 +3771,7 @@ impl<'a> Resolver<'a> {
                 }),
             Expr::Integer { span, .. } => Some(named_type_ref("Int", *span)),
             Expr::Float { span, .. } => Some(named_type_ref("Float", *span)),
+            Expr::Decimal { span, .. } => Some(named_type_ref("Decimal", *span)),
             Expr::String { span, .. } => Some(named_type_ref("Str", *span)),
             Expr::Bool { span, .. } => Some(named_type_ref("Bool", *span)),
             Expr::Unit { span } => Some(named_type_ref("Unit", *span)),
@@ -4358,13 +4361,13 @@ fn member_reference_span(span: crate::source::Span, name: &str) -> crate::source
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
     match name {
-        "Any" | "Int" | "Bool" | "Rune" | "Float" | "Str" | "Unit" | "Never" => Some(0),
+        "Any" | "Int" | "Bool" | "Rune" | "Float" | "Decimal" | "Str" | "Unit" | "Never" => Some(0),
         _ => None,
     }
 }
 
 fn is_builtin_extension_target(name: &str) -> bool {
-    matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str")
+    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Rune" | "Str")
 }
 
 fn arity_label(arity: usize) -> &'static str {

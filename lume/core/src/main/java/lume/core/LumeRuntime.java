@@ -451,6 +451,7 @@ public final class LumeRuntime {
         if (value instanceof Double || value instanceof Float) {
             return LumeType.primitive("Float");
         }
+        if (value instanceof LumeDecimal) { return LumeType.primitive("Decimal"); }
         if (value instanceof LumeUnit) {
             return LumeType.primitive("Unit");
         }

@@ -364,6 +364,7 @@ impl<'a> Parser<'a> {
                     TokenKind::Identifier
                         | TokenKind::Integer
                         | TokenKind::Float
+                        | TokenKind::Decimal
                         | TokenKind::String
                         | TokenKind::Caret
                         | TokenKind::Bang
@@ -385,6 +386,7 @@ impl<'a> Parser<'a> {
                     TokenKind::Identifier
                         | TokenKind::Integer
                         | TokenKind::Float
+                        | TokenKind::Decimal
                         | TokenKind::String
                         | TokenKind::Caret
                         | TokenKind::Bang

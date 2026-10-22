@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*invalid_binding_type.*
+
+def main() {
+    value Decimal = 0.1
+    println(value)
+}

@@ -2106,6 +2106,14 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.parse_string_expr(token)
             }
+            TokenKind::Decimal => {
+                let token = self.current().clone();
+                self.advance();
+                Some(Expr::Decimal {
+                    raw: token.lexeme,
+                    span: token.span,
+                })
+            }
             TokenKind::Keyword(Keyword::True) => {
                 let span = self.current_span();
                 self.advance();

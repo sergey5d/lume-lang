@@ -1,0 +1,26 @@
+# EXPECT:
+# 12345678901234567890.123456789
+# 0.10
+
+module examples/decimal_json
+
+use lume/json/{Json}
+
+public shape Invoice {
+    total Decimal
+    rate Decimal?
+}
+
+def main() {
+    decoded Result[Decimal, Str] = Json.decode[Decimal]("12345678901234567890.123456789")
+    amount = decoded!
+    assert(amount == 12345678901234567890.123456789d)
+    decodedInvoice Result[Invoice, Str] = Json.decode[Invoice]("""{"total": 0.10, "rate": 0.05}""")
+    invoice = decodedInvoice!
+    assert(invoice.total == 0.1d)
+    assert(invoice.rate! == 0.05d)
+    assert(Json.decode[Decimal]("\"NaN\"").isErr)
+    assert(Json.decode[Decimal]("true").isErr)
+    println(Json.stringify(amount))
+    println(Json.stringify(invoice.total))
+}

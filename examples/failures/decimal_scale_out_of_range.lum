@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*invalid_decimal_literal.*
+
+def main() {
+    println(1e2147483649d)
+}

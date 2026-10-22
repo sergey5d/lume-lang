@@ -2,6 +2,7 @@ package lume.json;
 
 import lume.core.LumeArray;
 import lume.core.LumeField;
+import lume.core.LumeDecimal;
 import lume.core.LumeVector;
 import lume.core.LumeMap;
 import lume.core.LumeRuntime;
@@ -14,6 +15,8 @@ import lume.core.Result;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,12 +76,15 @@ public final class JsonRuntime {
         if (value instanceof Boolean bool) {
             return bool(bool);
         }
+        if (value instanceof LumeDecimal decimal) { return new JsonValue.JsonNumber(decimal.toString()); }
         if (value instanceof Long
                 || value instanceof Integer
                 || value instanceof Short
                 || value instanceof Byte
                 || value instanceof Double
-                || value instanceof Float) {
+                || value instanceof Float
+                || value instanceof BigDecimal
+                || value instanceof BigInteger) {
             return number((Number) value);
         }
         if (value instanceof Option<?> option) {
@@ -383,6 +389,14 @@ public final class JsonRuntime {
             case "Int", "Int64" -> toLong(value, trimmed);
             case "Rune" -> Math.toIntExact(toLong(value, trimmed));
             case "Float", "Float64" -> toDouble(value, trimmed);
+            case "Decimal" -> {
+                if (!(value instanceof Number) && !(value instanceof String)) {
+                    throw new DecodeFailure("expected JSON number for Decimal");
+                }
+                var parsed = LumeDecimal.parse(value.toString());
+                if (parsed instanceof Option.Some<LumeDecimal> some) { yield some.value(); }
+                throw new DecodeFailure("expected JSON number for Decimal");
+            }
             case "Bool" -> toBool(value, trimmed);
             default -> decodeStructured(value, loadType(trimmed, contextPackage));
         };
@@ -531,6 +545,7 @@ public final class JsonRuntime {
             case "Int", "Int64" -> 0L;
             case "Rune" -> 0;
             case "Float", "Float64" -> 0.0;
+            case "Decimal" -> LumeDecimal.fromInt(0);
             case "Bool" -> false;
             default -> NO_DEFAULT;
         };
@@ -782,7 +797,9 @@ public final class JsonRuntime {
             }
             var raw = text.substring(start, index);
             try {
-                return floating ? Double.parseDouble(raw) : Long.parseLong(raw);
+                if (floating) { return new BigDecimal(raw); }
+                try { return Long.parseLong(raw); }
+                catch (NumberFormatException exception) { return new BigInteger(raw); }
             } catch (NumberFormatException err) {
                 throw error("invalid number");
             }

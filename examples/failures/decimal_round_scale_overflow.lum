@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*decimal scale out of range.*
+
+def main() { println(1d.round(Int.MAX, HalfEven)) }

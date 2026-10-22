@@ -290,6 +290,10 @@ pub enum Expr {
         raw: String,
         span: Span,
     },
+    Decimal {
+        raw: String,
+        span: Span,
+    },
     String {
         raw: String,
         span: Span,
@@ -421,6 +425,7 @@ impl Expr {
             | Expr::Placeholder { span }
             | Expr::Integer { span, .. }
             | Expr::Float { span, .. }
+            | Expr::Decimal { span, .. }
             | Expr::String { span, .. }
             | Expr::Bool { span, .. }
             | Expr::Unit { span }

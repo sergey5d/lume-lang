@@ -377,6 +377,7 @@ pub enum AnnotationValue {
     Bool(bool),
     Int(i64),
     Float(f64),
+    Decimal(String),
     String(String),
     List(Vec<AnnotationValue>),
     Record(Vec<AnnotationField>),
@@ -567,6 +568,7 @@ pub enum Constant {
     Bool(bool),
     Int(i64),
     Float(f64),
+    Decimal(String),
     String(String),
     List(Vec<Constant>),
 }

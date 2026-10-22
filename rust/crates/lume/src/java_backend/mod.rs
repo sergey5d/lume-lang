@@ -1476,6 +1476,10 @@ fn parse_lume_default_metadata_expr(
             raw: value.to_string(),
             span,
         }),
+        "decimal" => Some(crate::ast::Expr::Decimal {
+            raw: format!("{value}d"),
+            span,
+        }),
         "str" => Some(crate::ast::Expr::String {
             raw: value.to_string(),
             span,
@@ -2069,6 +2073,8 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         "float" | "java.lang.Float" | "Float" | "double" | "java.lang.Double" | "Double" => {
             Some("Float")
         }
+        "lume.core.LumeDecimal" | "LumeDecimal" if arg_count == 0 => Some("Decimal"),
+        "lume.core.Rounding" | "Rounding" if arg_count == 0 => Some("Rounding"),
         "char" | "java.lang.Character" | "Character" => Some("Rune"),
         "java.lang.String" | "String" => Some("Str"),
         "java.util.List"
@@ -5308,6 +5314,201 @@ def main() Unit {
             "-3 8\n1.25 7.5\ntrue true true\ntrue true\ntrue true true\ntrue true\ntrue true\ntrue true true\n-9223372036854775808 9223372036854775807\ntrue true true\ntrue\n"
         );
 
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn decimal_examples_have_java_interpreter_parity() {
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let temp = temp_path("lume-java-decimal");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).unwrap();
+        let success = root.join("examples/features/decimal.lum");
+        let interpreted = run_path(&success, None).expect("run decimal example");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:#?}",
+            interpreted.diagnostics
+        );
+        let expected = interpreter_stdout(interpreted);
+        let generated = generate_java_path(&success, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+        let mut failures = Vec::new();
+        for stem in [
+            "decimal_exact_division",
+            "decimal_zero_division",
+            "decimal_rounding_necessary",
+            "decimal_resource_limit",
+            "decimal_zero_remainder",
+            "decimal_arithmetic_scale_overflow",
+            "decimal_round_scale_overflow",
+        ] {
+            let source = temp.join(format!("{stem}.lum"));
+            fs::write(
+                &source,
+                format!(
+                    "module demo/decimal/{stem}\n{}",
+                    fs::read_to_string(root.join(format!("examples/failures/{stem}.lum"))).unwrap()
+                ),
+            )
+            .unwrap();
+            let interpreted = run_path(&source, None).unwrap();
+            assert_eq!(
+                interpreted.diagnostics.len(),
+                1,
+                "{stem}: {:#?}",
+                interpreted.diagnostics
+            );
+            let diagnostic = &interpreted.diagnostics[0].diagnostic;
+            assert_eq!(diagnostic.code, "runtime_error", "{stem}: {diagnostic:?}");
+            let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+            assert!(
+                generated.diagnostics.is_empty(),
+                "{stem}: {:#?}",
+                generated.diagnostics
+            );
+            let mut chars = stem.chars();
+            let class_name =
+                chars.next().unwrap().to_uppercase().collect::<String>() + chars.as_str();
+            failures.push((
+                format!("demo.decimal.{stem}.{class_name}Main"),
+                diagnostic.message.clone(),
+            ));
+        }
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac decimal",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.decimal.DecimalMain"),
+            "java decimal",
+        );
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+        for (main, message) in failures {
+            let output = Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg(&main)
+                .output()
+                .unwrap();
+            assert!(!output.status.success(), "{main} must fail");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert_eq!(
+                stderr.lines().next(),
+                Some(
+                    format!("Exception in thread \"main\" lume.core.LumePanic: {message}").as_str()
+                ),
+                "{main}: {stderr}"
+            );
+        }
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn decimal_json_preserves_precision_in_both_backends() {
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let temp = temp_path("lume-java-decimal-json");
+        let classes = temp.join("classes");
+        let api = temp.join("api");
+        let out = temp.join("generated");
+        fs::create_dir_all(&classes).unwrap();
+        fs::create_dir_all(&api).unwrap();
+        run_checked(
+            Command::new("javac")
+                .arg("-d")
+                .arg(&classes)
+                .args(core_runtime_sources()),
+            "javac core for decimal JSON",
+        );
+        let mut stubs = Vec::new();
+        collect_java_sources(&root.join("lume/json/src/main/java-api"), &mut stubs).unwrap();
+        run_checked(
+            Command::new("javac")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("-d")
+                .arg(&api)
+                .args(stubs),
+            "javac JSON descriptors",
+        );
+        let generated = generate_java_path(
+            root.join("lume/json/src/main/lume/lume/json/Json.lum"),
+            JavaBackendOptions::new(&out)
+                .with_classpath_entry(&classes)
+                .with_classpath_entry(&api),
+        )
+        .unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+        let mut sources = vec![root.join("lume/json/src/main/java/lume/json/JsonRuntime.java")];
+        collect_java_sources(&out, &mut sources).unwrap();
+        run_checked(
+            Command::new("javac")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("-d")
+                .arg(&classes)
+                .args(sources),
+            "javac JSON runtime",
+        );
+        let source = root.join("examples/features/decimal_json.lum");
+        let interpreted = run_path(&source, None).unwrap();
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:#?}",
+            interpreted.diagnostics
+        );
+        let expected = interpreter_stdout(interpreted);
+        let app = temp.join("app");
+        let generated = generate_java_path(
+            &source,
+            JavaBackendOptions::new(&app).with_classpath_entry(&classes),
+        )
+        .unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+        let mut sources = Vec::new();
+        collect_java_sources(&app, &mut sources).unwrap();
+        run_checked(
+            Command::new("javac")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("-d")
+                .arg(&classes)
+                .args(sources),
+            "javac decimal JSON example",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.decimal_json.Decimal_jsonMain"),
+            "java decimal JSON example",
+        );
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
         let _ = fs::remove_dir_all(temp);
     }
 

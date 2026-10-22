@@ -1,0 +1,119 @@
+# EXPECT:
+# 59.97
+# 0.125
+# 0.33
+# 1.00
+# 1E+100
+
+module examples/decimal
+
+shape Price {
+    amount Decimal
+}
+
+shape Defaults {
+    amount Decimal = 9.99d
+    tax Decimal
+    previous Decimal?
+}
+
+class Balance {
+    var amount Decimal
+}
+
+def identity[T](value T) T = value
+
+def withDefault(value Decimal = 1.25d) Decimal = value
+
+def main() {
+    price = 19.99d
+    quantity = 3d
+    assert(price * quantity == 59.97d)
+    assert(0.1d + 0.2d == 0.3d)
+    assert(1d / 8d == 0.125d)
+    assert(10.5d % 3d == 1.5d)
+    assert(1_000.00d - 0.01d == 999.99d)
+    assert(1e-9d < 2e-9d)
+    assert(9007199254740993d > 9007199254740992d)
+    assert((-3d).abs() == 3d)
+
+    assert(1.0d == 1.00d)
+    assert(1.0d.hash() == 1.00d.hash())
+    assert(1.00d.scale == 2)
+    assert(1.00d.toStr() == "1.00")
+    assert(identity(1.25d) == withDefault())
+    assert(Price(1.0d) == Price(1.00d))
+    assert((1.0d, 2d) == (1.00d, 2.0d))
+    assert(price.runtimeType.name! == "Decimal")
+    assert(typeOf[Decimal].name! == "Decimal")
+    erased Any = price
+    assert(erased is Decimal)
+    classified = match -1.0d {
+        case -1.00d => "negative"
+        case _ => "other"
+    }
+    assert(classified == "negative")
+    values = [2d, 1d, 3d]
+    values.sort((left, right) => left.compareTo(right))
+    assert(values[0] == 1d)
+
+    keys Set[Decimal] = Set()
+    keys.add(1.0d)
+    keys.add(1.00d)
+    assert(keys.size == 1)
+    lookup [Decimal: Str] = []
+    lookup[1.0d] := "found"
+    assert(lookup[1.00d]! == "found")
+
+    assert(1d.divide(3d, 2, HalfEven) == 0.33d)
+    assert(1d.divide(3d, scale = 2, rounding = Rounding.Up) == 0.34d)
+    assert(2.345d.round(2, HalfEven) == 2.34d)
+    assert(2.355d.round(2, HalfEven) == 2.36d)
+    assert((-2.345d).round(2, Floor) == -2.35d)
+    assert((-2.345d).round(2, Ceiling) == -2.34d)
+    assert(2.345d.round(2, HalfUp) == 2.35d)
+    assert(2.345d.round(2, HalfDown) == 2.34d)
+    assert((-2.349d).round(2, Down) == -2.34d)
+    assert(2.340d.round(2, Unnecessary) == 2.34d)
+
+    assert(Decimal.parse("12345678901234567890.123456789")! == 12345678901234567890.123456789d)
+    assert(Decimal.parse("NaN").isEmpty)
+    assert(Decimal.parse("1_000").isEmpty)
+    assert(42.toDecimal() == 42d)
+    assert(0.1.toDecimal()! == 0.1d)
+    assert(12.00d.toInt()! == 12)
+    assert(12.01d.toInt().isEmpty)
+    assert(9223372036854775808d.toInt().isEmpty)
+    assert(1.25d.toFloat() == 1.25)
+    assert((0.0 / 0.0).toDecimal().isEmpty)
+    tiny Float = Float.parse("4.9e-324")!
+    assert(tiny.toDecimal()! == 4.9e-324d)
+    assert(1e2147483647d.toFloat() > Float.MAX)
+    assert(1e-2147483647d.toFloat() == 0.0)
+    assert(1e2147483647d > 1e2147483646d)
+    assert(123d.round(-1, HalfEven) == 120d)
+    assert((-9223372036854775808d).toInt()! == Int.MIN)
+
+    defaults Defaults = default {}
+    assert(defaults.amount == 9.99d)
+    assert(defaults.tax == 0d)
+    assert(defaults.previous.isEmpty)
+    var total = 1d
+    total += 2d
+    total *= 3d
+    assert(total == 9d)
+    totals [Str: Decimal] = ["first": 1d]
+    totals["first"] += 2d
+    assert(totals["first"]! == 3d)
+    values[0] *= 2d
+    assert(values[0] == 2d)
+    balance = Balance(1d)
+    balance.amount += 2d
+    assert(balance.amount == 3d)
+
+    println(price * quantity)
+    println(1d / 8d)
+    println(1d.divide(3d, 2, HalfEven))
+    println(1.00d)
+    println(1e100d)
+}

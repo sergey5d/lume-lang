@@ -154,6 +154,10 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             raw: raw.clone(),
             span: *span,
         },
+        ast::Expr::Decimal { raw, span } => core::Expr::Decimal {
+            raw: raw.clone(),
+            span: *span,
+        },
         ast::Expr::String { raw, span } => core::Expr::String {
             raw: raw.clone(),
             span: *span,

@@ -330,6 +330,10 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let token = self.current().clone();
                 let inner = match token.kind {
+                    TokenKind::Decimal => Expr::Decimal {
+                        raw: token.lexeme,
+                        span: token.span,
+                    },
                     TokenKind::Integer => Expr::Integer {
                         raw: token.lexeme,
                         span: token.span,
@@ -341,7 +345,7 @@ impl<'a> Parser<'a> {
                     _ => {
                         self.error_at_current(
                             "expected_pattern",
-                            "expected numeric literal (integer or floating-point) after '-' in pattern",
+                            "expected numeric literal after '-' in pattern",
                         );
                         return None;
                     }
@@ -355,6 +359,17 @@ impl<'a> Parser<'a> {
                         span,
                     },
                     span,
+                })
+            }
+            TokenKind::Decimal => {
+                let token = self.current().clone();
+                self.advance();
+                Some(Pattern::Literal {
+                    span: token.span,
+                    value: Expr::Decimal {
+                        raw: token.lexeme,
+                        span: token.span,
+                    },
                 })
             }
             TokenKind::Caret => {

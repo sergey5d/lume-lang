@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*non-terminating decimal division.*
+
+def main() {
+    println(1d / 3d)
+}

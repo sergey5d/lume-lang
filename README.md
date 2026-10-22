@@ -54,6 +54,12 @@ Control flow is expression-friendly but still explicit:
 - `try`, pattern bindings, `??`, and explicit `map`/`flatMap` calls handle
   `Option`, `Result`, and `Either` flow.
 
+Numeric models stay distinct: `Int` is checked signed 64-bit arithmetic, `Float`
+is binary64, and `Decimal` provides exact arbitrary-precision decimal arithmetic
+with literals such as `19.99d` and explicit rounding. See
+[decimal arithmetic](syntax.md#decimal-arithmetic) and the runnable
+[Decimal example](examples/features/decimal.lum).
+
 ## Quick Start
 
 Run the CLI from the repository root:

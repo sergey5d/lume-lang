@@ -1152,6 +1152,7 @@ fn lume_constant_metadata(value: &ir::Constant) -> Option<String> {
         ir::Constant::Bool(value) => ("bool", value.to_string()),
         ir::Constant::Int(value) => ("int", value.to_string()),
         ir::Constant::Float(value) => ("float", value.to_string()),
+        ir::Constant::Decimal(value) => ("decimal", value.clone()),
         ir::Constant::String(value) => ("str", metadata_escape(&decode_lume_string_literal(value))),
         ir::Constant::List(_) => return None,
     };
@@ -1461,6 +1462,10 @@ fn annotation_value_expr(value: &ir::AnnotationValue) -> String {
         ir::AnnotationValue::Bool(value) => value.to_string(),
         ir::AnnotationValue::Int(value) => format!("{value}L"),
         ir::AnnotationValue::Float(value) => java_float_literal(*value),
+        ir::AnnotationValue::Decimal(value) => format!(
+            "lume.core.LumeDecimal.literal({})",
+            java_string_literal(value)
+        ),
         ir::AnnotationValue::String(value) => java_string_literal(value),
         ir::AnnotationValue::List(items) => format!(
             "lume.core.LumeVector.of({})",
@@ -2343,9 +2348,10 @@ impl<'a> SourceBodyEmitter<'a> {
                         ast::AssignOp::ModAssign => "%",
                         ast::AssignOp::Assign | ast::AssignOp::Reassign => unreachable!(),
                     };
-                    let operation =
-                        checked_int_binary_expr(&value_ty, &value_ty, operator, &current, &value)
-                            .unwrap_or_else(|| format!("({current} {operator} {value})"));
+                    let operation = intrinsic_numeric_binary_expr(
+                        &value_ty, &value_ty, operator, &current, &value,
+                    )
+                    .unwrap_or_else(|| format!("({current} {operator} {value})"));
                     if name != "Map" {
                         let base = self.synthetic_name(
                             "compoundCollection",
@@ -2507,7 +2513,10 @@ impl<'a> SourceBodyEmitter<'a> {
                             binding_types,
                         )?;
                         let value_ty = self.expr_type(&statement.values[0], bindings)?;
-                        if type_is_int_like(&target_ty) && type_is_int_like(&value_ty) {
+                        if (type_is_int_like(&target_ty) && type_is_int_like(&value_ty))
+                            || (is_named_builtin(&target_ty, "Decimal")
+                                && is_named_builtin(&value_ty, "Decimal"))
+                        {
                             // Keep effectful member receivers single-evaluation, as with Java's +=.
                             if let core::Expr::Member { receiver, name, .. } = &statement.targets[0]
                             {
@@ -2522,7 +2531,7 @@ impl<'a> SourceBodyEmitter<'a> {
                                 ));
                                 target = format!("{local}.{}", java_member_name(name));
                             }
-                            let operation = checked_int_binary_expr(
+                            let operation = intrinsic_numeric_binary_expr(
                                 &target_ty,
                                 &value_ty,
                                 &operator[..1],
@@ -6299,6 +6308,9 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some(format!("{}.INSTANCE", self.names.named_type(name)))
             }
             core::Expr::Member { receiver, name, .. }
+                if matches!(receiver.as_ref(), core::Expr::Identifier { name: owner, .. } if owner == "Rounding")
+                    && crate::decimal::is_rounding_name(name) => self.emit_core_enum_case(name, &[]),
+            core::Expr::Member { receiver, name, .. }
                 if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "SeekFrom")
                     && matches!(name.as_str(), "Start" | "Current" | "End") =>
             {
@@ -6391,6 +6403,7 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Bool { value, .. } => Some(value.to_string()),
             core::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
             core::Expr::Float { raw, .. } => Some(raw.clone()),
+            core::Expr::Decimal { raw, .. } => Some(format!("lume.core.LumeDecimal.literal({})", java_string_literal(&raw.trim_end_matches('d').replace('_', "")))),
             core::Expr::String { raw, .. } => {
                 Some(java_string_literal(&decode_lume_string_literal(raw)))
             }
@@ -6847,6 +6860,8 @@ impl<'a> SourceBodyEmitter<'a> {
                         let value = self.emit_expr(operand, bindings)?;
                         if self.expr_type(operand, bindings).as_ref().is_some_and(type_is_int_like) {
                             Some(format!("lume.core.LumeRuntime.negInt({value})"))
+                        } else if self.expr_type(operand, bindings).as_ref().is_some_and(|ty| is_named_builtin(ty, "Decimal")) {
+                            Some(format!("{value}.neg()"))
                         } else {
                             Some(format!("(-{value})"))
                         }
@@ -6902,7 +6917,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         | ast::BinaryOp::GreaterEq => unreachable!(),
                     };
                     if let (Some(left_ty), Some(right_ty)) = (&left_ty, &right_ty)
-                        && let Some(checked) = checked_int_binary_expr(left_ty, right_ty, operator, &left, &right)
+                        && let Some(checked) = intrinsic_numeric_binary_expr(left_ty, right_ty, operator, &left, &right)
                     {
                         return Some(checked);
                     }
@@ -8222,7 +8237,7 @@ impl<'a> SourceBodyEmitter<'a> {
             ty,
             ir::Type::Named { name, args }
                 if args.is_empty()
-                    && matches!(name.as_str(), "Unit" | "Bool" | "Int" | "Float" | "Str")
+                    && matches!(name.as_str(), "Unit" | "Bool" | "Int" | "Float" | "Decimal" | "Str")
         );
         if is_primitive {
             return Some(java_default_value(ty));
@@ -9190,7 +9205,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 if name == "parse"
                     && matches!(
                         receiver.as_ref(),
-                        core::Expr::Identifier { name, .. } if name == "Int" || name == "Float"
+                        core::Expr::Identifier { name, .. } if matches!(name.as_str(), "Int" | "Float" | "Decimal")
                     ) =>
             {
                 let core::Expr::Identifier { name: owner, .. } = receiver.as_ref() else {
@@ -9200,6 +9215,9 @@ impl<'a> SourceBodyEmitter<'a> {
                     return None;
                 };
                 let value = self.emit_call_arg(arg, bindings)?;
+                if owner == "Decimal" {
+                    return Some(format!("lume.core.LumeDecimal.parse({value})"));
+                }
                 let method = if owner == "Int" {
                     "parseInt"
                 } else {
@@ -10222,10 +10240,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 .is_empty()
                 .then(|| "lume.core.Option.None.instance()".to_string());
         }
-        if owner == "SeekFrom" {
+        if matches!(owner, "SeekFrom" | "Rounding") {
             return args
                 .is_empty()
-                .then(|| format!("lume.core.SeekFrom.{}.INSTANCE", java_type_name(case)));
+                .then(|| format!("lume.core.{owner}.{}.INSTANCE", java_type_name(case)));
         }
         if owner == "FileError" {
             return Some(format!(
@@ -10354,6 +10372,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 core::Expr::Bool { .. } => Some(ir::Type::Bool),
                 core::Expr::Integer { .. } => Some(ir::Type::Int),
                 core::Expr::Float { .. } => Some(ir::Type::Float),
+                core::Expr::Decimal { .. } => Some(ir::Type::named("Decimal")),
                 core::Expr::String { .. } => Some(ir::Type::Str),
                 core::Expr::Unit { .. } => Some(ir::Type::Unit),
                 core::Expr::Unary { op: ast::UnaryOp::UnsafeExtract, expr, .. } => {
@@ -11458,6 +11477,9 @@ impl<'a> JavaIrSupport<'a> {
                     args: vec![ir::Type::Float],
                 })
             }
+            [owner, method] if owner == "Decimal" && method == "parse" && arg_len == 1 => {
+                Some(ir::Type::option(ir::Type::named("Decimal")))
+            }
             [owner, method]
                 if owner == "Math" && matches!(method.as_str(), "min" | "max") && arg_len == 2 =>
             {
@@ -12457,6 +12479,8 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Bool" => Some("Boolean".to_string()),
         "Int" => Some("Long".to_string()),
         "Float" => Some("Double".to_string()),
+        "Decimal" => Some("lume.core.LumeDecimal".to_string()),
+        "Rounding" => Some("lume.core.Rounding".to_string()),
         "Str" => Some("String".to_string()),
         "Rune" => Some("Integer".to_string()),
         "Eq" => Some("lume.core.Eq".to_string()),
@@ -12548,6 +12572,8 @@ fn core_enum_case_owner(case: &str) -> Option<&'static str> {
             Some("FileError")
         }
         "Start" | "Current" | "End" => Some("SeekFrom"),
+        "Up" | "Down" | "Ceiling" | "Floor" | "HalfUp" | "HalfDown" | "HalfEven"
+        | "Unnecessary" => Some("Rounding"),
         _ => None,
     }
 }
@@ -12556,7 +12582,7 @@ fn core_enum_owner_type_arity(owner: &str) -> Option<usize> {
     match owner {
         "Option" => Some(1),
         "Result" | "Either" => Some(2),
-        "FileError" | "SeekFrom" => Some(0),
+        "FileError" | "SeekFrom" | "Rounding" => Some(0),
         _ => None,
     }
 }
@@ -12580,6 +12606,22 @@ fn builtin_method_param_types(
     method: &str,
     arg_len: usize,
 ) -> Option<Vec<ir::Type>> {
+    if is_named_builtin(receiver, "Decimal") {
+        return match (method, arg_len) {
+            ("compareTo" | "equals", 1) => Some(vec![receiver.clone()]),
+            ("abs" | "toInt" | "toFloat" | "scale" | "hash", 0) => Some(vec![]),
+            ("divide", 3) => Some(vec![
+                receiver.clone(),
+                ir::Type::Int,
+                ir::Type::named("Rounding"),
+            ]),
+            ("round", 2) => Some(vec![ir::Type::Int, ir::Type::named("Rounding")]),
+            _ => None,
+        };
+    }
+    if method == "toDecimal" && arg_len == 0 && type_is_numeric(receiver) {
+        return Some(vec![]);
+    }
     if type_is_int_like(receiver) {
         return match (method, arg_len) {
             (
@@ -12691,6 +12733,24 @@ fn builtin_method_return_type(
     method: &str,
     arg_len: usize,
 ) -> Option<ir::Type> {
+    if is_named_builtin(receiver, "Decimal") {
+        return match (method, arg_len) {
+            ("compareTo", 1) | ("scale" | "hash", 0) => Some(ir::Type::Int),
+            ("equals", 1) => Some(ir::Type::Bool),
+            ("abs", 0) | ("divide", 3) | ("round", 2) => Some(receiver.clone()),
+            ("toInt", 0) => Some(ir::Type::option(ir::Type::Int)),
+            ("toFloat", 0) => Some(ir::Type::Float),
+            _ => None,
+        };
+    }
+    if method == "toDecimal" && arg_len == 0 && type_is_numeric(receiver) {
+        let decimal = ir::Type::named("Decimal");
+        return Some(if type_is_int_like(receiver) {
+            decimal
+        } else {
+            ir::Type::option(decimal)
+        });
+    }
     if type_is_int_like(receiver) {
         return match (method, arg_len) {
             ("checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow", 1) => {
@@ -12958,6 +13018,10 @@ fn format_java_intrinsic_member_call(
     let is_int = type_is_named_or_primitive(receiver_ty, "Int", |ty| matches!(ty, ir::Type::Int));
     let is_float =
         type_is_named_or_primitive(receiver_ty, "Float", |ty| matches!(ty, ir::Type::Float));
+    if args.is_empty() && method == "toDecimal" && (is_int || is_float) {
+        let helper = if is_int { "fromInt" } else { "fromFloat" };
+        return Some(format!("lume.core.LumeDecimal.{helper}({receiver})"));
+    }
     if args.is_empty() && method == "sqrt" && (is_int || is_float) {
         return Some(format!("lume.core.LumeRuntime.sqrt({receiver})"));
     }
@@ -13079,6 +13143,8 @@ fn java_default_value(ty: &ir::Type) -> String {
         "0L".to_string()
     } else if type_is_named_or_primitive(ty, "Float", |ty| matches!(ty, ir::Type::Float)) {
         "0.0".to_string()
+    } else if is_named_builtin(ty, "Decimal") {
+        "lume.core.LumeDecimal.fromInt(0L)".to_string()
     } else if type_is_named_or_primitive(ty, "Str", |ty| matches!(ty, ir::Type::Str)) {
         java_string_literal("")
     } else {
@@ -13104,6 +13170,7 @@ fn source_literal_type(expr: &core::Expr) -> Option<ir::Type> {
     match expr {
         core::Expr::Integer { .. } => Some(ir::Type::Int),
         core::Expr::Float { .. } => Some(ir::Type::Float),
+        core::Expr::Decimal { .. } => Some(ir::Type::named("Decimal")),
         core::Expr::String { .. } => Some(ir::Type::Str),
         core::Expr::Bool { .. } => Some(ir::Type::Bool),
         core::Expr::Unit { .. } => Some(ir::Type::Unit),
@@ -13116,13 +13183,24 @@ fn type_is_int_like(ty: &ir::Type) -> bool {
     type_is_named_or_primitive(ty, "Int", |ty| matches!(ty, ir::Type::Int))
 }
 
-fn checked_int_binary_expr(
+fn intrinsic_numeric_binary_expr(
     left_ty: &ir::Type,
     right_ty: &ir::Type,
     operator: &str,
     left: &str,
     right: &str,
 ) -> Option<String> {
+    if is_named_builtin(left_ty, "Decimal") && is_named_builtin(right_ty, "Decimal") {
+        let method = match operator {
+            "+" => "add",
+            "-" => "sub",
+            "*" => "mul",
+            "/" => "div",
+            "%" => "rem",
+            _ => return None,
+        };
+        return Some(format!("{left}.{method}({right})"));
+    }
     if !type_is_int_like(left_ty) || !type_is_int_like(right_ty) {
         return None;
     }
@@ -13141,6 +13219,10 @@ fn emit_pattern_literal(expr: &ast::Expr) -> Option<String> {
     match expr {
         ast::Expr::Integer { raw, .. } => Some(format!("{raw}L")),
         ast::Expr::Float { raw, .. } => Some(raw.clone()),
+        ast::Expr::Decimal { raw, .. } => Some(format!(
+            "lume.core.LumeDecimal.literal({})",
+            java_string_literal(&raw.trim_end_matches('d').replace('_', ""))
+        )),
         ast::Expr::String { raw, .. } => {
             Some(java_string_literal(&decode_lume_string_literal(raw)))
         }
@@ -13150,7 +13232,14 @@ fn emit_pattern_literal(expr: &ast::Expr) -> Option<String> {
             op: ast::UnaryOp::Neg,
             expr,
             ..
-        } => Some(format!("(-{})", emit_pattern_literal(expr)?)),
+        } => {
+            let literal = emit_pattern_literal(expr)?;
+            Some(if matches!(expr.as_ref(), ast::Expr::Decimal { .. }) {
+                format!("{literal}.neg()")
+            } else {
+                format!("(-{literal})")
+            })
+        }
         ast::Expr::Group { inner, .. } => emit_pattern_literal(inner),
         _ => None,
     }
@@ -13186,6 +13275,7 @@ fn core_enum_case_fields(
             ("message", ir::Type::Str),
         ]),
         ("SeekFrom", "Start" | "Current" | "End", []) => Some(Vec::new()),
+        ("Rounding", name, []) if crate::decimal::is_rounding_name(name) => Some(Vec::new()),
         _ => None,
     }
 }
@@ -13455,6 +13545,10 @@ fn java_constant(constant: &ir::Constant) -> String {
         ir::Constant::Bool(value) => value.to_string(),
         ir::Constant::Int(value) => format!("{value}L"),
         ir::Constant::Float(value) => java_float_literal(*value),
+        ir::Constant::Decimal(value) => format!(
+            "lume.core.LumeDecimal.literal({})",
+            java_string_literal(value)
+        ),
         ir::Constant::String(value) => java_string_literal(&decode_lume_string_literal(value)),
         ir::Constant::List(items) => {
             let items = items
@@ -13510,6 +13604,7 @@ fn constant_type(constant: &ir::Constant) -> ir::Type {
         ir::Constant::Bool(_) => ir::Type::Bool,
         ir::Constant::Int(_) => ir::Type::Int,
         ir::Constant::Float(_) => ir::Type::Float,
+        ir::Constant::Decimal(_) => ir::Type::named("Decimal"),
         ir::Constant::String(_) => ir::Type::Str,
         ir::Constant::List(_) => ir::Type::Unknown,
     }
@@ -13685,6 +13780,7 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
     };
     let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
     match (type_name.as_str(), name) {
+        ("Decimal", "scale") => Some(ir::Type::Int),
         ("Str", "size") => Some(ir::Type::Int),
         ("Str", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
         ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")

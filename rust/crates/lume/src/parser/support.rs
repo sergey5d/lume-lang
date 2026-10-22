@@ -686,6 +686,7 @@ impl<'a> Parser<'a> {
             TokenKind::Identifier => "IDENT",
             TokenKind::Integer => "INT",
             TokenKind::Float => "FLOAT",
+            TokenKind::Decimal => "DECIMAL",
             TokenKind::String => "STRING",
             TokenKind::Keyword(Keyword::Case) => "CASE",
             TokenKind::Keyword(Keyword::If) => "IF",

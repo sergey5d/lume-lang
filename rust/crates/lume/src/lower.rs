@@ -4823,6 +4823,9 @@ impl<'a> FunctionLowerer<'a> {
                 }
             },
             Expr::String { raw, .. } => ir::Operand::Const(ir::Constant::String(raw.clone())),
+            Expr::Decimal { raw, .. } => ir::Operand::Const(ir::Constant::Decimal(
+                raw.trim_end_matches('d').replace('_', ""),
+            )),
             Expr::Bool { value, .. } => ir::Operand::Const(ir::Constant::Bool(*value)),
             Expr::Unit { .. } => ir::Operand::Const(ir::Constant::Unit),
             Expr::Binary {
@@ -5266,6 +5269,7 @@ impl<'a> FunctionLowerer<'a> {
                 .unwrap_or(ir::Type::Unknown),
             Expr::Integer { .. } => ir::Type::Int,
             Expr::Float { .. } => ir::Type::Float,
+            Expr::Decimal { .. } => ir::Type::named("Decimal"),
             Expr::String { .. } => ir::Type::Str,
             Expr::Bool { .. } => ir::Type::Bool,
             Expr::Unit { .. } => ir::Type::Unit,
@@ -5687,6 +5691,9 @@ impl<'a> FunctionLowerer<'a> {
             [owner, method] if owner == "Float" && method == "parse" => {
                 Some(ir::Type::option(ir::Type::Float))
             }
+            [owner, method] if owner == "Decimal" && method == "parse" => {
+                Some(ir::Type::option(ir::Type::named("Decimal")))
+            }
             [owner, method] if owner == "File" && method == "readBytes" => Some(ir::Type::Named {
                 name: "Result".to_string(),
                 args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],
@@ -5981,6 +5988,7 @@ impl<'a> FunctionLowerer<'a> {
                 ir::Constant::Bool(_) => ir::Type::Bool,
                 ir::Constant::Int(_) => ir::Type::Int,
                 ir::Constant::Float(_) => ir::Type::Float,
+                ir::Constant::Decimal(_) => ir::Type::named("Decimal"),
                 ir::Constant::String(_) => ir::Type::Str,
                 ir::Constant::List(values) => ir::Type::list(
                     values
@@ -6029,6 +6037,9 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn lookup_bare_enum_case_type(&self, name: &str) -> Option<ir::Type> {
+        if crate::decimal::is_rounding_name(name) {
+            return Some(ir::Type::named("Rounding"));
+        }
         if name == "None" {
             return Some(ir::Type::option(ir::Type::Unknown));
         }
@@ -6043,6 +6054,7 @@ impl<'a> FunctionLowerer<'a> {
                 "Some" | "None" => Some("Option"),
                 "Ok" | "Err" => Some("Result"),
                 "Left" | "Right" => Some("Either"),
+                name if crate::decimal::is_rounding_name(name) => Some("Rounding"),
                 _ => unique_bare_enum_case_owner(self.program, name),
             };
             if let Some(owner) = owner {
@@ -8234,6 +8246,9 @@ impl<'a> FunctionLowerer<'a> {
                 Some(ir::Constant::Int(0))
             }
             ir::Type::Named { name, .. } if name == "Float" => Some(ir::Constant::Float(0.0)),
+            ir::Type::Named { name, .. } if name == "Decimal" => {
+                Some(ir::Constant::Decimal("0".to_string()))
+            }
             ir::Type::Named { name, .. } if name == "Str" => {
                 Some(ir::Constant::String(String::new()))
             }
@@ -9825,6 +9840,9 @@ fn lower_annotation_value(expr: &ast::Expr) -> ir::AnnotationValue {
             parse_float_literal(raw)
                 .expect("float annotation literals are validated before lowering"),
         ),
+        ast::Expr::Decimal { raw, .. } => {
+            ir::AnnotationValue::Decimal(raw.trim_end_matches('d').replace('_', ""))
+        }
         ast::Expr::String { raw, .. } => ir::AnnotationValue::String(annotation_string_value(raw)),
         ast::Expr::ListLiteral { items, .. } => {
             ir::AnnotationValue::List(items.iter().map(lower_annotation_value).collect())
@@ -10316,6 +10334,37 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
         return Some(ty);
     }
 
+    if matches!(receiver, ir::Type::Named { name, .. } if name == "Decimal") {
+        let decimal = ir::Type::named("Decimal");
+        let (params, ret) = match name {
+            "abs" => (vec![], decimal.clone()),
+            "compareTo" => (vec![decimal], ir::Type::Int),
+            "divide" => (
+                vec![decimal.clone(), ir::Type::Int, ir::Type::named("Rounding")],
+                decimal,
+            ),
+            "round" => (vec![ir::Type::Int, ir::Type::named("Rounding")], decimal),
+            "toInt" => (vec![], ir::Type::option(ir::Type::Int)),
+            "toFloat" => (vec![], ir::Type::Float),
+            _ => return None,
+        };
+        return Some(ir::Type::Function {
+            params,
+            ret: Box::new(ret),
+        });
+    }
+    if name == "toDecimal" {
+        let ret = match receiver {
+            ir::Type::Int => ir::Type::named("Decimal"),
+            ir::Type::Float => ir::Type::option(ir::Type::named("Decimal")),
+            _ => return None,
+        };
+        return Some(ir::Type::Function {
+            params: vec![],
+            ret: Box::new(ret),
+        });
+    }
+
     if matches!(receiver, ir::Type::Int)
         || matches!(receiver, ir::Type::Named { name, args } if name == "Int" && args.is_empty())
     {
@@ -10804,6 +10853,9 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
 }
 
 fn builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
+    if name == "scale" && matches!(receiver, ir::Type::Named { name, .. } if name == "Decimal") {
+        return Some(ir::Type::Int);
+    }
     if matches!(receiver, ir::Type::Str) {
         return match name {
             "size" => Some(ir::Type::Int),
@@ -11619,6 +11671,9 @@ fn lower_field_initializer_constant(initializer: Option<&ast::Expr>) -> Option<i
         ast::Expr::Group { inner, .. } => lower_field_initializer_constant(Some(inner)),
         ast::Expr::Integer { raw, .. } => parse_integer_literal(raw, false).map(ir::Constant::Int),
         ast::Expr::Float { raw, .. } => parse_float_literal(raw).map(ir::Constant::Float),
+        ast::Expr::Decimal { raw, .. } => Some(ir::Constant::Decimal(
+            raw.trim_end_matches('d').replace('_', ""),
+        )),
         ast::Expr::String { raw, .. } => Some(ir::Constant::String(raw.clone())),
         ast::Expr::Bool { value, .. } => Some(ir::Constant::Bool(*value)),
         ast::Expr::Unit { .. } => Some(ir::Constant::Unit),
@@ -11667,6 +11722,7 @@ fn default_constant_for_type(ty: &ir::Type) -> ir::Constant {
             ir::Constant::Int(0)
         }
         ir::Type::Named { name, .. } if name == "Float" => ir::Constant::Float(0.0),
+        ir::Type::Named { name, .. } if name == "Decimal" => ir::Constant::Decimal("0".to_string()),
         ir::Type::Named { name, .. } if name == "Str" => ir::Constant::String(String::new()),
         _ => ir::Constant::Unit,
     }
@@ -11757,6 +11813,10 @@ fn is_named_runtime_value_path(program: &ir::Program, path: &[String]) -> bool {
     {
         return true;
     }
+    if matches!(path, [owner, case] if owner == "Rounding" && crate::decimal::is_rounding_name(case))
+    {
+        return true;
+    }
 
     if single_type_exists(program, &path[0]) {
         return true;
@@ -11774,7 +11834,7 @@ fn is_named_runtime_callee_path(program: &ir::Program, path: &[String]) -> bool 
     if declared_type_exists(program, &path.join(".")) {
         return true;
     }
-    if matches!(path, [owner, method] if ((owner == "Int" || owner == "Float") && method == "parse")
+    if matches!(path, [owner, method] if (matches!(owner.as_str(), "Int" | "Float" | "Decimal") && method == "parse")
         || (owner == "Option" && method == "when"))
     {
         return true;
@@ -11802,6 +11862,8 @@ fn runtime_callable_root_name(name: &str) -> bool {
         "OS" | "Math"
             | "File"
             | "SeekFrom"
+            | "Rounding"
+            | "Decimal"
             | "Range"
             | "IntRange"
             | "Vector"
@@ -11830,7 +11892,7 @@ fn single_type_exists(program: &ir::Program, name: &str) -> bool {
 }
 
 fn builtin_zero_arg_value_name(name: &str) -> bool {
-    matches!(name, "None")
+    matches!(name, "None") || crate::decimal::is_rounding_name(name)
 }
 
 fn core_pattern_case_fields(
@@ -11851,12 +11913,14 @@ fn core_pattern_case_fields(
         "Some" | "None" if path.len() == 1 => "Option",
         "Ok" | "Err" if path.len() == 1 => "Result",
         "Left" | "Right" if path.len() == 1 => "Either",
+        name if crate::decimal::is_rounding_name(name) => "Rounding",
         _ => inferred_owner?,
     };
 
     let fields = match (owner, case_name) {
         ("Option", "Some") | ("Result", "Ok") | ("Either", "Left" | "Right") => &["value"][..],
         ("Option", "None") | ("SeekFrom", "Start" | "Current" | "End") => &[],
+        ("Rounding", name) if crate::decimal::is_rounding_name(name) => &[],
         ("Result", "Err") => &["error"],
         ("FileError", "NotFound" | "AccessDenied" | "Closed") => &["path"],
         ("FileError", "InvalidEncoding") => &["path", "offset"],
