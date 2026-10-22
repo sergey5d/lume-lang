@@ -60,10 +60,10 @@ pub fn generate_java_path(
         });
     }
 
-    let load_options = ModuleLoadOptions {
-        library_modules: external_resolution.library_modules.clone(),
-        ..ModuleLoadOptions::default()
-    };
+    let mut load_options = ModuleLoadOptions::default();
+    load_options
+        .library_modules
+        .extend(external_resolution.library_modules.clone());
     let bundled = build_backend_bundle_with_load_options(path, &load_options)?;
     if !bundled.diagnostics.is_empty() {
         return Ok(JavaBackendResult {
@@ -78,7 +78,11 @@ pub fn generate_java_path(
     let bundle = bundled
         .bundle
         .expect("backend bundle after successful build");
-    let sources = emit::render_declaration_skeletons(&bundle, &external_resolution.classes);
+    let sources = emit::render_declaration_skeletons(
+        &bundle,
+        &external_resolution.classes,
+        discovered_externals.native_regex,
+    );
     let unsupported_diagnostics =
         unsupported_java_body_diagnostics(&bundle.root_display_path, &sources);
     if !unsupported_diagnostics.is_empty() {
@@ -136,6 +140,7 @@ fn unsupported_java_body_diagnostics(
 struct JavaExternalSymbols {
     symbols: Vec<JavaExternalSymbol>,
     local_type_names: HashMap<String, String>,
+    native_regex: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -226,6 +231,10 @@ fn discover_java_external_symbols_from_path(
         .parent()
         .ok_or_else(|| format!("resolve module base for {}", abs.display()))?;
     for import in &program.imports {
+        if import.path == "lume/regex" {
+            discovered.native_regex = true;
+            continue;
+        }
         let module_file = format!("{}.lum", import.path);
         let rooted_child_path = source_root.join(&module_file);
         let relative_child_path = base_dir.join(&module_file);
@@ -5415,6 +5424,86 @@ def main() Unit {
                 "{main}: {stderr}"
             );
         }
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn native_regex_names_do_not_replace_unrelated_local_declarations() {
+        let temp = temp_path("lume-java-local-regex-names");
+        let out = temp.join("generated");
+        fs::create_dir_all(&temp).unwrap();
+        let source = temp.join("main.lum");
+        fs::write(
+            &source,
+            r#"
+module demo/regex_names
+
+class Regex { value Str }
+class RegexMatch { value Int }
+shape RegexError { message Str }
+
+def main() {
+    pattern = Regex("local")
+    hit = RegexMatch(3)
+    error = RegexError("local")
+    println(pattern.value, hit.value, error.message)
+}
+"#,
+        )
+        .unwrap();
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+        for name in ["Regex", "RegexMatch", "RegexError"] {
+            assert!(out.join(format!("demo/regex_names/{name}.java")).is_file());
+        }
+        let module =
+            fs::read_to_string(out.join("demo/regex_names/Regex_namesModule.java")).unwrap();
+        assert!(!module.contains("LumeRegex"), "{module}");
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn native_regex_captures_have_java_interpreter_parity() {
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let temp = temp_path("lume-java-regex-captures");
+        let out = temp.join("generated");
+        let classes = temp.join("classes");
+        let source = root.join("examples/features/regex_captures.lum");
+        let interpreted = run_path(&source, None).expect("run regex capture example");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:#?}",
+            interpreted.diagnostics
+        );
+        let expected = interpreter_stdout(interpreted);
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:#?}",
+            generated.diagnostics
+        );
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac regex captures",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.regex_captures.Regex_capturesMain"),
+            "java regex captures",
+        );
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
         let _ = fs::remove_dir_all(temp);
     }
 

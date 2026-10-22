@@ -5694,6 +5694,11 @@ impl<'a> FunctionLowerer<'a> {
             [owner, method] if owner == "Decimal" && method == "parse" => {
                 Some(ir::Type::option(ir::Type::named("Decimal")))
             }
+            [owner, method] if owner == "Regex" && method == "compile" => Some(ir::Type::Named {
+                name: "Result".to_string(),
+                args: vec![ir::Type::named("Regex"), ir::Type::named("RegexError")],
+            }),
+            [owner, method] if owner == "Regex" && method == "escape" => Some(ir::Type::Str),
             [owner, method] if owner == "File" && method == "readBytes" => Some(ir::Type::Named {
                 name: "Result".to_string(),
                 args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],

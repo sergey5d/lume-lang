@@ -1,0 +1,94 @@
+# EXPECT:
+# regex captures ok
+
+module examples/regex_captures
+
+use lume/regex/{Regex, RegexMatch}
+
+def checked(pattern Str) Result[Regex, Str] =
+    Regex.compile(pattern).mapError(error => error.message)
+
+def capturedName(hit RegexMatch) Str? = hit.group("name")
+
+def main() {
+    pattern = checked(raw"(?<name>[A-Za-z]+)(?:-(?<number>[0-9]+))?")!
+    hit = pattern.fullMatch("Ada")!
+    assert(hit.text == "Ada")
+    assert(hit.toStr() == "RegexMatch(Ada)")
+    assert(pattern.toStr().startsWith("Regex("))
+    assert(hit.start == 0 && hit.end == 3)
+    assert(hit.group(0)! == "Ada")
+    assert(hit.group(1)! == "Ada")
+    assert(capturedName(hit)! == "Ada")
+    assert(hit.group(2).isEmpty)
+    assert(hit.group("number").isEmpty)
+    assert(hit.group(-1).isEmpty && hit.group(99).isEmpty)
+    assert(hit.group("missing").isEmpty)
+
+    groups [Str?] = hit.groups
+    assert(groups.size == 3)
+    assert(groups[0]! == "Ada" && groups[1]! == "Ada")
+    assert(groups[2].isEmpty)
+    named [Str: Str] = hit.groupMap
+    assert(named.size == 1)
+    assert(named["name"]! == "Ada")
+    assert(!named.contains("number"))
+    assert(named["number"].isEmpty)
+
+    # Returned collections are snapshots, not mutable match storage.
+    groups.add(Some("changed"))
+    groups.add(None)
+    named["name"] := "changed"
+    named["extra"] := "new"
+    assert(hit.groups.size == 3 && hit.groups[0]! == "Ada")
+    assert(hit.groupMap.size == 1 && hit.groupMap["name"]! == "Ada")
+    assert(hit.group(0)! == "Ada" && hit.group("name")! == "Ada")
+
+    second = pattern.fullMatch("Grace-42")!
+    assert(second.groups[2]! == "42")
+    assert(second.groupMap["number"]! == "42")
+    assert(hit.group("name")! == "Ada")
+    empty = Regex.compile(raw"(?<empty>)(?<absent>x)?")!.fullMatch("")!
+    assert(empty.groups.size == 3)
+    assert(empty.groups[0]! == "" && empty.groups[1]! == "")
+    assert(empty.groups[2].isEmpty)
+    assert(empty.groupMap.size == 1 && empty.groupMap["empty"]! == "")
+    assert(!empty.groupMap.contains("absent"))
+    plain = Regex.compile("plain")!.find("some plain text")!
+    assert(plain.groups.size == 1 && plain.groups[0]! == "plain")
+    assert(plain.groupMap.isEmpty)
+
+    mixed = Regex.compile(raw"(?<first>a)(b)(?:c)(?<last>d)")!.fullMatch("abcd")!
+    assert(mixed.groups.size == 4)
+    assert(mixed.groups[2]! == "b" && mixed.groupMap.size == 2)
+    assert(mixed.groupMap["last"]! == "d")
+    branch = Regex.compile(raw"(?<left>a)|(?<right>b)")!.fullMatch("b")!
+    assert(branch.groups[1].isEmpty && branch.groups[2]! == "b")
+    assert(branch.groupMap.size == 1 && branch.groupMap["right"]! == "b")
+    repeated = Regex.compile(raw"(?<last>[a-z])+")!.fullMatch("abc")!
+    assert(repeated.group("last")! == "c")
+
+    input = "😀Ada-7 Grace"
+    first = pattern.find(input)!
+    assert(first.start == 1 && first.end == 6)
+    assert(input[first.start: first.end] == first.text)
+    all = pattern.findAll(input)
+    assert(all.size == 2)
+    assert(all[0].group("number")! == "7")
+    assert(all[1].start == 7 && all[1].group("name")! == "Grace")
+    assert(all[1].groupMap["number"].isEmpty)
+    assert(pattern.contains("!Ada!") && !pattern.matches("!Ada!"))
+    assert(pattern.fullMatch("123").isEmpty && pattern.find("123").isEmpty)
+    assert(pattern.findAll("123").isEmpty)
+    assert(Regex.compile("a|ab")!.matches("ab"))
+    zero = Regex.compile("")!.findAll("😀")
+    assert(zero.size == 2 && zero[0].start == 0 && zero[1].start == 1)
+    assert(Regex.compile("a*")!.findAll("a").size == 1)
+    assert(Regex.compile("(?i)abc")!.matches("ABC"))
+    assert(Regex.compile(Regex.escape("a+b.(c)"))!.matches("a+b.(c)"))
+    invalid = Regex.compile("[")
+    assert(invalid.isErr)
+    let Err(error) = invalid else panic("invalid regex should fail")
+    assert(error.message.nonEmpty)
+    println("regex captures ok")
+}

@@ -25,9 +25,21 @@ const MAX_JAVA_FUNCTION_ARITY: usize = 12;
 pub(crate) fn render_declaration_skeletons(
     bundle: &BackendBundle,
     external_classes: &HashMap<String, JavaExternalClass>,
+    native_regex: bool,
 ) -> Vec<JavaSource> {
     let package = JavaPackage::from_module(bundle.ir.module.as_deref());
-    let names = JavaNames::from_external_classes(external_classes);
+    let mut names = JavaNames::from_external_classes(external_classes);
+    if native_regex {
+        for (name, java_name) in [
+            ("Regex", "lume.core.LumeRegex"),
+            ("RegexMatch", "lume.core.LumeRegexMatch"),
+            ("RegexError", "lume.core.RegexError"),
+        ] {
+            names
+                .java_types
+                .insert(name.to_string(), java_name.to_string());
+        }
+    }
     let mut sources = Vec::new();
     let mut source_indexes = HashMap::new();
 
@@ -9159,6 +9171,15 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some(format!("lume.core.LumeFile.{name}({arg})"))
             }
             core::Expr::Member { receiver, name, .. }
+                if matches!(receiver.as_ref(), core::Expr::Identifier { name, .. } if name == "Regex")
+                    && self.names.has_native_regex()
+                    && matches!(name.as_str(), "compile" | "escape")
+                    && args.len() == 1 =>
+            {
+                let arg = self.emit_call_arg(&args[0], bindings)?;
+                Some(format!("lume.core.LumeRegex.{name}({arg})"))
+            }
+            core::Expr::Member { receiver, name, .. }
                 if name == "iterator"
                     && args.is_empty()
                     && matches!(
@@ -9581,6 +9602,13 @@ impl<'a> SourceBodyEmitter<'a> {
                     ) =>
             {
                 Some(format!("lume.core.LumeFile.{method}({joined})"))
+            }
+            [owner, method]
+                if owner == "Regex"
+                    && self.names.has_native_regex()
+                    && matches!(method.as_str(), "compile" | "escape") =>
+            {
+                Some(format!("lume.core.LumeRegex.{method}({joined})"))
             }
             [owner] if self.names.is_java_type(owner) => Some(format!(
                 "new {}{}({joined})",
@@ -11481,6 +11509,25 @@ impl<'a> JavaIrSupport<'a> {
                 Some(ir::Type::option(ir::Type::named("Decimal")))
             }
             [owner, method]
+                if owner == "Regex"
+                    && self.names.has_native_regex()
+                    && method == "compile"
+                    && arg_len == 1 =>
+            {
+                Some(ir::Type::Named {
+                    name: "Result".to_string(),
+                    args: vec![ir::Type::named("Regex"), ir::Type::named("RegexError")],
+                })
+            }
+            [owner, method]
+                if owner == "Regex"
+                    && self.names.has_native_regex()
+                    && method == "escape"
+                    && arg_len == 1 =>
+            {
+                Some(ir::Type::Str)
+            }
+            [owner, method]
                 if owner == "Math" && matches!(method.as_str(), "min" | "max") && arg_len == 2 =>
             {
                 Some(ir::Type::Unknown)
@@ -12352,6 +12399,12 @@ impl JavaNames {
 
     fn is_java_type(&self, name: &str) -> bool {
         self.java_types.contains_key(name)
+    }
+
+    fn has_native_regex(&self) -> bool {
+        self.java_types
+            .get("Regex")
+            .is_some_and(|name| name == "lume.core.LumeRegex")
     }
 
     fn is_java_single_type(&self, name: &str) -> bool {

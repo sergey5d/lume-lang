@@ -211,6 +211,14 @@ pub(crate) struct LibraryModule {
 fn native_library_modules() -> HashMap<String, LibraryModule> {
     let mut modules = HashMap::new();
     modules.insert(
+        "lume/regex".to_string(),
+        LibraryModule {
+            program: native_regex_program(),
+            typecheck_only_types: HashSet::new(),
+            source_path: Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/native_regex.lum")),
+        },
+    );
+    modules.insert(
         "lume/json".to_string(),
         LibraryModule {
             program: native_json_program(),
@@ -219,6 +227,23 @@ fn native_library_modules() -> HashMap<String, LibraryModule> {
         },
     );
     modules
+}
+
+fn native_regex_program() -> Program {
+    static PROGRAM: OnceLock<Program> = OnceLock::new();
+    PROGRAM
+        .get_or_init(|| {
+            let file = SourceFile::new(
+                "<native:lume/regex>",
+                include_str!("native_regex.lum").to_string(),
+            );
+            let lexed = lex(&file);
+            assert!(lexed.diagnostics.is_empty(), "{:#?}", lexed.diagnostics);
+            let parsed = parse_program(&lexed.tokens);
+            assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+            parsed.program.expect("native lume/regex program")
+        })
+        .clone()
 }
 
 fn native_json_program() -> Program {

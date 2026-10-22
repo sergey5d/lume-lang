@@ -658,6 +658,55 @@ Ordinary `"..."` and `raw"..."` strings cannot cross a physical newline; use
 the `\n` escape for a line break inside an ordinary string or triple quotes for
 multiline source text.
 
+## Compiled Regular Expressions
+
+Import `Regex` from `lume/regex` to compile a reusable pattern. This API is
+implemented by the Rust interpreter and the Java core runtime; no application
+Java helper or additional application jar is needed.
+
+```txt
+use lume/regex/{Regex, RegexMatch}
+
+pattern = Regex.compile(raw"(?<name>[A-Za-z]+)(?:-(?<number>[0-9]+))?")!
+hit = pattern.fullMatch("Ada")!
+hit.groups       # [Some("Ada"), Some("Ada"), None]
+hit.groupMap     # ["name": "Ada"]
+hit.group("name") # Some("Ada")
+```
+
+- `Regex.compile(pattern)` returns `Result[Regex, RegexError]`. Invalid patterns
+  are errors, not ordinary non-matches. `RegexError.message` describes the error;
+  `offset` is an optional Unicode-scalar position within the pattern.
+- `Regex.escape(text)` quotes literal text for use as a pattern.
+- `contains(text)` searches anywhere; `matches(text)` requires the entire input
+  to match. `find(text)` returns the first `RegexMatch?`, and `fullMatch(text)`
+  returns a match only when the entire input matches.
+- `findAll(text)` returns a vector of non-overlapping matches in input order.
+  Empty matches terminate safely and occur only at Unicode-scalar boundaries;
+  an empty match immediately following another match at the same boundary is
+  skipped.
+- `RegexMatch.text` contains the whole match. `start` and exclusive `end` are
+  Unicode-scalar indexes suitable for `input[start:end]`.
+- `group(index)` and `group(name)` return `Str?`. Group `0` is the whole match.
+  An unknown group or an optional group that did not participate returns `None`;
+  a participating empty group returns `Some("")`. Repeated captures expose the
+  final participating capture, not a history of captures.
+- `groups` is a `[Str?]` snapshot including group `0`, then all capturing groups
+  in opening-parenthesis order. Named groups also occupy numbered positions;
+  non-capturing groups do not. Unmatched groups retain their `None` slots.
+- `groupMap` is a `[Str: Str]` snapshot containing only participating named
+  groups, including matched empty strings. Unmatched named groups are omitted.
+  Normal map lookup therefore returns `Str?`, not `Str??`.
+- Changing either returned collection does not change the match or later reads.
+  Regex and match handles cannot be directly constructed by application code.
+
+Patterns currently use the runtime's regex engine: Rust `regex` in the
+interpreter and `java.util.regex.Pattern` in Java. Common named captures, ordinary
+character classes, repetitions, and inline `(?i)` flags work on both. An identical
+extended pattern dialect is not guaranteed; in particular, Java-only look-around
+and backreferences are not portable. The existing string split/replacement APIs
+retain their current contracts.
+
 ## OS / Printing
 
 Console printing is available through `OS`:

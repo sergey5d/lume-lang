@@ -8,6 +8,9 @@ use std::{
     rc::Rc,
 };
 
+mod regex;
+use self::regex::{RegexMatchValue, RegexValue};
+
 use crate::{
     ast,
     decimal::Decimal,
@@ -915,6 +918,8 @@ pub(crate) enum Value {
     Closure(Rc<ClosureValue>),
     FileStream(Rc<RefCell<FileStreamValue>>),
     TextFileReader(Rc<RefCell<TextFileReaderValue>>),
+    Regex(Rc<RegexValue>),
+    RegexMatch(Rc<RegexMatchValue>),
     ReferenceId(ReferenceIdValue),
     RuntimeType(RuntimeTypeValue),
     RuntimeField {
@@ -1098,6 +1103,8 @@ impl Value {
             Value::TextFileReader(reader) => {
                 format!("TextFileReader({})", reader.borrow().path)
             }
+            Value::Regex(regex) => format!("Regex({})", regex.pattern()),
+            Value::RegexMatch(hit) => format!("RegexMatch({})", hit.text()),
             Value::ReferenceId(_) => "<reference>".to_string(),
             Value::RuntimeType(runtime_type) => format!("type {}", runtime_type.render()),
             Value::RuntimeField { .. } => "<field>".to_string(),
@@ -2139,6 +2146,10 @@ impl<'a> Interpreter<'a> {
             Value::TextFileReader(_) => {
                 self.runtime_type_value_for_ir_type(&ir::Type::named("TextFileReader"))
             }
+            Value::Regex(_) => self.runtime_type_value_for_ir_type(&ir::Type::named("Regex")),
+            Value::RegexMatch(_) => {
+                self.runtime_type_value_for_ir_type(&ir::Type::named("RegexMatch"))
+            }
             Value::RuntimeType(_) => self.runtime_type_value_for_ir_type(&ir::Type::Named {
                 name: "Type".to_string(),
                 args: vec![ir::Type::named("Any")],
@@ -3097,6 +3108,9 @@ impl<'a> Interpreter<'a> {
         }
         if path[0] == "Json" && path.len() == 2 {
             return self.invoke_json_method(&path[1], args, span);
+        }
+        if path[0] == "Regex" && path.len() == 2 {
+            return self.invoke_regex_static(&path[1], args, span);
         }
 
         if matches!(path[0].as_str(), "Array" | "Vector") && path.len() == 2 {
@@ -5601,6 +5615,12 @@ impl<'a> Interpreter<'a> {
             Value::TextFileReader(reader) => {
                 return self.invoke_text_file_reader_method(reader.clone(), method, args, span);
             }
+            Value::Regex(regex) if method != "toStr" => {
+                return self.invoke_regex_method(regex.clone(), method, args, span);
+            }
+            Value::RegexMatch(hit) if method != "toStr" => {
+                return self.invoke_regex_match_method(hit.clone(), method, args, span);
+            }
             _ => {}
         }
 
@@ -7078,6 +7098,8 @@ impl<'a> Interpreter<'a> {
                 Value::TextFileReader(_) => {
                     matches!(name.as_str(), "TextFileReader" | "TextReader" | "Closeable")
                 }
+                Value::Regex(_) => name == "Regex",
+                Value::RegexMatch(_) => name == "RegexMatch",
                 other => self
                     .runtime
                     .type_by_name_kind(name, crate::ast::TypeKind::Record)
@@ -7830,6 +7852,8 @@ fn values_identical(left: &Value, right: &Value) -> bool {
         (Value::Aggregate(lhs), Value::Aggregate(rhs)) => Rc::ptr_eq(lhs, rhs),
         (Value::FileStream(lhs), Value::FileStream(rhs)) => Rc::ptr_eq(lhs, rhs),
         (Value::TextFileReader(lhs), Value::TextFileReader(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::Regex(lhs), Value::Regex(rhs)) => Rc::ptr_eq(lhs, rhs),
+        (Value::RegexMatch(lhs), Value::RegexMatch(rhs)) => Rc::ptr_eq(lhs, rhs),
         _ => false,
     }
 }
@@ -7843,6 +7867,8 @@ fn reference_identity_address(value: &Value) -> Option<usize> {
         Value::Aggregate(value) => Some(Rc::as_ptr(value) as usize),
         Value::FileStream(value) => Some(Rc::as_ptr(value) as usize),
         Value::TextFileReader(value) => Some(Rc::as_ptr(value) as usize),
+        Value::Regex(value) => Some(Rc::as_ptr(value) as usize),
+        Value::RegexMatch(value) => Some(Rc::as_ptr(value) as usize),
         _ => None,
     }
 }
@@ -12170,5 +12196,53 @@ class LaterSpec with Spec {
             run.output,
             "PASS PassingSpec\nFAIL FailingSpec\nPASS LaterSpec\n\n2 passed, 1 failed\n"
         );
+    }
+
+    #[test]
+    fn native_regex_captures_preserve_optional_groups_and_snapshot_collections() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../examples/features/regex_captures.lum");
+        let result = run_path(path, None).expect("run regex capture example");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        assert_eq!(result.output, "regex captures ok\n");
+    }
+
+    #[test]
+    fn native_regex_handles_are_opaque_and_capture_accessors_are_getters() {
+        let temp = repo_root().join(format!(
+            "rust/target/lume-regex-checks-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp).expect("create regex test directory");
+        let path = temp.join("main.lum");
+        for statement in ["value = Regex()", "value = RegexMatch()"] {
+            fs::write(
+                &path,
+                format!("use lume/regex/{{Regex, RegexMatch}}\ndef main() {{\n{statement}\n}}\n"),
+            )
+            .unwrap();
+            let checked = check_path(&path).unwrap();
+            assert!(
+                checked
+                    .diagnostics
+                    .iter()
+                    .any(|error| error.diagnostic.code == "constructor_unavailable"),
+                "{statement}: {:#?}",
+                checked.diagnostics
+            );
+        }
+        for getter in ["groups", "groupMap"] {
+            fs::write(&path, format!("use lume/regex/Regex\ndef main() {{\nhit = Regex.compile(\"a\")!.find(\"a\")!\nvalue = hit.{getter}()\n}}\n")).unwrap();
+            let checked = check_path(&path).unwrap();
+            assert!(
+                checked
+                    .diagnostics
+                    .iter()
+                    .any(|error| error.diagnostic.code == "getter_call_syntax"),
+                "{getter}: {:#?}",
+                checked.diagnostics
+            );
+        }
+        fs::remove_dir_all(temp).unwrap();
     }
 }
