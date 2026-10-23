@@ -11,6 +11,7 @@ pub mod ir;
 pub mod java_backend;
 pub mod lexer;
 pub mod lower;
+mod mixins;
 mod numeric;
 pub mod parser;
 pub mod resolver;

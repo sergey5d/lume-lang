@@ -21,6 +21,17 @@ pub struct LowerResult {
 }
 
 pub fn lower_program(program: &ast::Program) -> LowerResult {
+    let composed = match crate::mixins::compose(program) {
+        Ok(program) => program,
+        Err(diagnostics) => {
+            return LowerResult {
+                program: None,
+                core_bodies: HashMap::new(),
+                diagnostics,
+            };
+        }
+    };
+    let program = &composed;
     let mut lowerer = Lowerer::new(program);
     let lowered = lowerer.lower();
     LowerResult {
@@ -11244,7 +11255,9 @@ fn ir_type_is_hashable(
                     hashable
                 }
                 ast::TypeKind::Class => ir_type_has_hashed_bound(definition, ty, types, seen),
-                ast::TypeKind::Annotation | ast::TypeKind::Interface => false,
+                ast::TypeKind::Annotation | ast::TypeKind::Interface | ast::TypeKind::Mixin => {
+                    false
+                }
             }
         }
         ir::Type::Unknown | ir::Type::Never | ir::Type::Function { .. } => false,
@@ -11321,7 +11334,7 @@ fn ir_type_is_equality(
                 ast::TypeKind::Class | ast::TypeKind::Interface => {
                     ir_type_has_equality_bound(definition, ty, types, seen)
                 }
-                ast::TypeKind::Annotation => false,
+                ast::TypeKind::Annotation | ast::TypeKind::Mixin => false,
             }
         }
         ir::Type::Unknown | ir::Type::Never | ir::Type::Function { .. } => false,

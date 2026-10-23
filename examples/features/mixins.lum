@@ -1,0 +1,133 @@
+# EXPECT:
+# mixins ok
+
+module examples/mixins
+
+use mixins_support/{Counted, CountParts as ImportedParts}
+
+interface Sized {
+    get size Int
+}
+
+interface Described {
+    def describe() Str
+}
+
+mixin CollectionParts with Sized {
+    get nonEmpty Bool = this.size > 0
+
+    def describe() Str =
+        if this.nonEmpty { "has elements" } else { "empty" }
+
+    def describeLater() fn() Str = () => this.describe()
+}
+
+class Bag with Sized, Described {
+    use CollectionParts
+
+    items [Int]
+    get size Int = items.size
+
+    def viaMember() Str = describe()
+}
+
+class AlwaysNonEmpty with Sized, Described {
+    use CollectionParts
+
+    get size Int = 0
+    get nonEmpty Bool = true
+}
+
+mixin FirstLabel {
+    get label Str = "first"
+}
+
+mixin SecondLabel {
+    get label Str = "second"
+}
+
+class ResolvedLabel {
+    use FirstLabel
+    use SecondLabel
+
+    get label Str = "resolved"
+}
+
+class ReverseResolvedLabel {
+    use SecondLabel
+    use FirstLabel
+
+    get label Str = "resolved"
+}
+
+class ImportedCounter with Counted {
+    use ImportedParts
+    count Int
+
+    def report() Str = summary()
+}
+
+mixin IntRendering {
+    def render(value Int) Str = "int " + value
+}
+
+mixin StrRendering {
+    def render(value Str) Str = "str " + value
+}
+
+class Renderer {
+    use IntRendering
+    use StrRendering
+}
+
+interface Values[T] {
+    get first T
+}
+
+mixin ValueParts[T] with Values[T] {
+    def copyFirst() T {
+        value T = this.first
+        value
+    }
+
+    def identity[V](value V) V = value
+}
+
+class IntValue with Values[Int] {
+    use ValueParts[Int]
+    first Int
+}
+
+class GenericValue[T] with Values[T] {
+    use ValueParts[T]
+    first T
+}
+
+def described[T with Described](value T) Str = value.describe()
+
+def main() {
+    empty = Bag([])
+    full = Bag([1, 2])
+    assert(!empty.nonEmpty && empty.describe() == "empty")
+    assert(full.nonEmpty && full.describe() == "has elements")
+    assert(full.viaMember() == "has elements")
+    callback fn() Str = full.describe
+    assert(callback() == "has elements")
+    replacement = AlwaysNonEmpty()
+    assert(replacement.size == 0 && replacement.describe() == "has elements")
+    later = replacement.describeLater()
+    assert(later() == "has elements")
+    view Described = replacement
+    assert(view.describe() == "has elements")
+    assert(described(replacement) == "has elements")
+    assert(ResolvedLabel().label == "resolved")
+    assert(ReverseResolvedLabel().label == "resolved")
+    assert(ImportedCounter(3).report() == "3 imported")
+    assert(Renderer().render(7) == "int 7")
+    assert(Renderer().render("hello") == "str hello")
+    assert(IntValue(42).copyFirst() == 42)
+    generic GenericValue[Str] = GenericValue("hello")
+    assert(generic.copyFirst() == "hello")
+    assert(IntValue(42).identity[Str]("generic method") == "generic method")
+    println("mixins ok")
+}

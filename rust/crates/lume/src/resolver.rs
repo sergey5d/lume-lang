@@ -473,6 +473,9 @@ impl SymbolKind {
             SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Interface)) => {
                 "interface constructor parameter"
             }
+            SymbolKind::Parameter(ParameterKind::Constructor(TypeKind::Mixin)) => {
+                "mixin constructor parameter"
+            }
             SymbolKind::This => "'this' receiver",
             SymbolKind::EnumCase => "union variant",
         }
@@ -1282,6 +1285,7 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
         bounds: decl
             .with_bounds
             .iter()
+            .chain(&decl.mixins)
             .filter_map(type_ref_name)
             .map(str::to_string)
             .collect(),
@@ -1898,6 +1902,9 @@ impl<'a> Resolver<'a> {
         for bound in &decl.with_bounds {
             self.resolve_type_ref(Some(bound));
         }
+        for mixin in &decl.mixins {
+            self.resolve_type_ref_with_mixin(Some(mixin), true);
+        }
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
@@ -1959,14 +1966,50 @@ impl<'a> Resolver<'a> {
                 }
             }
         }
-        self.push_method_hints(decl.members.iter().filter_map(|member| match member {
-            TypeMember::Method(method) => Some(method.name.as_str()),
-            _ => None,
-        }));
-        self.push_getter_hints(decl.members.iter().filter_map(|member| match member {
-            TypeMember::Method(method) if method.getter => Some(method.name.as_str()),
-            _ => None,
-        }));
+        let mut inherited_methods = HashMap::new();
+        let mut pending = decl
+            .with_bounds
+            .iter()
+            .chain(&decl.mixins)
+            .filter_map(type_ref_name)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut seen = HashSet::new();
+        while let Some(name) = pending.pop() {
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            if let Some(info) = self.lookup_type(&name) {
+                inherited_methods.extend(info.methods.clone());
+                pending.extend(info.bounds.clone());
+            }
+        }
+        let mut method_hints = inherited_methods.keys().cloned().collect::<HashSet<_>>();
+        let mut getter_hints = inherited_methods
+            .iter()
+            .filter(|(_, member)| member.getter)
+            .map(|(name, _)| name.clone())
+            .collect::<HashSet<_>>();
+        method_hints.extend(
+            decl.members
+                .iter()
+                .filter_map(|member| match member {
+                    TypeMember::Method(method) => Some(method.name.as_str()),
+                    _ => None,
+                })
+                .map(str::to_string),
+        );
+        getter_hints.extend(
+            decl.members
+                .iter()
+                .filter_map(|member| match member {
+                    TypeMember::Method(method) if method.getter => Some(method.name.as_str()),
+                    _ => None,
+                })
+                .map(str::to_string),
+        );
+        self.push_method_hints(method_hints.iter().map(String::as_str));
+        self.push_getter_hints(getter_hints.iter().map(String::as_str));
         for member in &decl.members {
             match member {
                 TypeMember::Method(method) => self.resolve_method(method),
@@ -2974,6 +3017,10 @@ impl<'a> Resolver<'a> {
     // resolve_type_ref validates structural type syntax and generic arity, but
     // intentionally stops short of producing any typed representation.
     fn resolve_type_ref(&mut self, reference: Option<&TypeRef>) {
+        self.resolve_type_ref_with_mixin(reference, false);
+    }
+
+    fn resolve_type_ref_with_mixin(&mut self, reference: Option<&TypeRef>, allow_mixin: bool) {
         let Some(reference) = reference else {
             return;
         };
@@ -3054,6 +3101,9 @@ impl<'a> Resolver<'a> {
                 }
                 if let Some(info) = self.lookup_type(name) {
                     let arity = info.arity;
+                    if info.kind == TypeKind::Mixin && !allow_mixin {
+                        self.add_error("mixin_not_a_type", format!("mixin '{name}' is not a value type; adopt it inside a class with 'use {name}'"), *span);
+                    }
                     self.record_definition(*span, self.type_definition(name));
                     if args.len() != arity {
                         self.add_error(
@@ -4411,6 +4461,7 @@ fn field_label(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape field",
         TypeKind::Object => "object field",
         TypeKind::Interface => "interface field",
+        TypeKind::Mixin => "mixin field",
         TypeKind::Enum => "declared-union field",
     }
 }

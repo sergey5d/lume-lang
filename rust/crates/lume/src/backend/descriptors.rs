@@ -146,6 +146,7 @@ fn describe_type_kind(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape",
         TypeKind::Object => "object",
         TypeKind::Interface => "interface",
+        TypeKind::Mixin => "mixin",
         TypeKind::Enum => "union",
     }
 }

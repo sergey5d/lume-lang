@@ -1,0 +1,11 @@
+module examples/mixins_support
+
+public interface Counted {
+    get count Int
+}
+
+def suffix() Str = " imported"
+
+public mixin CountParts with Counted {
+    def summary() Str = this.count.toStr() + suffix()
+}

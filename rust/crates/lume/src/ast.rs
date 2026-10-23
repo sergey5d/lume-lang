@@ -82,10 +82,11 @@ pub enum TypeKind {
     Record,
     Object,
     Interface,
+    Mixin,
     Enum,
 }
 
-/// An `annotation`, `class`, `shape`, `object`, `interface`, or `enum` declaration.
+/// An annotation, class, shape, object, interface, mixin, or declared union.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeDecl {
     pub annotations: Vec<Annotation>,
@@ -95,6 +96,8 @@ pub struct TypeDecl {
     pub type_params: Vec<TypeParam>,
     pub type_conditions: Vec<GenericCondition>,
     pub with_bounds: Vec<TypeRef>,
+    /// Explicit, stateless behavior adopted by a class with `use MixinName`.
+    pub mixins: Vec<TypeRef>,
     pub members: Vec<TypeMember>,
     pub span: Span,
 }

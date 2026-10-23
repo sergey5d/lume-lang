@@ -118,6 +118,7 @@ impl<'a> Parser<'a> {
             | TokenKind::Keyword(Keyword::Class)
             | TokenKind::Keyword(Keyword::Shape)
             | TokenKind::Keyword(Keyword::Object)
+            | TokenKind::Keyword(Keyword::Mixin)
             | TokenKind::Keyword(Keyword::Interface) => {
                 let decl = self.parse_type_decl(annotations, visibility)?;
                 Some(Item::Type(decl))
@@ -478,6 +479,7 @@ impl<'a> Parser<'a> {
             type_params: generic_clause.params,
             type_conditions: generic_clause.conditions,
             with_bounds,
+            mixins: Vec::new(),
             members,
             span: start.cover(end),
         }))
@@ -630,6 +632,11 @@ impl<'a> Parser<'a> {
                 self.advance();
                 (TypeKind::Interface, span)
             }
+            TokenKind::Keyword(Keyword::Mixin) => {
+                let span = self.current_span();
+                self.advance();
+                (TypeKind::Mixin, span)
+            }
             _ => {
                 self.error_at_current(
                     "expected_type_decl",
@@ -640,6 +647,13 @@ impl<'a> Parser<'a> {
         };
 
         let (simple_name, _) = self.expect_identifier("expected type name")?;
+        if kind == TypeKind::Mixin && !annotations.is_empty() {
+            self.diagnostics.push(Diagnostic::error(
+                "invalid_mixin_annotation",
+                "mixins have no runtime metadata and cannot be annotated",
+                annotations[0].span,
+            ));
+        }
         let name = self
             .type_path
             .last()
@@ -680,6 +694,7 @@ impl<'a> Parser<'a> {
         self.skip_newlines();
 
         let mut members = Vec::new();
+        let mut mixins = Vec::new();
         let mut invalid_constructors = Vec::new();
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             self.skip_newlines();
@@ -698,7 +713,25 @@ impl<'a> Parser<'a> {
                 ));
             }
             match self.current_kind() {
+                TokenKind::Keyword(Keyword::Use) => {
+                    let start = self.current_span();
+                    self.advance();
+                    if kind != TypeKind::Class {
+                        self.diagnostics.push(Diagnostic::error(
+                            "invalid_mixin_use",
+                            "only classes may adopt mixins with 'use'",
+                            start,
+                        ));
+                    }
+                    mixins.push(self.parse_type_ref()?);
+                }
                 TokenKind::Keyword(Keyword::Type) if self.starts_type_alias_decl() => {
+                    if kind == TypeKind::Mixin {
+                        self.error_at_current(
+                            "mixin_nested_declaration",
+                            "mixin bodies contain methods and getters, not nested declarations",
+                        );
+                    }
                     let nested =
                         self.parse_type_alias_or_union_decl(member_annotations, member_visibility)?;
                     self.nested_items.push(nested);
@@ -707,7 +740,14 @@ impl<'a> Parser<'a> {
                 | TokenKind::Keyword(Keyword::Class)
                 | TokenKind::Keyword(Keyword::Shape)
                 | TokenKind::Keyword(Keyword::Object)
+                | TokenKind::Keyword(Keyword::Mixin)
                 | TokenKind::Keyword(Keyword::Interface) => {
+                    if kind == TypeKind::Mixin {
+                        self.error_at_current(
+                            "mixin_nested_declaration",
+                            "mixin bodies contain methods and getters, not nested declarations",
+                        );
+                    }
                     let nested = self.parse_type_decl(member_annotations, member_visibility)?;
                     self.nested_items.push(Item::Type(nested));
                 }
@@ -776,6 +816,13 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let field = self.parse_field_decl(member_annotations, member_visibility)?;
+                    if kind == TypeKind::Mixin {
+                        self.diagnostics.push(Diagnostic::error(
+                            "mixin_storage",
+                            "mixins cannot declare stored fields; require an interface getter instead",
+                            field.span,
+                        ));
+                    }
                     members.push(TypeMember::Field(field));
                 }
             }
@@ -799,6 +846,7 @@ impl<'a> Parser<'a> {
             type_params: generic_clause.params,
             type_conditions: generic_clause.conditions,
             with_bounds,
+            mixins,
             members,
             span: start.cover(end),
         })
@@ -1332,6 +1380,7 @@ fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
                 "only classes can declare custom constructors; interface '{name}' cannot declare constructors"
             )
         }
+        TypeKind::Mixin => format!("mixin '{name}' cannot declare constructors"),
         TypeKind::Enum => {
             format!(
                 "only classes can declare custom constructors; declared union '{name}' uses variants for construction"

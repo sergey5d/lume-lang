@@ -16,6 +16,35 @@ fn parse(src: &str) -> ParseResult {
     parse_program(&lexed.tokens)
 }
 
+#[test]
+fn parses_stateless_mixins_and_rejects_storage_and_nonclass_adoption() {
+    let parsed = parse("mixin Parts { get count Int = 0 }\nclass Bag { use Parts }");
+    assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+    let program = parsed.program.unwrap();
+    assert!(matches!(&program.items[0], Item::Type(decl) if decl.kind == TypeKind::Mixin));
+    assert!(matches!(&program.items[1], Item::Type(decl) if decl.mixins.len() == 1));
+    for (source, code) in [
+        ("mixin Parts { value Int }", "mixin_storage"),
+        ("mixin Parts { new() {} }", "invalid_constructor_decl"),
+        ("shape S { use Parts }", "invalid_mixin_use"),
+        ("interface I { use Parts }", "invalid_mixin_use"),
+        (
+            "def f() { mixin Parts {} }",
+            "nested_declaration_in_callable",
+        ),
+    ] {
+        let parsed = parse(source);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == code),
+            "expected {code} for {source}: {:#?}",
+            parsed.diagnostics
+        );
+    }
+}
+
 fn parse_expr_only(src: &str) -> Expr {
     let file = SourceFile::new("test.lum", src);
     let lexed = lex(&file);

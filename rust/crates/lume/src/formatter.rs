@@ -295,6 +295,9 @@ fn collect_program_rewrites(
                 for annotation in &decl.annotations {
                     collect_annotation_rewrites(annotation, tokens, rewrites);
                 }
+                for mixin in &decl.mixins {
+                    collect_type_rewrites(mixin, tokens, rewrites);
+                }
                 for member in &decl.members {
                     match member {
                         TypeMember::Field(field) => {
@@ -1676,6 +1679,17 @@ def main() {
             result.text,
             "def main() {\n    spaced [Str: Int] = []\n    compact [Str: Int] = []\n}\n"
         );
+    }
+
+    #[test]
+    fn formats_mixin_adoption_and_generic_type_arguments() {
+        let source = "private mixin Parts[T] {\ndef keep(value Option[T]) Option[T] = value\n}\nclass Box {\nuse Parts[Option[Int]]\n}\n";
+        let result = format(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(result.text.contains("mixin Parts[T]"));
+        assert!(!result.text.contains("private mixin"));
+        assert!(result.text.contains("    use Parts[Int?]"));
+        assert_eq!(format(&result.text).text, result.text);
     }
 
     #[test]

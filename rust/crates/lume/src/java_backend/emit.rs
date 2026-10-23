@@ -240,6 +240,7 @@ fn render_type_shell(
         TypeKind::Object => render_single(bundle, ty, package, names),
         TypeKind::Interface => render_interface(bundle, ty, package, names),
         TypeKind::Enum => render_enum(bundle, ty, package, names),
+        TypeKind::Mixin => unreachable!("mixins are composed before lowering"),
     }
 }
 
@@ -1140,6 +1141,7 @@ fn lume_type_kind_name(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape",
         TypeKind::Object => "object",
         TypeKind::Interface => "interface",
+        TypeKind::Mixin => "mixin",
         TypeKind::Enum => "union",
     }
 }
@@ -1243,6 +1245,7 @@ fn type_descriptor_expr(
             methods,
             annotations
         ),
+        TypeKind::Mixin => unreachable!("mixins have no runtime type descriptor"),
     }
 }
 
@@ -7523,6 +7526,31 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         expected: &ir::Type,
     ) -> Option<String> {
+        if let core::Expr::Member { receiver, name, .. } = expr
+            && let ir::Type::Function { params, .. } = expected
+            && let Some(receiver_ty @ ir::Type::Named { .. }) = self.expr_type(receiver, bindings)
+        {
+            let support = JavaIrSupport::new(self.bundle, self.function, self.names);
+            let ir::Type::Named {
+                name: owner_name, ..
+            } = &receiver_ty
+            else {
+                unreachable!()
+            };
+            if !support.receiver_has_field(&receiver_ty, name)
+                && !support.type_has_getter_for_receiver(&receiver_ty, name)
+                && let Some(owner) = support.type_def(owner_name)
+                && support
+                    .function_named_for_arg_len(owner, name, params.len())
+                    .is_some()
+            {
+                return Some(format!(
+                    "{}::{}",
+                    self.emit_receiver_expr(receiver, bindings)?,
+                    java_member_name(name)
+                ));
+            }
+        }
         if let Some(source_ty) = self
             .source_expr_type(expr.span())
             .or_else(|| self.expr_type(expr, bindings))

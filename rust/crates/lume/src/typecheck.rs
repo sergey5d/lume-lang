@@ -385,7 +385,43 @@ struct FunctionSig {
     getter: bool,
 }
 
-#[derive(Debug, Clone)]
+fn normalized_mixin_signature(sig: &FunctionSig) -> FunctionSig {
+    let subst = sig
+        .type_params
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (name.clone(), Ty::TypeParam(format!("@{index}"))))
+        .collect();
+    let mut normalized = instantiate_function_sig(sig.clone(), &subst);
+    normalized.reified_type_params = sig
+        .reified_type_params
+        .iter()
+        .map(|name| {
+            sig.type_params
+                .iter()
+                .position(|param| param == name)
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    normalized
+}
+
+fn mixin_signature_key(name: &str, sig: &FunctionSig) -> String {
+    let sig = normalized_mixin_signature(sig);
+    format!(
+        "{name}:{}:[{}]({})",
+        sig.getter,
+        sig.type_params.len(),
+        sig.params
+            .iter()
+            .map(|param| format!("{}:{}:{}", param.ty.describe(), param.variadic, param.lazy))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+#[derive(Debug, Clone, PartialEq)]
 enum GenericConditionSig {
     Bound { subject: Ty, bound: Ty },
     Equal { left: Ty, right: Ty },
@@ -1160,6 +1196,7 @@ fn type_kind_label(kind: TypeKind) -> &'static str {
         TypeKind::Record => "shape",
         TypeKind::Object => "object",
         TypeKind::Interface => "interface",
+        TypeKind::Mixin => "mixin",
         TypeKind::Enum => "declared union",
     }
 }
@@ -1190,6 +1227,7 @@ fn restricted_visibility(left: Visibility, right: Visibility) -> Visibility {
 
 fn custom_constructor_error(sig: &TypeSig) -> String {
     match sig.kind {
+        TypeKind::Mixin => format!("mixin '{}' cannot declare constructors", sig.name),
         TypeKind::Annotation => format!(
             "only classes can declare custom constructors; annotation '{}' cannot declare constructors",
             sig.name
@@ -1257,11 +1295,13 @@ struct World {
 
 impl World {
     fn from_program(program: &Program) -> Self {
-        Self {
+        let mut world = Self {
             ambient: default_inline_ambient(),
             root_module: Some(ModuleInfo::from_program("<memory>", program)),
             ..Self::default()
-        }
+        };
+        world.compose_mixin_signatures();
+        world
     }
 
     fn from_graph(graph: ModuleGraph, root: PathBuf, stdlib_dir: PathBuf) -> Result<Self, String> {
@@ -1309,13 +1349,58 @@ impl World {
             let mut seen = HashSet::new();
             visit_order(&modules, &root, &mut seen, &mut order);
         }
-        Ok(Self {
+        let mut world = Self {
             modules,
             order,
             ambient,
             checked_globals: HashMap::new(),
             root_module: None,
-        })
+        };
+        world.compose_mixin_signatures();
+        Ok(world)
+    }
+
+    fn compose_mixin_signatures(&mut self) {
+        let mut additions = Vec::new();
+        for module in self.modules.values().chain(self.root_module.iter()) {
+            let mut checker = Checker::new(self, module);
+            for item in &module.program.items {
+                let Item::Type(decl) = item else { continue };
+                if decl.kind != TypeKind::Class {
+                    continue;
+                }
+                checker.current_type_paths.push(decl.name.clone());
+                checker.push_ast_type_params(&decl.type_params, &decl.type_conditions);
+                let mut methods = module.types[&decl.name].methods.clone();
+                for (_, mixin, subst) in checker.mixin_uses(decl) {
+                    for (name, overloads) in mixin.methods {
+                        for method in overloads {
+                            let method = instantiate_function_sig(method, &subst);
+                            let target = methods.entry(name.clone()).or_default();
+                            if !target.iter().any(|existing| {
+                                mixin_signature_key(&name, existing)
+                                    == mixin_signature_key(&name, &method)
+                            }) {
+                                target.push(method);
+                            }
+                        }
+                    }
+                }
+                additions.push((module.path.clone(), decl.name.clone(), methods));
+                checker.pop_type_params();
+                checker.current_type_paths.pop();
+            }
+        }
+        for (path, name, methods) in additions {
+            let module = self.modules.get_mut(&path).or_else(|| {
+                self.root_module
+                    .as_mut()
+                    .filter(|module| module.path == path)
+            });
+            if let Some(sig) = module.and_then(|module| module.types.get_mut(&name)) {
+                sig.methods = methods;
+            }
+        }
     }
 
     fn lookup_module_alias<'a>(
@@ -1982,6 +2067,7 @@ impl<'a> Checker<'a> {
                 alias.span,
             );
         }
+        self.validate_type_ref_generic_applications(&alias.target);
         if alias.name.contains('.') {
             self.current_type_paths.pop();
         }
@@ -2135,10 +2221,21 @@ impl<'a> Checker<'a> {
         }
         self.push_ast_type_params(&decl.type_params, &decl.type_conditions);
         self.validate_generic_clause(&decl.type_params, &decl.type_conditions);
+        self.check_mixin_composition(decl, &type_sig);
         for bound in &decl.with_bounds {
             let Ty::Named(name, args) = self.ty_from_type_ref(bound) else {
                 continue;
             };
+            if self
+                .lookup_any_type(&name)
+                .is_some_and(|sig| sig.kind == TypeKind::Mixin)
+            {
+                self.add_error(
+                    "mixin_not_a_type",
+                    "mixins are adopted inside classes with 'use', not listed as interface bounds",
+                    bound.span(),
+                );
+            }
             if args.is_empty() && is_builtin_primitive_type_name(&name) {
                 self.diagnostics
                     .push(primitive_implementation_diagnostic(&name, bound.span()));
@@ -2369,7 +2466,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_interface_implementation(&mut self, sig: &TypeSig, span: crate::source::Span) {
-        if sig.kind == TypeKind::Interface {
+        if matches!(sig.kind, TypeKind::Interface | TypeKind::Mixin) {
             return;
         }
         if sig
@@ -2403,6 +2500,208 @@ impl<'a> Checker<'a> {
                 span,
             );
         }
+    }
+
+    fn mixin_uses(&self, decl: &TypeDecl) -> Vec<(TypeRef, TypeSig, HashMap<String, Ty>)> {
+        decl.mixins
+            .iter()
+            .filter_map(|target| {
+                let Ty::Named(name, args) = self.ty_from_type_ref(target) else {
+                    return None;
+                };
+                let sig = self.lookup_any_type(&name)?;
+                if sig.kind != TypeKind::Mixin || sig.type_params.len() != args.len() {
+                    return None;
+                }
+                let subst = sig.type_params.iter().cloned().zip(args).collect();
+                Some((target.clone(), sig, subst))
+            })
+            .collect()
+    }
+
+    fn check_mixin_composition(&mut self, decl: &TypeDecl, owner: &TypeSig) {
+        if decl.kind == TypeKind::Mixin {
+            for bound in &decl.with_bounds {
+                let ty = self.ty_from_type_ref(bound);
+                if !matches!(&ty, Ty::Named(name, _) if self.lookup_any_type(name).is_some_and(|sig| sig.kind == TypeKind::Interface))
+                {
+                    self.add_error(
+                        "invalid_mixin_requirement",
+                        "mixin requirements must be interfaces",
+                        bound.span(),
+                    );
+                }
+            }
+        }
+        let mut seen = HashSet::new();
+        for target in &decl.mixins {
+            let ty = self.ty_from_type_ref(target);
+            let sig = match &ty {
+                Ty::Named(name, _) => self.lookup_any_type(name),
+                _ => None,
+            };
+            if !sig.as_ref().is_some_and(|sig| sig.kind == TypeKind::Mixin) {
+                self.add_error(
+                    "invalid_mixin_use",
+                    "'use' in a class must name a mixin declaration",
+                    target.span(),
+                );
+            } else if let Ty::Named(_, args) = &ty {
+                let sig = sig.unwrap();
+                if args.len() != sig.type_params.len() {
+                    self.add_error(
+                        "invalid_type_argument_count",
+                        format!(
+                            "mixin '{}' expects {} type arguments, got {}",
+                            sig.name,
+                            sig.type_params.len(),
+                            args.len()
+                        ),
+                        target.span(),
+                    );
+                }
+            }
+            if !seen.insert(ty.describe()) {
+                self.add_error(
+                    "duplicate_mixin_use",
+                    "a class cannot adopt the same mixin more than once",
+                    target.span(),
+                );
+            }
+        }
+        let mut candidates =
+            HashMap::<String, Vec<(String, String, FunctionSig, crate::source::Span)>>::new();
+        for (target, mixin, subst) in self.mixin_uses(decl) {
+            for requirement in &mixin.with_bounds {
+                let required = substitute_type(requirement, &subst);
+                if !self.is_assignable(&self.owner_self_ty(owner), &required) {
+                    self.add_error(
+                        "missing_mixin_requirement",
+                        format!(
+                            "class '{}' must implement '{}' to use mixin '{}'",
+                            decl.name,
+                            required.describe(),
+                            mixin.name
+                        ),
+                        target.span(),
+                    );
+                } else if !self.mixin_requirement_members_are_compatible(owner, &required) {
+                    self.add_error("incompatible_mixin_requirement", format!("class '{}' does not provide compatible public members for mixin '{}' requirement '{}'", decl.name, mixin.name, required.describe()), target.span());
+                }
+            }
+            self.check_call_generic_conditions(&mixin.generic_conditions, &subst, target.span());
+            for (name, overloads) in mixin.methods {
+                for method in overloads {
+                    let method = instantiate_function_sig(method, &subst);
+                    let key = mixin_signature_key(&name, &method);
+                    candidates.entry(key).or_default().push((
+                        mixin.name.clone(),
+                        name.clone(),
+                        method,
+                        target.span(),
+                    ));
+                }
+            }
+        }
+        let own_methods = decl
+            .members
+            .iter()
+            .filter_map(|member| match member {
+                TypeMember::Method(method) => Some(method),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for group in candidates.values() {
+            let (_, name, supplied, span) = &group[0];
+            if owner.fields.iter().any(|field| field.name == *name) {
+                self.add_error(
+                    "mixin_member_kind_mismatch",
+                    format!("stored field '{name}' cannot replace a mixin method or getter"),
+                    *span,
+                );
+            }
+            let replacements = own_methods
+                .iter()
+                .filter_map(|method| {
+                    let mut sig = function_sig_from_method(method, &owner.type_params);
+                    expand_aliases_in_function_sig(&mut sig, &self.module.aliases);
+                    (mixin_signature_key(&method.name, &sig) == mixin_signature_key(name, supplied))
+                        .then_some((*method, sig))
+                })
+                .collect::<Vec<_>>();
+            if replacements.is_empty() && group.len() > 1 {
+                self.add_error("mixin_member_conflict", format!("mixins {} both supply '{name}'; resolve the conflict with a compatible declaration in class '{}'", group.iter().map(|(owner, _, _, _)| format!("'{owner}'")).collect::<Vec<_>>().join(" and "), decl.name), *span);
+            }
+            for (method, replacement) in &replacements {
+                let replacement = normalized_mixin_signature(replacement);
+                for (mixin, _, supplied, _) in group {
+                    let supplied = normalized_mixin_signature(supplied);
+                    let compatible = replacement.getter == supplied.getter
+                        && visibility_rank(replacement.visibility)
+                            >= visibility_rank(supplied.visibility)
+                        && replacement.params.iter().zip(&supplied.params).all(
+                            |(actual, expected)| {
+                                actual.name == expected.name
+                                    && (!expected.has_initializer || actual.has_initializer)
+                            },
+                        )
+                        && self.is_assignable(&replacement.ret, &supplied.ret)
+                        && replacement.generic_conditions == supplied.generic_conditions
+                        && replacement.reified_type_params == supplied.reified_type_params;
+                    if !compatible {
+                        self.add_error("incompatible_mixin_override", format!("member '{name}' on '{}' is incompatible with the declaration supplied by mixin '{mixin}'", decl.name), method.span);
+                    }
+                }
+            }
+            if own_methods
+                .iter()
+                .any(|method| method.name == *name && method.getter != supplied.getter)
+                || candidates
+                    .values()
+                    .any(|other| other[0].1 == *name && other[0].2.getter != supplied.getter)
+            {
+                self.add_error("mixin_member_kind_mismatch", format!("'{name}' must have the same member kind in the class and all adopted mixins"), *span);
+            }
+        }
+    }
+
+    fn mixin_requirement_members_are_compatible(&self, owner: &TypeSig, requirement: &Ty) -> bool {
+        let required = self.effective_interface_methods(requirement, &mut HashSet::new());
+        let actual = self.owner_self_ty(owner);
+        required.iter().all(|(name, overloads)| {
+            overloads.iter().all(|expected| {
+                if expected.getter
+                    && owner.fields.iter().any(|field| {
+                        field.name == *name
+                            && field.visibility == Visibility::Default
+                            && self.is_assignable(&field.ty, &expected.ret)
+                    })
+                {
+                    return true;
+                }
+                let methods = if expected.getter {
+                    self.member_getter_sig(&actual, name)
+                        .map(|method| vec![method])
+                } else {
+                    self.member_method_sigs(&actual, name)
+                };
+                methods.is_some_and(|methods| {
+                    methods.iter().any(|method| {
+                        if method.visibility != Visibility::Default
+                            || mixin_signature_key(name, method)
+                                != mixin_signature_key(name, expected)
+                        {
+                            return false;
+                        }
+                        let method = normalized_mixin_signature(method);
+                        let expected = normalized_mixin_signature(expected);
+                        self.is_assignable(&method.ret, &expected.ret)
+                            && method.generic_conditions == expected.generic_conditions
+                            && method.reified_type_params == expected.reified_type_params
+                    })
+                })
+            })
+        })
     }
 
     fn check_type_field_initializers(&mut self, decl: &TypeDecl, owner: &TypeSig) {
@@ -5126,6 +5425,13 @@ impl<'a> Checker<'a> {
                     }
                     return field.ty.clone();
                 }
+                if self.member_getter_sig(&receiver_ty, name).is_some() {
+                    self.add_error(
+                        "assign_immutable",
+                        format!("getter '{name}' is read-only and cannot be assigned"),
+                        *span,
+                    );
+                }
                 self.member_type(&receiver_ty, name).unwrap_or_else(|| {
                     self.add_error(
                         "unknown_member",
@@ -5278,6 +5584,17 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
                 if let Some(ty) = self.lookup_named_constructor_type(name) {
+                    if self
+                        .lookup_any_type(name)
+                        .is_some_and(|sig| sig.kind == TypeKind::Mixin)
+                    {
+                        self.add_error(
+                            "mixin_not_a_value",
+                            "a mixin is reusable behavior, not a value or constructor",
+                            *span,
+                        );
+                        return Ty::Unknown;
+                    }
                     return ty;
                 }
                 self.add_error("undefined_name", self.undefined_value_message(name), *span);
@@ -6096,6 +6413,9 @@ impl<'a> Checker<'a> {
     }
 
     fn check_lambda_param(&mut self, param: &crate::ast::LambdaParam, hint: Ty) -> Ty {
+        if let Some(ty) = &param.ty {
+            self.validate_type_ref_generic_applications(ty);
+        }
         if let Some(destructure) = &param.destructure {
             let ty = param
                 .ty
@@ -6184,6 +6504,19 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         expected: &Ty,
     ) -> Ty {
+        let member_callee = match callee {
+            Expr::Index { receiver, .. } => receiver.as_ref(),
+            other => other,
+        };
+        if let Expr::Member { receiver, .. } = member_callee
+            && !matches!(receiver.as_ref(), Expr::Identifier { name, .. } if self.lookup_value(name).is_some())
+            && self
+                .brace_call_type_sig(receiver)
+                .is_some_and(|sig| sig.kind == TypeKind::Mixin)
+        {
+            self.add_error("mixin_not_a_value", "mixin members are called on a consuming class instance, not on the mixin declaration", span);
+            return Ty::Unknown;
+        }
         if matches!(callee, Expr::Identifier { name, .. } if name == "Any") {
             return self.check_explicit_any_widening(args, uses_brace_syntax, span);
         }
@@ -8506,6 +8839,18 @@ impl<'a> Checker<'a> {
             return ret;
         }
 
+        if sig.kind == TypeKind::Mixin {
+            self.add_error(
+                "invalid_mixin_construction",
+                format!(
+                    "mixin '{}' cannot be constructed; adopt it inside a class with 'use {}'",
+                    sig.name, sig.name
+                ),
+                span,
+            );
+            return ret;
+        }
+
         if sig.kind == TypeKind::Interface {
             self.add_error(
                 "invalid_interface_construction",
@@ -9872,6 +10217,18 @@ impl<'a> Checker<'a> {
     }
 
     fn validate_runtime_type_ref(&mut self, reference: &TypeRef, ty: &Ty, construct: &str) {
+        if let Ty::Named(name, _) = ty
+            && self
+                .lookup_any_type(name)
+                .is_some_and(|sig| sig.kind == TypeKind::Mixin)
+        {
+            self.add_error(
+                "mixin_not_a_type",
+                "mixins cannot be used in runtime type tests or patterns",
+                reference.span(),
+            );
+            return;
+        }
         match reference {
             TypeRef::Named { args, span, .. } if !args.is_empty() => {
                 self.add_error(
@@ -11570,14 +11927,25 @@ impl<'a> Checker<'a> {
             );
         }
         for bound in &sig.with_bounds {
-            let Ty::Named(bound_name, _) = bound else {
+            let Ty::Named(bound_name, bound_args) = bound else {
                 continue;
             };
             let Some(bound_sig) = self.lookup_any_type(bound_name) else {
                 continue;
             };
             if let Some(methods) = self.method_sigs_for_type_inner(&bound_sig, name, seen) {
-                return Some(methods);
+                let subst = bound_sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(bound_args.iter().cloned())
+                    .collect();
+                return Some(
+                    methods
+                        .into_iter()
+                        .map(|method| instantiate_function_sig(method, &subst))
+                        .collect(),
+                );
             }
         }
         None
@@ -11788,6 +12156,18 @@ impl<'a> Checker<'a> {
     }
 
     fn check_typeof_type_ref(&mut self, ty_ref: &TypeRef, represented: &Ty) {
+        if let Ty::Named(name, _) = represented
+            && self
+                .lookup_any_type(name)
+                .is_some_and(|sig| sig.kind == TypeKind::Mixin)
+        {
+            self.add_error(
+                "mixin_not_a_type",
+                "mixins have no runtime type metadata",
+                ty_ref.span(),
+            );
+            return;
+        }
         match represented {
             Ty::TypeParam(name) if self.is_reified_type_param(name) => {}
             Ty::TypeParam(name) => {
@@ -13344,6 +13724,10 @@ impl<'a> Checker<'a> {
                 let Some(sig) = self.lookup_any_type(name) else {
                     return;
                 };
+                if sig.kind == TypeKind::Mixin {
+                    self.add_error("mixin_not_a_type", format!("mixin '{}' cannot be used as a value's type; use an interface for the contract", sig.name), *span);
+                    return;
+                }
                 if sig.generic_conditions.is_empty() || sig.type_params.len() != args.len() {
                     return;
                 }
@@ -13818,7 +14202,7 @@ impl<'a> Checker<'a> {
                     TypeKind::Class | TypeKind::Interface => {
                         self.type_sig_has_equality_bound(&sig, ty, seen)
                     }
-                    TypeKind::Annotation => false,
+                    TypeKind::Annotation | TypeKind::Mixin => false,
                 }
             }
             Ty::TypeParam(name) => self.type_param_bounds(name).iter().any(|bound| {
@@ -13889,7 +14273,7 @@ impl<'a> Checker<'a> {
                         hashable
                     }
                     TypeKind::Class => self.type_sig_has_hashed_bound(&sig, ty, seen),
-                    TypeKind::Annotation | TypeKind::Interface => false,
+                    TypeKind::Annotation | TypeKind::Interface | TypeKind::Mixin => false,
                 }
             }
             Ty::TypeParam(name) => self.type_param_bounds(name).iter().any(|bound| {
@@ -16245,6 +16629,84 @@ def main() Int {
         );
         let result = check_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn checks_stateless_mixins_and_rejects_unsafe_composition() {
+        let accepted = check_path(workspace_root().join("examples/features/mixins.lum")).unwrap();
+        assert!(
+            accepted.diagnostics.is_empty(),
+            "{:#?}",
+            accepted.diagnostics
+        );
+        let cases = [
+            (
+                "mixin_member_conflict",
+                "mixin A { get value Int = 1 }\nmixin B { get value Int = 2 }\nclass C { use A\nuse B }",
+            ),
+            (
+                "incompatible_mixin_override",
+                "mixin A { get value Bool = true }\nclass C { use A\nget value Int = 1 }",
+            ),
+            (
+                "mixin_member_kind_mismatch",
+                "mixin A { get value Int = 1 }\nclass C { use A\ndef value() Int = 2 }",
+            ),
+            (
+                "mixin_member_kind_mismatch",
+                "mixin A { get value Int = 1 }\nclass C { use A\nvalue Int }",
+            ),
+            (
+                "missing_mixin_requirement",
+                "interface Sized { get size Int }\nmixin A with Sized { get nonEmpty Bool = this.size > 0 }\nclass C { use A }",
+            ),
+            ("invalid_mixin_use", "class A {}\nclass C { use A }"),
+            (
+                "duplicate_mixin_use",
+                "mixin A {}\nclass C { use A\nuse A }",
+            ),
+            ("mixin_not_a_type", "mixin A {}\ndef f(value A) {}"),
+            ("mixin_not_a_type", "mixin A {}\ntype Alias = A"),
+            (
+                "invalid_mixin_construction",
+                "mixin A {}\ndef main() { value = A() }",
+            ),
+            (
+                "mixin_not_a_type",
+                "mixin A {}\ndef main() { value = typeOf[A] }",
+            ),
+            (
+                "invalid_type_argument_count",
+                "mixin A[T] {}\nclass C { use A }",
+            ),
+            (
+                "incompatible_mixin_requirement",
+                "interface Readable { def read() Str }\nmixin A with Readable { def text() Str = this.read() }\nclass C with Readable { use A\ndef read() Int = 1 }",
+            ),
+            (
+                "assign_immutable",
+                "interface Sized { get size Int }\nmixin A with Sized { def update() { this.size := 1 } }",
+            ),
+            (
+                "mixin_not_a_type",
+                "mixin A {}\ndef main() { callback = (value A) => value }",
+            ),
+            (
+                "mixin_not_a_value",
+                "mixin A { def value() Int = 1 }\ndef main() { value = A.value() }",
+            ),
+        ];
+        for (code, source) in cases {
+            let result = check_program(&parse_inline(source));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
+                "expected {code} for {source}: {:#?}",
+                result.diagnostics
+            );
+        }
     }
 
     #[test]

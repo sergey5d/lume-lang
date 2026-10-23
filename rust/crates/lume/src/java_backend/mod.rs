@@ -418,6 +418,7 @@ fn java_library_local_placeholder_items(
                 type_params: Vec::new(),
                 type_conditions: Vec::new(),
                 with_bounds: Vec::new(),
+                mixins: Vec::new(),
                 members: Vec::new(),
                 span,
             })
@@ -454,6 +455,7 @@ fn java_library_type_decl(
             .cloned()
             .collect(),
         members: java_library_members(external_class, exposed_names, span),
+        mixins: Vec::new(),
         span,
     }
 }
@@ -2280,6 +2282,44 @@ mod tests {
         run_path, run_path_with_args,
         source::{LineColumn, Span},
     };
+
+    #[test]
+    fn runs_stateless_mixins_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap();
+        let source = root.join("examples/features/mixins.lum");
+        let interpreted = run_path(&source, None).expect("run mixins");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        let temp = temp_path("lume-java-mixins");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let result =
+            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate mixins");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(!out.join("examples/mixins/CollectionParts.java").exists());
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac mixins",
+        );
+        let result = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.mixins.MixinsMain"),
+            "java mixins",
+        );
+        assert_eq!(String::from_utf8(result.stdout).unwrap(), "mixins ok\n");
+        let _ = fs::remove_dir_all(temp);
+    }
 
     #[test]
     fn maps_lume_core_java_boundary_types_back_to_lume_types() {

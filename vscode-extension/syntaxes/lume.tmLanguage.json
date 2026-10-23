@@ -181,7 +181,7 @@
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|new|type|annotation|class|shape|interface|object|ext|use|module|with|when|as|public|private|internal|case|var|vararg|let)\\b"
+          "match": "\\b(?:def|new|type|annotation|class|shape|interface|mixin|object|ext|use|module|with|when|as|public|private|internal|case|var|vararg|let)\\b"
         },
         {
           "name": "storage.modifier.generic.reified.lume",

@@ -313,6 +313,9 @@ fn rewrite_type_decl_for_runtime(
     for bound in &mut decl.with_bounds {
         rewrite_type_ref_for_runtime(bound, module);
     }
+    for mixin in &mut decl.mixins {
+        rewrite_type_ref_for_runtime(mixin, module);
+    }
     for member in &mut decl.members {
         match member {
             ast::TypeMember::Field(field) => {
@@ -2632,6 +2635,9 @@ impl<'a> Interpreter<'a> {
                     crate::ast::TypeKind::Record => "Shape",
                     crate::ast::TypeKind::Object => "Object",
                     crate::ast::TypeKind::Interface => "Interface",
+                    crate::ast::TypeKind::Mixin => {
+                        unreachable!("mixins are composed before lowering")
+                    }
                     crate::ast::TypeKind::Enum => "Union",
                 })
                 .unwrap_or("Primitive"),
@@ -8390,6 +8396,7 @@ fn runtime_type_kind_name(kind: crate::ast::TypeKind) -> &'static str {
         crate::ast::TypeKind::Record => "shape",
         crate::ast::TypeKind::Object => "object",
         crate::ast::TypeKind::Interface => "interface",
+        crate::ast::TypeKind::Mixin => "mixin",
         crate::ast::TypeKind::Enum => "union",
     }
 }

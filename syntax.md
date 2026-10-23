@@ -10,7 +10,7 @@ The lexer reserves these words for language grammar:
 annotation  as        break     case       class      continue
 defer       def       default   do         else       ext
 false       fn        for       get        if         interface
-internal    is        let       match      module     object
+internal    is        let       match      mixin      module     object
 private     public    reified   return     shape      true
 try         type      use       var        vararg     when
 while       with      yield
@@ -1002,6 +1002,7 @@ Top-level forms:
 - `def`
 - `annotation`
 - `interface`
+- `mixin`
 - `class`
 - `shape`
 - `object`
@@ -1016,6 +1017,8 @@ Top-level forms:
 - `internal annotation`
 - `private interface`
 - `internal interface`
+- `private mixin`
+- `internal mixin`
 - `private class`
 - `internal class`
 - `private shape`
@@ -1069,9 +1072,10 @@ type OptionX[T] =
 
 ### Nested Declarations
 
-Named `class`, `shape`, `interface`, `object`, and `annotation` declarations,
-as well as `type` aliases and declared unions, may appear inside any other
-named declaration of those kinds:
+Named `class`, `shape`, `interface`, `mixin`, `object`, and `annotation`
+declarations, as well as `type` aliases and declared unions, may appear inside
+named classes, shapes, interfaces, objects, or annotations. Mixin bodies contain
+only methods and getters:
 
 ```txt
 class Parser {
@@ -2453,8 +2457,8 @@ Getter rules:
   when `getter` returns a function, in which case member access reads the getter
   and `()` invokes that returned function
 
-Getters may be declared by classes, shapes, interfaces, objects, and extension
-blocks. The current compiler enforces direct read-only field access. Proving
+Getters may be declared by classes, shapes, interfaces, mixins, objects, and
+extension blocks. The current compiler enforces direct read-only field access. Proving
 that a getter is transitively read-only requires following aliases, called
 methods, callbacks, interface dispatch, and foreign calls. That is a separate
 effect-analysis subsystem, not a local scan for assignment statements. Effect
@@ -2847,6 +2851,63 @@ use model/user_extensions/*
 user User = User { name: "Ada" }
 label = user.displayName()
 ```
+
+### Stateless Mixins
+
+A `mixin` supplies reusable methods and getters that a class explicitly adopts.
+It is not a value type, an interface, or a constructor target.
+
+```txt
+interface Sized {
+    get size Int
+}
+
+mixin CollectionParts with Sized {
+    get nonEmpty Bool = this.size > 0
+
+    def describe() Str =
+        if this.nonEmpty { "has elements" } else { "empty" }
+}
+
+class Bag with Sized {
+    use CollectionParts
+
+    items [Int]
+    get size Int = items.size
+    get nonEmpty Bool = items.nonEmpty
+}
+```
+
+- `with Sized` on a mixin requires the consuming class to implement `Sized`.
+  It does not automatically add that interface to the class's declared bounds.
+- A class adopts a mixin with `use MixinName` inside its body. Imports of mixin
+  declarations use the ordinary module visibility and `use` rules.
+- Mixins may have type parameters, for example `use ValueParts[Int]`. Their
+  methods may have their own type parameters; getters follow normal getter rules.
+- Mixin bodies contain methods and getters with implementations, not stored
+  fields, constructors, or nested declarations. State belongs to the class and
+  is accessed through the mixin's required interfaces.
+- Supplied members become ordinary members of the consuming class and may
+  satisfy its interface requirements. There is one receiver: `this` is always
+  the consuming class instance, including inside nested calls and callbacks.
+- A class declaration replaces a matching supplied member when their member
+  kinds and callable contracts are compatible. It must preserve parameter
+  names, accepted inputs and defaults, visibility, and a compatible return type.
+  Stored fields cannot replace mixin getters; ordinary public fields can still
+  satisfy getters in the mixin's required interfaces.
+- Competing mixin implementations of the same signature require a compatible
+  declaration in the class. There is no first- or last-mixin winner, so
+  reordering adoption declarations cannot change a valid program's behavior.
+  Distinct method overloads may coexist.
+- Internal calls use the class's final members. In the example,
+  `bag.describe()` calls `Bag.nonEmpty`, not a separate mixin receiver.
+- Only classes adopt mixins. There is no mixin-to-mixin adoption or `super`
+  chain. A mixin has no instance identity or runtime type metadata, and mixin
+  declarations cannot be annotated.
+
+Mixin adoption is explicit and independent of interface defaults and extension
+visibility. Implementing an interface does not implicitly adopt a mixin.
+See `examples/features/mixins.lum` for an executable example.
 
 ### Constructors
 
@@ -5864,7 +5925,7 @@ public def parse(value Str) Result[Data, Str] = ...
 ```
 
 This default applies to top-level functions, immutable bindings, annotations,
-interfaces, classes, shapes, objects, transparent aliases, and declared
+interfaces, mixins, classes, shapes, objects, transparent aliases, and declared
 unions. Top-level mutable bindings are not allowed; mutable module state must
 live inside named objects, class instances, or function locals.
 

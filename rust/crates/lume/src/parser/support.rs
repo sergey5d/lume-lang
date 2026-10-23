@@ -16,6 +16,7 @@ impl<'a> Parser<'a> {
                 | TokenKind::Keyword(Keyword::Shape)
                 | TokenKind::Keyword(Keyword::Object)
                 | TokenKind::Keyword(Keyword::Interface)
+                | TokenKind::Keyword(Keyword::Mixin)
                 | TokenKind::Keyword(Keyword::Ext) => return,
                 _ => self.advance(),
             }
@@ -692,6 +693,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::If) => "IF",
             TokenKind::Keyword(Keyword::Else) => "ELSE",
             TokenKind::Keyword(Keyword::Match) => "MATCH",
+            TokenKind::Keyword(Keyword::Mixin) => "MIXIN",
             TokenKind::Keyword(Keyword::Reified) => "REIFIED",
             TokenKind::Keyword(Keyword::Fn) => "FN",
             TokenKind::Keyword(Keyword::For) => "FOR",

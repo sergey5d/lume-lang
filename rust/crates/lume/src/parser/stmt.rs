@@ -49,7 +49,7 @@ impl<'a> Parser<'a> {
         if self.starts_named_type_declaration_in_callable() {
             self.error_at_current(
                 "nested_declaration_in_callable",
-                "named type aliases, unions, classes, shapes, interfaces, objects, and annotations are allowed only at module or declaration scope, not inside a callable body",
+                "named type aliases, unions, classes, shapes, interfaces, mixins, objects, and annotations are allowed only at module or declaration scope, not inside a callable body",
             );
             return None;
         }
@@ -172,6 +172,7 @@ impl<'a> Parser<'a> {
                 | Keyword::Class
                 | Keyword::Shape
                 | Keyword::Interface
+                | Keyword::Mixin
                 | Keyword::Type,
             )) => true,
             Some(TokenKind::Keyword(Keyword::Object)) => self
