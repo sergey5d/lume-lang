@@ -91,6 +91,37 @@ fn interfaces_are_signatures_only_and_mixins_accept_visibility() {
     }
 }
 
+#[test]
+fn interfaces_reject_storage_but_allow_signatures_and_nested_declarations() {
+    let accepted =
+        parse("interface Contract {\nget id Int\ndef read() Str\nshape Nested { value Int }\n}");
+    assert!(
+        accepted.diagnostics.is_empty(),
+        "{:?}",
+        accepted.diagnostics
+    );
+    for field in [
+        "id Int",
+        "id Int = 1",
+        "var id Int",
+        "private id Int",
+        "internal id Int",
+    ] {
+        let parsed = parse(&format!("interface Contract {{ {field} }}"));
+        let diagnostic = parsed
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "interface_field")
+            .unwrap_or_else(|| panic!("accepted {field}: {:?}", parsed.diagnostics));
+        assert!(
+            diagnostic
+                .helps
+                .iter()
+                .any(|help| help.contains("get id Type"))
+        );
+    }
+}
+
 fn parse_expr_only(src: &str) -> Expr {
     let file = SourceFile::new("test.lum", src);
     let lexed = lex(&file);

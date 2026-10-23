@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*cannot assign value of type 'Str' to target of type 'Int'.*
+
+interface Identified[T] {
+    get id T
+}
+
+class User[T] with Identified[T] {
+    var id T
+}
+
+def main() {
+    user = User[Int](1)
+    user.id := "wrong type"
+}

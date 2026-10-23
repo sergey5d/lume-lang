@@ -96,3 +96,27 @@ fn interface_methods_and_getters_cannot_have_bodies() {
         fs::remove_file(path).expect("remove temporary source");
     }
 }
+
+#[test]
+fn interfaces_cannot_declare_stored_fields() {
+    for field in ["id Int", "id Int = 1", "var id Int"] {
+        let path = temp_source(
+            "interface-field",
+            &format!("interface Contract {{ {field} }}"),
+        );
+        let output = Command::new(env!("CARGO_BIN_EXE_lume"))
+            .arg("check")
+            .arg(&path)
+            .env(
+                "LUME_STDLIB",
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../stdlib"),
+            )
+            .output()
+            .expect("lume check should run");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "accepted {field}");
+        assert!(stderr.contains("error[interface_field]"), "{stderr}");
+        assert!(stderr.contains("get id Type"), "{stderr}");
+        fs::remove_file(path).expect("remove temporary source");
+    }
+}

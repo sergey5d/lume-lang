@@ -2284,6 +2284,14 @@ impl<'a> Checker<'a> {
         for member in &decl.members {
             match member {
                 TypeMember::Field(field) => {
+                    if decl.kind == TypeKind::Interface {
+                        self.diagnostics
+                            .push(typecheck_diagnostics::interface_field(
+                                &field.name,
+                                field.span,
+                            ));
+                        continue;
+                    }
                     if decl.kind == TypeKind::Annotation {
                         if field.visibility != Visibility::Default {
                             self.add_error(
@@ -7562,18 +7570,18 @@ impl<'a> Checker<'a> {
 
     fn type_declares_method_body(&self, sig: &TypeSig, name: &str) -> bool {
         sig.methods.get(name).is_some_and(|methods| {
-            methods
-                .iter()
-                .any(|method| method.has_body && method.visibility == Visibility::Default)
+            methods.iter().any(|method| {
+                method.has_body && !method.getter && method.visibility == Visibility::Default
+            })
         }) || self
             .module
             .extensions
             .get(&sig.name)
             .and_then(|methods| methods.get(name))
             .is_some_and(|methods| {
-                methods
-                    .iter()
-                    .any(|method| method.has_body && method.visibility == Visibility::Default)
+                methods.iter().any(|method| {
+                    method.has_body && !method.getter && method.visibility == Visibility::Default
+                })
             })
     }
 
@@ -11324,11 +11332,19 @@ impl<'a> Checker<'a> {
     }
 
     fn field_sig_for_member(&self, receiver: &Ty, name: &str) -> Option<FieldSig> {
-        let Ty::Named(type_name, _) = receiver else {
+        let Ty::Named(type_name, args) = receiver else {
             return None;
         };
         let sig = self.lookup_any_type(type_name)?;
-        sig.fields.iter().find(|field| field.name == name).cloned()
+        let mut field = sig.fields.iter().find(|field| field.name == name)?.clone();
+        let subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+        field.ty = substitute_type(&field.ty, &subst);
+        Some(field)
     }
 
     fn can_access_member_visibility(
@@ -17963,6 +17979,66 @@ def main() Unit {
     }
 
     #[test]
+    fn concrete_types_can_implement_interface_getters_with_fields_or_getters() {
+        let result = check_path(
+            workspace_root().join("examples/features/interface_getter_implementations.lum"),
+        )
+        .unwrap();
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+
+        for owner in ["class", "shape", "object"] {
+            for (requirement, implementation, code) in [
+                (
+                    "get id Int",
+                    "private id Int = 1",
+                    "missing_interface_member",
+                ),
+                (
+                    "get id Int",
+                    "internal id Int = 1",
+                    "missing_interface_member",
+                ),
+                (
+                    "get id Int",
+                    "id Str = \"bad\"",
+                    "invalid_interface_getter_field_type",
+                ),
+                (
+                    "get id Int",
+                    "get id Str = \"bad\"",
+                    "missing_interface_member",
+                ),
+                (
+                    "get id Int",
+                    "private get id Int = 1",
+                    "missing_interface_member",
+                ),
+                (
+                    "get id Int",
+                    "internal get id Int = 1",
+                    "missing_interface_member",
+                ),
+                ("get id Int", "def id() Int = 1", "missing_interface_member"),
+                ("def id() Int", "get id Int = 1", "missing_interface_member"),
+                ("def id() Int", "id Int = 1", "missing_interface_member"),
+            ] {
+                let source = format!(
+                    "interface Contract {{ {requirement} }}\n{owner} Implementation with Contract {{ {implementation} }}"
+                );
+                let checked = check_program(&parse_inline(&source));
+                assert!(
+                    checked
+                        .diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.code == code),
+                    "expected {code} for {source}: {:?}",
+                    checked.diagnostics
+                );
+            }
+        }
+    }
+
+    #[test]
     fn fields_must_be_public_and_compatible_to_satisfy_interface_getters() {
         let program = parse_inline(
             r#"
@@ -17999,6 +18075,29 @@ class MethodId with Identified {
             }),
             "{:#?}",
             result.diagnostics
+        );
+    }
+
+    #[test]
+    fn field_backed_interface_getters_remain_read_only() {
+        let program = parse_inline(
+            r#"
+            interface Identified { get id Int }
+            class User with Identified { var id Int }
+            def main() {
+                user Identified = User(1)
+                user.id := 2
+            }
+            "#,
+        );
+        let checked = check_program(&program);
+        assert!(
+            checked
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "assign_immutable"),
+            "{:?}",
+            checked.diagnostics
         );
     }
 

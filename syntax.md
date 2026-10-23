@@ -3444,14 +3444,20 @@ member-name namespace described in [Functions and Methods](#functions-and-method
 
 Interfaces:
 
+Interface instance members are method (`def`) and read-only getter (`get`)
+signatures only. Interfaces cannot declare stored fields, field initializers,
+constructors, or member bodies. Nested type declarations remain declaration-scope
+organization, not instance storage.
+
 ```txt
 interface Named {
     def label() Str
 }
 ```
 
-A public stored field satisfies a read-only interface getter with the same name
-when the field type is assignable to the getter's return type:
+A public stored field, whether immutable or `var`, satisfies a read-only interface
+getter with the same name when the field type is assignable to the getter's
+return type:
 
 ```txt
 interface Identified {
@@ -3464,11 +3470,16 @@ class User with Identified {
 }
 ```
 
-No forwarding `get id Int = this.id` declaration is required. A `var` field
-may also satisfy the getter; the interface exposes only its read capability.
+No forwarding `get id Int = this.id` declaration is required. The interface
+exposes only read access, even when the backing field is mutable. Mutating the
+field through its concrete type is visible through existing interface views.
 Private and internal fields do not satisfy the contract, and an ordinary
 zero-argument method such as `def id() Int` is not a getter implementation.
-Implementations may instead compute the value with an explicit getter.
+Classes, shapes, and named or anonymous objects may instead compute the value
+with an explicit getter. This choice belongs to the implementation, not the
+interface. A getter or stored field does not implement an ordinary `def` method.
+See `examples/features/interface_getter_implementations.lum` for all three
+concrete declaration kinds and both implementation styles.
 
 Interface implementation and inheritance lists use one `with`, followed by
 comma-separated interface types:

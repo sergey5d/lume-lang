@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*interfaces cannot declare stored field 'id'; use a getter signature instead.*
+
+interface Identified {
+    id Int
+}

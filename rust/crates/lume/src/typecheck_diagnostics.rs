@@ -1,5 +1,16 @@
 use crate::{Diagnostic, source::Span};
 
+pub(crate) fn interface_field(name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "interface_field",
+        format!("interfaces cannot declare stored field '{name}'; use a getter signature instead"),
+        span,
+    )
+    .with_help(format!(
+        "declare `get {name} Type` in the interface; implementations may supply a public field or a getter"
+    ))
+}
+
 pub(crate) fn interface_member_body(span: Span) -> Diagnostic {
     Diagnostic::error(
         "interface_member_body",

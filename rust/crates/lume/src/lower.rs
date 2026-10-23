@@ -30,10 +30,16 @@ pub fn lower_program(program: &ast::Program) -> LowerResult {
         })
         .flat_map(|decl| &decl.members)
         .filter_map(|member| match member {
-            TypeMember::Method(method) => method.body.as_ref(),
+            TypeMember::Field(field) => Some(crate::typecheck_diagnostics::interface_field(
+                &field.name,
+                field.span,
+            )),
+            TypeMember::Method(method) => method
+                .body
+                .as_ref()
+                .map(|body| crate::typecheck_diagnostics::interface_member_body(body.span())),
             _ => None,
         })
-        .map(|body| crate::typecheck_diagnostics::interface_member_body(body.span()))
         .collect::<Vec<_>>();
     if !diagnostics.is_empty() {
         return LowerResult {
@@ -534,6 +540,7 @@ impl<'a> Lowerer<'a> {
         let Some(type_id) = self.type_ids.get(&(decl.name.clone(), decl.kind)).copied() else {
             return;
         };
+        let type_params = self.program.types[type_id.0].type_params.clone();
 
         let mut fields = Vec::new();
         let mut methods_to_attach = Vec::new();
@@ -546,7 +553,9 @@ impl<'a> Lowerer<'a> {
                     let ty = field
                         .ty
                         .as_ref()
-                        .map(|ty| lower_type_ref_with_aliases(ty, &self.type_aliases))
+                        .map(|ty| {
+                            lower_type_ref_with_type_params(ty, &type_params, &self.type_aliases)
+                        })
                         .unwrap_or(ir::Type::Unknown);
                     fields.push(ir::Field {
                         annotations: lower_annotations(&field.annotations),
@@ -601,7 +610,13 @@ impl<'a> Lowerer<'a> {
                             ty: field
                                 .ty
                                 .as_ref()
-                                .map(|ty| lower_type_ref_with_aliases(ty, &self.type_aliases))
+                                .map(|ty| {
+                                    lower_type_ref_with_type_params(
+                                        ty,
+                                        &type_params,
+                                        &self.type_aliases,
+                                    )
+                                })
                                 .unwrap_or(ir::Type::Unknown),
                             has_initializer: field.initializer.is_some(),
                             initializer: lower_field_initializer_constant(
@@ -12273,6 +12288,36 @@ mod tests {
     }
 
     #[test]
+    fn rejects_interface_storage_even_without_parser_validation() {
+        let mut program = parse_inline("class Contract { id Int\nvar label Str = \"name\" }");
+        let Item::Type(contract) = &mut program.items[0] else {
+            panic!("expected Contract")
+        };
+        contract.kind = ast::TypeKind::Interface;
+        let checked = crate::check_program(&program);
+        assert_eq!(
+            checked
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "interface_field")
+                .count(),
+            2,
+            "{:?}",
+            checked.diagnostics
+        );
+        let lowered = lower_program(&program);
+        assert!(lowered.program.is_none());
+        assert!(lowered.core_bodies.is_empty());
+        assert_eq!(lowered.diagnostics.len(), 2, "{:?}", lowered.diagnostics);
+        assert!(
+            lowered
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "interface_field")
+        );
+    }
+
+    #[test]
     fn interface_extensions_remain_separate_from_contract_bodies() {
         let program = parse_inline(
             r#"
@@ -12581,6 +12626,58 @@ mod tests {
             })
             .count();
         assert_eq!(add_calls, 2, "{:#?}", twice.blocks);
+    }
+
+    #[test]
+    fn infers_generic_constructor_and_field_types_without_type_arguments() {
+        let program = parse_inline(
+            r#"
+            class User[T] {
+                var id T
+            }
+
+            shape ListBox[T] {
+                values [T]
+            }
+
+            def main() {
+                user = User(1)
+                user.id := 2
+                id = user.id
+                boxed = ListBox([1])
+                items = boxed.values
+            }
+            "#,
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        let local_type = |name: &str| {
+            main.locals
+                .iter()
+                .find(|local| local.name == name)
+                .map(|local| local.ty.clone())
+                .expect("inferred local")
+        };
+
+        assert_eq!(
+            local_type("user"),
+            ir::Type::Named {
+                name: "User".to_string(),
+                args: vec![ir::Type::Int],
+            }
+        );
+        assert_eq!(local_type("id"), ir::Type::Int);
+        assert_eq!(
+            local_type("boxed"),
+            ir::Type::Named {
+                name: "ListBox".to_string(),
+                args: vec![ir::Type::Int],
+            }
+        );
+        assert_eq!(local_type("items"), ir::Type::list(ir::Type::Int));
     }
 
     #[test]

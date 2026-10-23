@@ -816,6 +816,13 @@ impl<'a> Parser<'a> {
                 }
                 _ => {
                     let field = self.parse_field_decl(member_annotations, member_visibility)?;
+                    if kind == TypeKind::Interface {
+                        self.diagnostics
+                            .push(crate::typecheck_diagnostics::interface_field(
+                                &field.name,
+                                field.span,
+                            ));
+                    }
                     if kind == TypeKind::Mixin {
                         self.diagnostics.push(Diagnostic::error(
                             "mixin_storage",

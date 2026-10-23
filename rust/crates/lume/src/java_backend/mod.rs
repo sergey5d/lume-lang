@@ -4002,6 +4002,50 @@ def main() Unit {
     }
 
     #[test]
+    fn runs_interface_getter_implementations_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = root.join("examples/features/interface_getter_implementations.lum");
+        let interpreted = run_path(&source, None).expect("run interface getters");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "interface getters ok\n");
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let temp = temp_path("lume-java-interface-getter-implementations");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:?}",
+            generated.diagnostics
+        );
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac interface getters",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.interfacegetters.InterfacegettersMain"),
+            "java interface getters",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            interpreted.output
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn readable_java_keeps_simple_for_loops_structured() {
         let temp = temp_path("lume-java-readable-for-loop");
         let source = temp.join("for_loop.lum");

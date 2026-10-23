@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*does not implement required method 'id'.*
+
+interface Identified {
+    def id() Int
+}
+
+class WrongKind with Identified {
+    get id Int = 42
+}
