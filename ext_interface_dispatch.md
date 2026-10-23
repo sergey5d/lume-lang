@@ -3,6 +3,10 @@
 Observed at commit `f208f747`, using the interpreter (`lume run`) and the Java
 backend (`lume gen` followed by `javac`).
 
+Interfaces now contain signatures only; overridable shared implementations use
+explicit `mixin` adoption. The extension-dispatch findings below are a separate
+historical audit, not a proposal to replace mixins with extensions.
+
 ## Summary
 
 `ext Interface { ... }` adds methods to an interface. When a class that
@@ -164,8 +168,8 @@ contract, while the interpreter does not.
 This makes "nothing inherits behaviour" literally true and keeps `ext`
 consistent with the "nothing hidden" goal.
 
-If interface default methods are dropped later, Option A is their replacement.
-Shared behaviour moves to `ext`, and interfaces become pure contracts.
+Option A concerns statically selected extension helpers. Explicitly adopted
+mixins supply overridable class members instead; interfaces remain pure contracts.
 
 ### Option B: `ext` methods are overridable defaults
 

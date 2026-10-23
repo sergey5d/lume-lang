@@ -9606,9 +9606,11 @@ impl<'a> SourceBodyEmitter<'a> {
                     Some(format!("lume.core.LumeMap.fromParts({joined})"))
                 }
             }
-            [owner] if owner == "Set" && emitted.is_empty() => {
-                Some("lume.core.LumeSet.empty()".to_string())
-            }
+            [owner] if owner == "Set" => Some(if emitted.is_empty() {
+                "lume.core.LumeSet.empty()".to_string()
+            } else {
+                format!("lume.core.LumeSet.from(lume.core.LumeVector.of({joined}))")
+            }),
             [owner] if owner == "Range" && matches!(emitted.len(), 2 | 3) => {
                 Some(format!("new lume.core.IntRange({joined})"))
             }

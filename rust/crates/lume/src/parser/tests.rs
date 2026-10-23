@@ -45,6 +45,52 @@ fn parses_stateless_mixins_and_rejects_storage_and_nonclass_adoption() {
     }
 }
 
+#[test]
+fn interfaces_are_signatures_only_and_mixins_accept_visibility() {
+    let parsed = parse(
+        "private mixin Hidden { def answer() Int = 42 }\ninternal mixin Shared { get ready Bool = true }\npublic mixin Exported {}",
+    );
+    assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+    let program = parsed.program.unwrap();
+    let visibilities = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Type(decl) => Some(decl.visibility),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        visibilities,
+        vec![
+            Visibility::Private,
+            Visibility::Internal,
+            Visibility::Default
+        ]
+    );
+
+    for source in [
+        "interface I { def answer() Int = 42 }",
+        "interface I { def answer() Int { 42 } }",
+        "interface I { get answer Int = 42 }",
+        "interface I { get answer Int { 42 } }",
+        "class Outer { interface I { def run() {} } }",
+    ] {
+        let parsed = parse(source);
+        let diagnostic = parsed
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "interface_member_body")
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected interface_member_body for {source}: {:?}",
+                    parsed.diagnostics
+                )
+            });
+        assert!(diagnostic.helps.iter().any(|help| help.contains("mixin")));
+    }
+}
+
 fn parse_expr_only(src: &str) -> Expr {
     let file = SourceFile::new("test.lum", src);
     let lexed = lex(&file);
@@ -7424,7 +7470,8 @@ interface Defaults {
 }
 "#,
     );
-    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    assert_eq!(result.diagnostics.len(), 1, "{:#?}", result.diagnostics);
+    assert_eq!(result.diagnostics[0].code, "interface_member_body");
     let program = result.program.expect("program");
     let Item::Type(declaration) = &program.items[0] else {
         panic!("expected Defaults interface");

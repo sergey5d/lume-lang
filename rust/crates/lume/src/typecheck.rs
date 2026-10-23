@@ -24265,7 +24265,7 @@ class Counter {
             "examples/enums.lum",
             "examples/enum_object_same_name.lum",
             "examples/imports.lum",
-            "examples/interface_default_methods.lum",
+            "examples/mixin_interface_implementations.lum",
             "examples/vector_hof.lum",
             "examples/set_map_hof.lum",
             "examples/placeholder_lambda.lum",

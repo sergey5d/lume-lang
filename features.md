@@ -69,23 +69,16 @@ Open module/use questions:
 - decide whether extension-method imports should keep using ordinary wildcard module use, or get a dedicated import surface such as `use ext app/module/*` or `use ext app/module/TypeName`
 - decide whether extension methods should also be allowed on named `object` types
 
-### 5. Interface Method Conflict Resolution
+### 5. Interface Contract Checking
 
-Open checker/runtime design:
-- decide how method resolution should work when a type implements multiple interfaces that inherit or declare conflicting method signatures
-- decide whether a class/type implementation can explicitly call a specific inherited interface/default method implementation from inside its own method body
-- choose syntax for qualified interface dispatch if needed
-- possible call forms to compare:
-  - `super.method(args)` if there is exactly one unambiguous inherited implementation
-  - `InterfaceName.method(this, args)` as an explicit static-looking dispatch form
-  - `InterfaceName.super.method(args)` as a Java-like qualified-super form
-  - another Lume-specific form if the above read too foreign or imply the wrong object model
-- define diagnostics for ambiguous interface method calls so the compiler points users toward the disambiguation syntax
+Interfaces contain signatures only; shared implementations use explicit mixin
+adoption. Mixin conflicts require a compatible class implementation, with no
+adoption-order precedence or `super` chain. Private and internal mixins follow
+ordinary declaration visibility.
 
-Related syntax question:
-- whether explicit implementation markers would add enough readability in large types to justify extra syntax
-- if added, decide whether they should mark interface satisfaction, replacement of an inherited concrete method, or both
-- define diagnostics for accidental signature mismatches even if no marker is added
+Remaining checker work:
+- ensure every required overload has a compatible implementation when several interfaces share a method name
+- keep extension dispatch independent of explicit mixin composition (see `ext_interface_dispatch.md`)
 
 ### Getter Effect Architecture
 

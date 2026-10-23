@@ -10,7 +10,6 @@ interface Labeled {
 }
 
 interface Metadata {
-    def category() Str = "metadata"
 }
 
 annotation Route with Metadata {

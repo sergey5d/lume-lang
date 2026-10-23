@@ -1217,7 +1217,18 @@ impl<'a> Parser<'a> {
             ));
         }
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
-            Some(self.parse_callable_body()?)
+            let body = self.parse_callable_body()?;
+            if allow_signature_only {
+                self.diagnostics.push(
+                    Diagnostic::error(
+                        "interface_member_body",
+                        "interface members declare signatures, not implementations",
+                        body.span(),
+                    )
+                    .with_help("move this implementation into a mixin and adopt it with 'use MixinName' in the class"),
+                );
+            }
+            Some(body)
         } else if allow_signature_only {
             None
         } else {

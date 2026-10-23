@@ -16,8 +16,14 @@ private interface SetApi[T] with Iterable[T] {
     def forEach(f fn(T) Unit)
     def contains(value T) Bool
     get isEmpty Bool
-    get nonEmpty Bool = !this.isEmpty
+    get nonEmpty Bool
     get size Int
+    def makeStr(separator Str) Str
+    def makeStr(separator Str, render fn(T) Str) Str
+}
+
+private mixin SetParts[T] with SetApi[T] {
+    get nonEmpty Bool = !this.isEmpty
 
     def makeStr(separator Str) Str {
         var result Str = ""
@@ -47,6 +53,8 @@ private interface SetApi[T] with Iterable[T] {
 }
 
 public class Set[T] with SetApi[T] {
+    use SetParts[T]
+
     new(values [T] vararg) =
         panic("Set construction is provided by the active runtime")
 }

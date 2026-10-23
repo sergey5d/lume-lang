@@ -11828,7 +11828,7 @@ def main() Unit {
             }
 
             interface Labeled {
-                get label Str = "default"
+                get label Str
             }
 
             class User with Identified[Int] {
@@ -11867,24 +11867,40 @@ def main() Unit {
     }
 
     #[test]
-    fn runs_interface_default_methods_and_overrides() {
+    fn runs_mixin_interface_implementations_and_overrides() {
         let program = lower_inline(
             r#"
             interface Hopper {
+                def hop() Str
+            }
+
+            mixin Hopping with Hopper {
                 def hop() Str = "hop"
             }
 
             interface FirstChoice {
-                def choose() Str = "first"
+                def choose() Str
             }
 
             interface SecondChoice {
+                def choose() Str
+            }
+
+            mixin FirstImplementation with FirstChoice {
+                def choose() Str = "first"
+            }
+
+            mixin SecondImplementation with SecondChoice {
                 def choose() Str = "second"
             }
 
-            class Rabbit with Hopper {}
+            class Rabbit with Hopper { use Hopping }
 
-            class PreferFirst with FirstChoice, SecondChoice {}
+            class PreferFirst with FirstChoice, SecondChoice {
+                use FirstImplementation
+                use SecondImplementation
+                def choose() Str = "first"
+            }
 
             def main() Unit {
                 rabbit = Rabbit {}

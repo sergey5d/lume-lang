@@ -9,3 +9,18 @@ def suffix() Str = " imported"
 public mixin CountParts with Counted {
     def summary() Str = this.count.toStr() + suffix()
 }
+
+private mixin PrivateParts {
+    get label Str = "private implementation"
+}
+
+internal mixin InternalParts with Counted {
+    def doubled() Int = this.count * 2
+}
+
+public class HiddenCounter with Counted {
+    use PrivateParts
+    use InternalParts
+
+    count Int
+}

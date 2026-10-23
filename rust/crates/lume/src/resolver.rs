@@ -5012,6 +5012,72 @@ def main() Int = answer()
     }
 
     #[test]
+    fn mixin_visibility_controls_imports_and_qualified_adoption() {
+        let temp = workspace_root().join("rust/target/resolver-mixin-visibility-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("support.lum"),
+            r#"
+module support
+private mixin Hidden { def answer() Int = 1 }
+internal mixin Shared { def answer() Int = 2 }
+public mixin Exported { def answer() Int = 3 }
+private class Container { public mixin Nested {} }
+public class Box { use Hidden }
+"#,
+        )
+        .expect("write support");
+
+        let source = temp.join("consumer.lum");
+        for (module, name, allowed) in [
+            ("support", "Hidden", false),
+            ("support", "Shared", true),
+            ("other", "Hidden", false),
+            ("other", "Shared", false),
+            ("other", "Exported", true),
+            ("other", "Container.Nested", false),
+        ] {
+            fs::write(
+                &source,
+                format!(
+                    "module {module}\nuse support/{{{name}}}\nclass Consumer {{ use {} }}",
+                    name.rsplit('.').next().unwrap(),
+                ),
+            )
+            .expect("write selective consumer");
+            let result = resolve_path(&source);
+            if allowed {
+                let result = result.unwrap();
+                assert!(
+                    result.diagnostics.is_empty(),
+                    "{module}/{name}: {:?}",
+                    result.diagnostics
+                );
+            } else {
+                assert!(
+                    result.is_err(),
+                    "{module}/{name}: hidden mixin import succeeded"
+                );
+            }
+
+            fs::write(
+                &source,
+                format!("module {module}\nuse support\nclass Consumer {{ use support.{name} }}",),
+            )
+            .expect("write qualified consumer");
+            let result = resolve_path(&source).expect("resolve qualified consumer");
+            assert_eq!(
+                result.diagnostics.is_empty(),
+                allowed,
+                "{module}/{name}: {:?}",
+                result.diagnostics
+            );
+        }
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn top_level_declarations_require_public_for_external_imports() {
         let temp = workspace_root().join("rust/target/resolver-explicit-public-test");
         let _ = fs::remove_dir_all(&temp);

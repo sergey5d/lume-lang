@@ -2289,36 +2289,50 @@ mod tests {
             .join("../../..")
             .canonicalize()
             .unwrap();
-        let source = root.join("examples/features/mixins.lum");
-        let interpreted = run_path(&source, None).expect("run mixins");
-        assert!(
-            interpreted.diagnostics.is_empty(),
-            "{:?}",
-            interpreted.diagnostics
-        );
-        let temp = temp_path("lume-java-mixins");
-        let out = temp.join("out");
-        let classes = temp.join("classes");
-        let result =
-            generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate mixins");
-        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-        assert!(!out.join("examples/mixins/CollectionParts.java").exists());
-        let mut sources = core_runtime_sources();
-        collect_java_sources(&out, &mut sources).unwrap();
-        fs::create_dir_all(&classes).unwrap();
-        run_checked(
-            Command::new("javac").arg("-d").arg(&classes).args(&sources),
-            "javac mixins",
-        );
-        let result = run_checked(
-            Command::new("java")
-                .arg("-cp")
-                .arg(&classes)
-                .arg("examples.mixins.MixinsMain"),
-            "java mixins",
-        );
-        assert_eq!(String::from_utf8(result.stdout).unwrap(), "mixins ok\n");
-        let _ = fs::remove_dir_all(temp);
+        for (path, entrypoint, expected) in [
+            (
+                "examples/features/mixins.lum",
+                "examples.mixins.MixinsMain",
+                "mixins ok\n",
+            ),
+            (
+                "examples/features/mixin_collections.lum",
+                "examples.mixin_collections.Mixin_collectionsMain",
+                "collection mixins ok\n",
+            ),
+        ] {
+            let source = root.join(path);
+            let interpreted = run_path(&source, None).expect("run mixins");
+            assert!(
+                interpreted.diagnostics.is_empty(),
+                "{:?}",
+                interpreted.diagnostics
+            );
+            assert_eq!(interpreted.output, expected);
+            let temp = temp_path("lume-java-mixins");
+            let out = temp.join("out");
+            let classes = temp.join("classes");
+            let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+                .expect("generate mixins");
+            assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+            assert!(!out.join("examples/mixins/CollectionParts.java").exists());
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).unwrap();
+            fs::create_dir_all(&classes).unwrap();
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac mixins",
+            );
+            let result = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg(entrypoint),
+                "java mixins",
+            );
+            assert_eq!(String::from_utf8(result.stdout).unwrap(), expected);
+            let _ = fs::remove_dir_all(temp);
+        }
     }
 
     #[test]
@@ -3927,7 +3941,7 @@ interface Identified[T] {
 }
 
 interface Labeled {
-    get label Str = "default"
+    get label Str
 }
 
 class User with Identified[Int] {

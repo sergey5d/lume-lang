@@ -31,11 +31,17 @@ private interface VectorApi[T] with Iterable[T] {
     get last Option[T]
     def tail() Vector[T]
     get isEmpty Bool
-    get nonEmpty Bool = !this.isEmpty
+    get nonEmpty Bool
     def removeFirst() Option[T]
     def removeLast() Option[T]
     get size Int
     def forEach(f fn(T) Unit)
+    def makeStr(separator Str) Str
+    def makeStr(separator Str, render fn(T) Str) Str
+}
+
+private mixin VectorParts[T] with VectorApi[T] {
+    get nonEmpty Bool = !this.isEmpty
 
     def makeStr(separator Str) Str {
         var result Str = ""
@@ -65,6 +71,8 @@ private interface VectorApi[T] with Iterable[T] {
 }
 
 public class Vector[T] with VectorApi[T] {
+    use VectorParts[T]
+
     new(values [T] vararg) =
         panic("Vector construction is provided by the active runtime")
 }

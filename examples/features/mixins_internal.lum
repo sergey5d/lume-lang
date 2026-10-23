@@ -1,0 +1,9 @@
+module examples/mixins_support
+
+use mixins_support/{Counted, InternalParts}
+
+public class InternalCounter with Counted {
+    use InternalParts
+
+    count Int
+}

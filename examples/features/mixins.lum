@@ -3,7 +3,8 @@
 
 module examples/mixins
 
-use mixins_support/{Counted, CountParts as ImportedParts}
+use mixins_support/{Counted, CountParts as ImportedParts, HiddenCounter}
+use mixins_internal/{InternalCounter}
 
 interface Sized {
     get size Int
@@ -123,6 +124,9 @@ def main() {
     assert(ResolvedLabel().label == "resolved")
     assert(ReverseResolvedLabel().label == "resolved")
     assert(ImportedCounter(3).report() == "3 imported")
+    assert(HiddenCounter(4).label == "private implementation")
+    assert(HiddenCounter(4).doubled() == 8)
+    assert(InternalCounter(5).doubled() == 10)
     assert(Renderer().render(7) == "int 7")
     assert(Renderer().render("hello") == "str hello")
     assert(IntValue(42).copyFirst() == 42)

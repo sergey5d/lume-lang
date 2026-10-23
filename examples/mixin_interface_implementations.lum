@@ -3,22 +3,40 @@
 # conflict first
 
 interface Greeter {
+    def greet() Str
+}
+
+mixin Greeting with Greeter {
     def greet() Str = "interface"
 }
 
 class OverrideBox with Greeter {
+    use Greeting
+
     def greet() Str = "class"
 }
 
 interface FirstChoice {
-    def choose() Str = "first"
+    def choose() Str
 }
 
 interface SecondChoice {
+    def choose() Str
+}
+
+mixin FirstImplementation with FirstChoice {
+    def choose() Str = "first"
+}
+
+mixin SecondImplementation with SecondChoice {
     def choose() Str = "second"
 }
 
 class PreferFirst with FirstChoice, SecondChoice {
+    use FirstImplementation
+    use SecondImplementation
+
+    def choose() Str = "first"
 }
 
 def main() Unit {

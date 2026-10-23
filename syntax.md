@@ -2882,6 +2882,11 @@ class Bag with Sized {
   It does not automatically add that interface to the class's declared bounds.
 - A class adopts a mixin with `use MixinName` inside its body. Imports of mixin
   declarations use the ordinary module visibility and `use` rules.
+- Top-level mixins are private by default. `private mixin` is file-local;
+  `internal mixin` may be imported only within the same declared module;
+  `public mixin` may be imported externally. A public class may adopt a private
+  or internal mixin without exposing the mixin itself. Its supplied members
+  retain their declared member visibility.
 - Mixins may have type parameters, for example `use ValueParts[Int]`. Their
   methods may have their own type parameters; getters follow normal getter rules.
 - Mixin bodies contain methods and getters with implementations, not stored
@@ -2905,8 +2910,10 @@ class Bag with Sized {
   chain. A mixin has no instance identity or runtime type metadata, and mixin
   declarations cannot be annotated.
 
-Mixin adoption is explicit and independent of interface defaults and extension
-visibility. Implementing an interface does not implicitly adopt a mixin.
+Interfaces contain signatures only. Shared implementations belong in explicitly
+adopted mixins, or in extensions for helpers that do not supply class members.
+Implementing an interface does not implicitly adopt a mixin. Extension visibility
+is independent of mixin adoption.
 See `examples/features/mixins.lum` for an executable example.
 
 ### Constructors
@@ -3480,23 +3487,22 @@ Anonymous implementations start with `object with`. Repeating `with`, such as
 `object with Readable with Writable`, is invalid; write `object with Readable,
 Writable` instead. Expression-level `shape with` is not supported.
 
-Interfaces may also provide default methods by attaching a body:
+Interfaces declare contracts, not default implementations. Put shared method
+and getter bodies in a mixin and adopt it explicitly:
 
 ```txt
 interface Named {
     def label() Str
-    def greeting() Str = "Hello " + this.label()
+    def greeting() Str
 }
-```
 
-Methods that satisfy an interface just use ordinary method declarations:
-
-```txt
-interface Named {
-    def label() Str
+mixin Greetings with Named {
+    def greeting() Str = "Hello " + this.label()
 }
 
 class Box with Named {
+    use Greetings
+
     def label() Str = "box"
 }
 ```

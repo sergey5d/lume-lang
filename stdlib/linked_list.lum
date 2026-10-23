@@ -23,12 +23,18 @@ private interface LinkedListApi[T] with Iterable[T] {
     get last Option[T]
     def tail() LinkedList[T]
     get isEmpty Bool
-    get nonEmpty Bool = !this.isEmpty
+    get nonEmpty Bool
     def removeFirst() Option[T]
     def removeLast() Option[T]
     get size Int
     def forEach(f fn(T) Unit)
     def iterator() Iterator[T]
+    def makeStr(separator Str) Str
+    def makeStr(separator Str, render fn(T) Str) Str
+}
+
+private mixin LinkedListParts[T] with LinkedListApi[T] {
+    get nonEmpty Bool = !this.isEmpty
 
     def makeStr(separator Str) Str {
         var result Str = ""
@@ -58,6 +64,8 @@ private interface LinkedListApi[T] with Iterable[T] {
 }
 
 public class LinkedList[T] with LinkedListApi[T] {
+    use LinkedListParts[T]
+
     new(values [T] vararg) =
         panic("LinkedList construction is provided by the active runtime")
 }

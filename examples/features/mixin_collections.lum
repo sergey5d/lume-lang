@@ -1,0 +1,33 @@
+# EXPECT:
+# collection mixins ok
+
+module examples/mixin_collections
+
+def main() {
+    vector [Int] = Vector(1, 2)
+    set Set[Int] = Set(1, 2)
+    linked LinkedList[Int] = LinkedList(1, 2)
+    assert(vector.nonEmpty && set.nonEmpty && linked.nonEmpty)
+    assert(vector.makeStr(",") == "1,2")
+    assert(set.makeStr(",") == "1,2")
+    assert(linked.makeStr(",") == "1,2")
+    assert(vector.makeStr("/", value => "v" + value) == "v1/v2")
+    assert(set.makeStr("/", value => "s" + value) == "s1/s2")
+    assert(linked.makeStr("/", value => "l" + value) == "l1/l2")
+
+    emptyVector = Vector[Int]()
+    emptySet = Set[Int]()
+    emptyLinked = LinkedList[Int]()
+    assert(!emptyVector.nonEmpty && !emptySet.nonEmpty && !emptyLinked.nonEmpty)
+    assert(emptyVector.makeStr(",") == "")
+    assert(emptySet.makeStr(",") == "")
+    assert(emptyLinked.makeStr(",") == "")
+    assert(emptyVector.makeStr(",", value => value.toStr()) == "")
+    assert(emptySet.makeStr(",", value => value.toStr()) == "")
+    assert(emptyLinked.makeStr(",", value => value.toStr()) == "")
+    emptyVector.add(3)
+    emptySet.add(3)
+    emptyLinked.add(3)
+    assert(emptyVector.nonEmpty && emptySet.nonEmpty && emptyLinked.nonEmpty)
+    println("collection mixins ok")
+}
