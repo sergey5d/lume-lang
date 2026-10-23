@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*interface members declare signatures, not implementations.*
+
+interface Contract {
+    get answer Int = 42
+}

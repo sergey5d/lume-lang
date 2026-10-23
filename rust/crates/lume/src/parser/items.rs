@@ -1118,7 +1118,7 @@ impl<'a> Parser<'a> {
         &mut self,
         annotations: Vec<Annotation>,
         visibility: Visibility,
-        allow_signature_only: bool,
+        signature_only: bool,
     ) -> Option<MethodDecl> {
         let (start, getter) = if self.match_keyword(Keyword::Def) {
             (self.previous_span(), false)
@@ -1181,13 +1181,12 @@ impl<'a> Parser<'a> {
         } else {
             self.parse_param_list()?
         };
-        let return_type = if self
-            .callable_body_starts_here(allow_signature_only, getter || legacy_getter_syntax)
-        {
-            None
-        } else {
-            self.parse_optional_return_type()
-        };
+        let return_type =
+            if self.callable_body_starts_here(signature_only, getter || legacy_getter_syntax) {
+                None
+            } else {
+                self.parse_optional_return_type()
+            };
         if getter && return_type.is_none() {
             if name.chars().next().is_some_and(char::is_uppercase) {
                 self.diagnostics.push(Diagnostic::error(
@@ -1218,18 +1217,14 @@ impl<'a> Parser<'a> {
         }
         let body = if self.at(TokenKind::LBrace) || self.at(TokenKind::Eq) {
             let body = self.parse_callable_body()?;
-            if allow_signature_only {
-                self.diagnostics.push(
-                    Diagnostic::error(
-                        "interface_member_body",
-                        "interface members declare signatures, not implementations",
+            if signature_only {
+                self.diagnostics
+                    .push(crate::typecheck_diagnostics::interface_member_body(
                         body.span(),
-                    )
-                    .with_help("move this implementation into a mixin and adopt it with 'use MixinName' in the class"),
-                );
+                    ));
             }
             Some(body)
-        } else if allow_signature_only {
+        } else if signature_only {
             None
         } else {
             self.error_at_current("expected_method_body", "expected method body");

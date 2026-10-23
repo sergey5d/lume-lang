@@ -166,6 +166,15 @@ pub enum CallableBody {
     Expr(Expr),
 }
 
+impl CallableBody {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Block(block) => block.span,
+            Self::Expr(expr) => expr.span(),
+        }
+    }
+}
+
 /// A field declared on a type or enum case payload.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldDecl {

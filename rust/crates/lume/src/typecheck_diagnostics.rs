@@ -1,5 +1,16 @@
 use crate::{Diagnostic, source::Span};
 
+pub(crate) fn interface_member_body(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "interface_member_body",
+        "interface members declare signatures, not implementations",
+        span,
+    )
+    .with_help(
+        "move this implementation into a mixin and adopt it with 'use MixinName' in the class",
+    )
+}
+
 pub(crate) fn private_field_constructor(
     span: Span,
     class_name: &str,

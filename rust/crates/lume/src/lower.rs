@@ -21,6 +21,27 @@ pub struct LowerResult {
 }
 
 pub fn lower_program(program: &ast::Program) -> LowerResult {
+    let diagnostics = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Type(decl) if decl.kind == ast::TypeKind::Interface => Some(decl),
+            _ => None,
+        })
+        .flat_map(|decl| &decl.members)
+        .filter_map(|member| match member {
+            TypeMember::Method(method) => method.body.as_ref(),
+            _ => None,
+        })
+        .map(|body| crate::typecheck_diagnostics::interface_member_body(body.span()))
+        .collect::<Vec<_>>();
+    if !diagnostics.is_empty() {
+        return LowerResult {
+            program: None,
+            core_bodies: HashMap::new(),
+            diagnostics,
+        };
+    }
     let composed = match crate::mixins::compose(program) {
         Ok(program) => program,
         Err(diagnostics) => {
@@ -12199,6 +12220,82 @@ mod tests {
             "{:#?}",
             lowered.diagnostics
         );
+    }
+
+    #[test]
+    fn rejects_interface_bodies_even_without_parser_validation() {
+        let mut program = parse_inline(
+            r#"
+            mixin Contract {
+                def answer() Int = 42
+                get ready Bool = true
+            }
+            class Consumer with Contract {}
+            "#,
+        );
+        let Item::Type(contract) = &mut program.items[0] else {
+            panic!("expected Contract declaration");
+        };
+        contract.kind = ast::TypeKind::Interface;
+
+        let checked = crate::check_program(&program);
+        assert_eq!(
+            checked
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "interface_member_body")
+                .count(),
+            2,
+            "{:?}",
+            checked.diagnostics
+        );
+        assert_eq!(
+            checked
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "missing_interface_member")
+                .count(),
+            2,
+            "{:?}",
+            checked.diagnostics
+        );
+
+        let lowered = lower_program(&program);
+        assert!(lowered.program.is_none());
+        assert!(lowered.core_bodies.is_empty());
+        assert_eq!(lowered.diagnostics.len(), 2, "{:?}", lowered.diagnostics);
+        assert!(
+            lowered
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code == "interface_member_body")
+        );
+    }
+
+    #[test]
+    fn interface_extensions_remain_separate_from_contract_bodies() {
+        let program = parse_inline(
+            r#"
+            interface Contract { def answer() Int }
+            ext Contract {
+                get ready Bool = this.answer() > 0
+            }
+            class Consumer with Contract {
+                def answer() Int = 42
+            }
+            def main() Bool {
+                consumer Contract = Consumer()
+                consumer.ready
+            }
+            "#,
+        );
+        let checked = crate::check_program(&program);
+        assert!(checked.diagnostics.is_empty(), "{:?}", checked.diagnostics);
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:?}", lowered.diagnostics);
+        let run = crate::interpreter::run_program(&lowered.program.unwrap());
+        assert!(run.diagnostics.is_empty(), "{:?}", run.diagnostics);
+        assert_eq!(run.return_value.as_deref(), Some("true"));
     }
 
     #[test]

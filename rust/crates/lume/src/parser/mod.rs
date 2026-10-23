@@ -147,15 +147,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-impl CallableBody {
-    fn span(&self) -> Span {
-        match self {
-            CallableBody::Block(block) => block.span,
-            CallableBody::Expr(expr) => expr.span(),
-        }
-    }
-}
-
 impl LambdaBody {
     fn span(&self) -> Span {
         match self {

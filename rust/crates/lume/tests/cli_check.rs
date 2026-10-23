@@ -61,3 +61,38 @@ fn check_reports_unused_mutability_without_failing() {
     assert!(String::from_utf8_lossy(&run.stderr).contains("warning[unused_mutability]"));
     fs::remove_file(path).expect("temporary source should be removable");
 }
+
+#[test]
+fn interface_methods_and_getters_cannot_have_bodies() {
+    for member in [
+        "def answer() Int = 42",
+        "def answer() Int { 42 }",
+        "get answer Int = 42",
+        "get answer Int { 42 }",
+    ] {
+        let path = temp_source(
+            "interface-body",
+            &format!("interface Contract {{ {member} }}"),
+        );
+        for command in ["check", "run"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_lume"))
+                .arg(command)
+                .arg(&path)
+                .env(
+                    "LUME_STDLIB",
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../stdlib"),
+                )
+                .output()
+                .expect("lume should run");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{command} accepted {member}");
+            assert!(stderr.contains("error[interface_member_body]"), "{stderr}");
+            assert!(
+                stderr.contains("move this implementation into a mixin"),
+                "{stderr}"
+            );
+            assert!(output.stdout.is_empty());
+        }
+        fs::remove_file(path).expect("remove temporary source");
+    }
+}

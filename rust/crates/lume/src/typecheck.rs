@@ -2322,6 +2322,13 @@ impl<'a> Checker<'a> {
                     }
                 }
                 TypeMember::Method(method) => {
+                    if decl.kind == TypeKind::Interface
+                        && let Some(body) = &method.body
+                    {
+                        self.diagnostics
+                            .push(typecheck_diagnostics::interface_member_body(body.span()));
+                        continue;
+                    }
                     if method.name == "new" && decl.kind != TypeKind::Class {
                         self.add_error(
                             "invalid_constructor_decl",
@@ -7483,10 +7490,6 @@ impl<'a> Checker<'a> {
 
         for name in names {
             let requirements = &methods[&name];
-            let required = requirements
-                .iter()
-                .filter(|method| !method.has_body)
-                .collect::<Vec<_>>();
             let field = implementation
                 .fields
                 .iter()
@@ -7516,16 +7519,16 @@ impl<'a> Checker<'a> {
                 continue;
             }
 
-            if required.is_empty() {
+            if requirements.is_empty() {
                 continue;
             }
-            let implemented = if required.iter().all(|method| method.getter) {
+            let implemented = if requirements.iter().all(|method| method.getter) {
                 implementation.methods.get(&name).is_some_and(|methods| {
                     methods.iter().any(|method| {
                         method.has_body
                             && method.visibility == Visibility::Default
                             && method.getter
-                            && required.iter().all(|requirement| {
+                            && requirements.iter().all(|requirement| {
                                 self.is_assignable(&method.ret, &requirement.ret)
                             })
                     })
@@ -7537,7 +7540,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
 
-            let member_kind = if required.iter().all(|method| method.getter) {
+            let member_kind = if requirements.iter().all(|method| method.getter) {
                 "getter"
             } else {
                 "method"
