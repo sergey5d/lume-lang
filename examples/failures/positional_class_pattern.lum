@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*unary pattern 'User\(\.\.\.\)' requires exactly one extractable field and one pattern; 'User' has 2 extractable fields and the pattern contains 2.*
+# .*named-value unpacking uses braces; 'User\(\.\.\.\)' is not supported.*
 
 class User {
     name Str

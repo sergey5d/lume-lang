@@ -1,7 +1,7 @@
 # FAIL_REGEX:
-# .*empty parenthesized pattern 'None\(\)' is not supported; use the bare variant name for a zero-payload union variant.*
+# .*named-value unpacking uses braces; 'None\(\.\.\.\)' is not supported.*
 
 def main(value Option[Int]) Int = match value {
-    case Some(value) => value
+    case Some { value } => value
     case None() => 0
 }

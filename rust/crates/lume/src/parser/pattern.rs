@@ -503,18 +503,11 @@ impl<'a> Parser<'a> {
                     }
                     let close =
                         self.consume(TokenKind::RParen, "expected ')' after constructor pattern")?;
-                    if args.is_empty() {
-                        self.diagnostics.push(Diagnostic::error(
-                            "empty_parenthesized_pattern",
-                            format!(
-                                "empty parenthesized pattern '{}()' is not supported; use the bare variant name for a zero-payload union variant, '_ {}' to ignore a value of that type, or 'value {}' to bind it",
-                                path.join("."),
-                                path.join("."),
-                                path.join(".")
-                            ),
+                    self.diagnostics
+                        .push(crate::typecheck_diagnostics::parenthesized_pattern(
+                            &path,
                             start.cover(close),
                         ));
-                    }
                     return Some(Pattern::Constructor {
                         path,
                         args,

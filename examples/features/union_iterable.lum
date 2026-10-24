@@ -8,7 +8,7 @@ type MaybeValue[T] with Iterable[T] =
 
 ext MaybeValue[T] {
     def iterator() Iterator[T] = match this {
-        case Present(value) => [value].iterator()
+        case Present { value } => [value].iterator()
         case Missing => Vector[T]().iterator()
     }
 }

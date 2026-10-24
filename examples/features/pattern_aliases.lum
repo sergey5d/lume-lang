@@ -14,7 +14,7 @@ class User {
 }
 
 def nestedTuple(pair (Int?, Str)) Int {
-    let (Some(value), label) = pair else return -1
+    let (Some { value }, label) = pair else return -1
     value + label.size
 }
 
@@ -29,7 +29,7 @@ def main() Unit {
     }
 
     current Int? = Some(5)
-    while let Some(value) as some = current {
+    while let Some { value } as some = current {
         println("while", value, some.value)
         break
     }

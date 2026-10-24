@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*bare case pattern 'Some' has a payload; use 'Some\(_\)' to ignore it or 'Some\(pattern\)' to match it.*
+# .*bare case pattern 'Some' has a payload; use 'Some \{ value \}' to unpack it or 'Some \{ value: _ \}' to ignore it.*
 
 def main(value Option[Int]) Unit {
     match value {

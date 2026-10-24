@@ -105,11 +105,11 @@ object Defaults {
         <p><code>let</code> supports irrefutable destructuring directly. Refutable bindings require an <code>else</code> path. <code>if let</code> branches on a pattern, and <code>match</code> handles alternatives exhaustively.</p>
         <pre><code>let { name, location } = ada
 
-let Some(first) = users.at(0) else return
+let Some { value as first } = users.at(0) else return
 
 label = match access {
     case Admin => "administrator"
-    case Member(organization) => organization
+    case Member { organization } => organization
 }</code></pre>
         <p>Tuple, vector, shape, class, and union-alternative patterns are name-aware where the source data is named. Vector patterns may capture a remainder with spread syntax.</p>
 

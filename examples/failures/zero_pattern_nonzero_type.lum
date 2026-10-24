@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*empty parenthesized pattern 'User\(\)' is not supported; use the bare variant name for a zero-payload union variant.*
+# .*named-value unpacking uses braces; 'User\(\.\.\.\)' is not supported.*
 
 class User {
     name Str

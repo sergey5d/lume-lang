@@ -19,12 +19,12 @@ def annotatedBare() Unit {}
 def annotatedQualified() Unit {}
 
 def readBare(value OptionX[Int]) Int = match value {
-    case SomeX(item) => item
+    case SomeX { value as item } => item
     case NoneX => 0
 }
 
 def readQualified(value OptionX[Int]) Int = match value {
-    case OptionX.SomeX(item) => item
+    case OptionX.SomeX { value as item } => item
     case OptionX.NoneX => 0
 }
 

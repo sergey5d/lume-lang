@@ -34,7 +34,7 @@ def compareRows(left (Int, Int, Str), right (Int, Int, Str)) Int {
 
 def syntax1(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
-    if let Some(firstRow) = rows.at(0) {
+    if let Some { value as firstRow } = rows.at(0) {
         let (_, initialY Int, _) = firstRow
         var lastY = initialY
         for row <- rows {
@@ -57,7 +57,7 @@ def syntax1(rows [(Int, Int, Str)]) Unit {
 
 def syntax2(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
-    if let Some(firstRow) = rows.at(0) {
+    if let Some { value as firstRow } = rows.at(0) {
         let (_, initialY Int, _) = firstRow
         var lastY = initialY
         for row <- rows {
@@ -81,7 +81,7 @@ def syntax2(rows [(Int, Int, Str)]) Unit {
 def syntax3(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
 
-    if let Some(first) = rows.at(0) {
+    if let Some { value as first } = rows.at(0) {
         let (_, initialY Int, _) = first
         var lastY = initialY
         for row <- rows {
@@ -104,7 +104,7 @@ def syntax3(rows [(Int, Int, Str)]) Unit {
 
 def syntax4(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
-    if let Some(first) = rows.at(0) {
+    if let Some { value as first } = rows.at(0) {
         let (_, initialY Int, _) = first
         var lastY = initialY
         for row <- rows {

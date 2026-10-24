@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*unary pattern 'Box\(\.\.\.\)' requires exactly one extractable field and one pattern; 'Box' has 2 extractable fields and the pattern contains 1.*
+# .*named-value unpacking uses braces; 'Box\(\.\.\.\)' is not supported.*
 
 class Box {
     value Int

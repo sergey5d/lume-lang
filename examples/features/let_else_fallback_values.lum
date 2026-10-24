@@ -17,7 +17,7 @@ class SomeClass {
 }
 
 def scalar(value Str?) Str {
-    let Some(item) = value else "fallback"
+    let Some { value as item } = value else "fallback"
     item
 }
 
@@ -35,7 +35,7 @@ def recordFallback(value Any) Str {
 }
 
 def pairFallback(value Option[(Str, Str)]) Str {
-    let Some(pair) = value else ("positional1", "positional2")
+    let Some { value as pair } = value else ("positional1", "positional2")
     pair[0] + " " + pair[1]
 }
 

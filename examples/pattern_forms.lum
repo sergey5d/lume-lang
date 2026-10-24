@@ -32,12 +32,12 @@ object Ready {}
 def main() Int {
     missing Int? = None
     match missing {
-        case Some(_) => ()
+        case Some { value: _ } => ()
         case None => println("none")
     }
 
     match None {
-        case Some(_) => println("error")
+        case Some { value: _ } => println("error")
         case None as none => println("none", none)
     }
 
@@ -47,12 +47,12 @@ def main() Int {
 
     present Int? = Some(5)
     match present {
-        case Some(x) => println("some", x)
+        case Some { value as x } => println("some", x)
         case None => ()
     }
 
     match present {
-        case Some(x) as val => println("some", val.value, x)
+        case Some { value as x } as val => println("some", val.value, x)
         case None => ()
     }
 

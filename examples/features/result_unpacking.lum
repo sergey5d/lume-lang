@@ -1,0 +1,61 @@
+# EXPECT:
+# match ok 7
+# match err missing
+# if let ok 7
+# if let err missing
+# let ok 7
+# let fallback
+# let err missing
+# let no error
+# while let ok 1
+# while let ok 2
+# while let err done
+
+def describeResult(result Result[Int, Str]) Str = match result {
+    case Ok { value } => "match ok ${value}"
+    case Err { error } => "match err ${error}"
+}
+
+def unpackValue(result Result[Int, Str]) Str {
+    let Ok { value } = result else return "let fallback"
+    "let ok ${value}"
+}
+
+def unpackError(result Result[Int, Str]) Str {
+    let Err { error } = result else return "let no error"
+    "let err ${error}"
+}
+
+def main() {
+    success Result[Int, Str] = Ok(7)
+    failure Result[Int, Str] = Err("missing")
+
+    println(describeResult(success))
+    println(describeResult(failure))
+
+    if let Ok { value } = success {
+        println("if let ok", value)
+    }
+    if let Err { error } = failure {
+        println("if let err", error)
+    }
+
+    println(unpackValue(success))
+    println(unpackValue(failure))
+    println(unpackError(failure))
+    println(unpackError(success))
+
+    var current Result[Int, Str] = Ok(1)
+    while let Ok { value } = current {
+        println("while let ok", value)
+        if value < 2 {
+            current := Ok(value + 1)
+        } else {
+            current := Err("done")
+        }
+    }
+    while let Err { error } = current {
+        println("while let err", error)
+        current := Ok(0)
+    }
+}

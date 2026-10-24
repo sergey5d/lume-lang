@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*named-value unpacking uses braces; 'Ok\(\.\.\.\)' is not supported.*
+
+def main() {
+    result Result[Int, Str] = Ok(7)
+    match result {
+        case Ok(value) => println(value)
+        case Err { error } => println(error)
+    }
+}

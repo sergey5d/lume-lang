@@ -1482,8 +1482,25 @@ mod tests {
     #[test]
     fn keeps_destructuring_typed_and_grouped_extractions_as_patterns() {
         assert_formatted(
-            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\nlet item Int <- value else return\nlet Some(item) = left else return\nlet (a, b) <- pair else return\nlet _ <- left else return\nlet {\nx <- left\ny <- right\n} else return\n}\n",
-            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\n    let item Int <- value else return\n    let Some(item) = left else return\n    let (a, b) <- pair else return\n    let _ <- left else return\n    let {\n        x <- left\n        y <- right\n    } else return\n}\n",
+            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\nlet item Int <- value else return\nlet Some { value as item } = left else return\nlet (a, b) <- pair else return\nlet _ <- left else return\nlet {\nx <- left\ny <- right\n} else return\n}\n",
+            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\n    let item Int <- value else return\n    let Some { value as item } = left else return\n    let (a, b) <- pair else return\n    let _ <- left else return\n    let {\n        x <- left\n        y <- right\n    } else return\n}\n",
+        );
+    }
+
+    #[test]
+    fn rejects_parenthesized_unpacking_without_overwriting_source() {
+        let source = "def run(result Result[Int, Str]) {\nlet Ok(value) = result else return\nprintln(value)\n}\n";
+        let result = format(source);
+        assert_eq!(result.text, source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "parenthesized_pattern")
+        );
+        assert_formatted(
+            "def run(result Result[Int, Str]) {\nlet Ok { value } = result else return\nprintln(value)\n}\n",
+            "def run(result Result[Int, Str]) {\n    let Ok { value } = result else return\n    println(value)\n}\n",
         );
     }
 

@@ -15,7 +15,7 @@ def main() Unit {
     ]
 
     extracted [Int?] = values.map(value => match value {
-        case SomeX(x) => Some(x * 10)
+        case SomeX { value as x } => Some(x * 10)
         case NoneX => None
     })
 

@@ -2,6 +2,6 @@
 # .*empty field pattern 'None \{\}' is redundant; use the bare zero-payload case 'None'.*
 
 def main(maybe Option[Int]) Int = match maybe {
-    case Some(value) => value
+    case Some { value } => value
     case None {} => 0
 }

@@ -91,9 +91,9 @@ def main() Unit {
     streamClosed = stream.close()!
     println(stream.closed)
     match stream.read(1) {
-        case Ok(_) => println("open")
-        case Err(Closed { path: _ }) => println("closed")
-        case Err(_) => println("error")
+        case Ok { value: _ } => println("open")
+        case Err { error: Closed { path: _ } } => println("closed")
+        case Err { error: _ } => println("error")
     }
 
     reader = File.openText(path)!
@@ -105,13 +105,13 @@ def main() Unit {
     readerClosed = reader.close()!
 
     match File.readText(OS.args[1]) {
-        case Err(InvalidEncoding { offset }) => println("invalid", offset)
+        case Err { error: InvalidEncoding { offset } } => println("invalid", offset)
         case _ => println("unexpected")
     }
 
     invalidReader = File.openText(OS.args[1])!
     match invalidReader.readLine() {
-        case Err(InvalidEncoding { offset }) => println("stream invalid", offset)
+        case Err { error: InvalidEncoding { offset } } => println("stream invalid", offset)
         case _ => println("unexpected stream")
     }
 }

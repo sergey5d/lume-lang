@@ -30,8 +30,8 @@ def main() Int {
 
     maybe Option[Any] = Some(Any(5))
     match maybe {
-        case Some(_ Int) => println("option wildcard")
-        case Some(_) => ()
+        case Some { value: _ Int } => println("option wildcard")
+        case Some { value: _ } => ()
         case None => ()
     }
 

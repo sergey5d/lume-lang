@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*unary pattern 'Values\(\.\.\.\)' requires exactly one extractable field and one pattern; 'Values' has 2 extractable fields and the pattern contains 2.*
+# .*named-value unpacking uses braces; 'Pair\.Values\(\.\.\.\)' is not supported.*
 
 type Pair =
     class Values {

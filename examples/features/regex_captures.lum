@@ -88,7 +88,7 @@ def main() {
     assert(Regex.compile(Regex.escape("a+b.(c)"))!.matches("a+b.(c)"))
     invalid = Regex.compile("[")
     assert(invalid.isErr)
-    let Err(error) = invalid else panic("invalid regex should fail")
+    let Err { error } = invalid else panic("invalid regex should fail")
     assert(error.message.nonEmpty)
     println("regex captures ok")
 }

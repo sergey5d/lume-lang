@@ -120,3 +120,75 @@ fn interfaces_cannot_declare_stored_fields() {
         fs::remove_file(path).expect("remove temporary source");
     }
 }
+
+#[test]
+fn interfaces_cannot_contain_nested_declarations() {
+    for declaration in [
+        "class Nested {}",
+        "shape Nested {}",
+        "interface Nested {}",
+        "object Nested {}",
+        "annotation Nested {}",
+        "mixin Nested {}",
+        "type Nested = Str",
+        "type Nested = class Present { value Str } | object Missing {}",
+    ] {
+        let path = temp_source(
+            "interface-nested-declaration",
+            &format!("interface Contract {{ {declaration} }}"),
+        );
+        for command in ["check", "run"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_lume"))
+                .arg(command)
+                .arg(&path)
+                .env(
+                    "LUME_STDLIB",
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../stdlib"),
+                )
+                .output()
+                .expect("lume should run");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{command} accepted {declaration}");
+            assert!(
+                stderr.contains("error[interface_nested_declaration]"),
+                "{stderr}"
+            );
+            assert!(stderr.contains("'get' and 'def' signatures"), "{stderr}");
+            assert!(output.stdout.is_empty());
+        }
+        fs::remove_file(path).expect("remove temporary source");
+    }
+}
+
+#[test]
+fn named_unpacking_requires_braces() {
+    for body in [
+        "match result {\ncase Ok(value) => println(value)\ncase Err { error } => println(error)\n}",
+        "if let Ok(value) = result { println(value) }",
+        "let Ok(value) = result else return\nprintln(value)",
+        "while let Ok(value) = result { println(value)\nbreak }",
+        "for let Ok(value) <- [result] { println(value) }",
+    ] {
+        let path = temp_source(
+            "parenthesized-unpacking",
+            &format!("def main() {{\nresult Result[Int, Str] = Ok(1)\n{body}\n}}"),
+        );
+        for command in ["check", "run"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_lume"))
+                .arg(command)
+                .arg(&path)
+                .env(
+                    "LUME_STDLIB",
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../stdlib"),
+                )
+                .output()
+                .expect("lume should run");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(!output.status.success(), "{command} accepted {body}");
+            assert!(stderr.contains("error[parenthesized_pattern]"), "{stderr}");
+            assert!(stderr.contains("Ok { value as binding }"), "{stderr}");
+            assert!(output.stdout.is_empty());
+        }
+        fs::remove_file(path).expect("remove temporary source");
+    }
+}

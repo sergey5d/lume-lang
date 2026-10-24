@@ -15,7 +15,7 @@ type Outcome =
 def main() Unit {
     outcome Outcome = Outcome.Success("ok")
     match outcome {
-        case Outcome.Success(value) => println("annotations", value == "ok")
+        case Outcome.Success { value } => println("annotations", value == "ok")
         case Outcome.Cancelled => println("cancelled")
     }
 }

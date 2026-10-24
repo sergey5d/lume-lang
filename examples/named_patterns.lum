@@ -28,6 +28,7 @@
 # for let 16
 # 0
 
+# Named values use field patterns, independently of constructor parameter order.
 class Box[T] {
     value T
 }
@@ -76,19 +77,19 @@ type Tagged =
 
 def showSome(value Int?) Unit {
     match value {
-        case Some(item) => println("some", item)
+        case Some { value as item } => println("some", item)
         case None => ()
     }
 }
 
 def showResult(ok Result[Str, Str], err Result[Str, Str]) Unit {
     match ok {
-        case Ok(value) => println("ok", value)
-        case Err(_) => ()
+        case Ok { value } => println("ok", value)
+        case Err { error: _ } => ()
     }
     match err {
-        case Ok(_) => ()
-        case Err(error) => println("err", error)
+        case Ok { value: _ } => ()
+        case Err { error } => println("err", error)
     }
 }
 
@@ -97,43 +98,43 @@ def main() Int {
     showResult(Ok("ready"), Err("failed"))
 
     match Box(7) {
-        case Box(item) => println("box", item)
+        case Box { value as item } => println("box", item)
     }
 
     match Label("label") {
-        case Label(value) => println("shape", value)
+        case Label { value } => println("shape", value)
     }
 
     match UserId("42", 10) {
-        case UserId(id) => println("user id", id)
+        case UserId { value as id } => println("user id", id)
     }
 
     match Some(0) {
-        case Some(0) => println("zero")
-        case Some(_) => ()
+        case Some { value: 0 } => println("zero")
+        case Some { value: _ } => ()
         case None => ()
     }
 
     match Some(1) {
-        case Some(_) => println("wildcard")
+        case Some { value: _ } => println("wildcard")
         case None => ()
     }
 
     maybeUser User? = Some(User { name: "Ada" })
     match maybeUser {
-        case Some(User { name }) => println("nested", name)
+        case Some { value: User { name } } => println("nested", name)
         case None => ()
     }
 
     boxedMaybe Box[Int?] = Box(Some(8))
     match boxedMaybe {
-        case Box(Some(item)) => println("box some", item)
+        case Box { value: Some { value as item } } => println("box some", item)
         case _ => ()
     }
 
     workerResult Result[Any, Str] = Ok(Worker { name: "Wren" })
     match workerResult {
-        case Ok(value Worker) => println("worker", value.name)
+        case Ok { value: value Worker } => println("worker", value.name)
         case _ => ()
     }
 
@@ -143,12 +144,12 @@ def main() Int {
     }
 
     match SecretBox(11, "secret") {
-        case SecretBox(value) => println("private", value)
+        case SecretBox { value } => println("private", value)
     }
 
     tagged Tagged = Tagged.Named(13)
     match tagged {
-        case Tagged.Named(value) => println("tagged", value)
+        case Tagged.Named { value } => println("tagged", value)
         case Unnamed => ()
     }
 
@@ -172,13 +173,13 @@ def main() Int {
     }
 
     match Some(100) {
-        case Some(_) => println("ignored some")
+        case Some { value: _ } => println("ignored some")
         case None => ()
     }
 
     exactNone Int? = None
     match exactNone {
-        case Some(_) => ()
+        case Some { value: _ } => ()
         case None => println("none")
     }
 
@@ -207,15 +208,15 @@ def main() Int {
         case Ready => println("singleton")
     }
 
-    let Box(letValue) = Box(14)
+    let Box { value as letValue } = Box(14)
     println("let", letValue)
 
-    if let Some(ifValue) = Some(15) {
+    if let Some { value as ifValue } = Some(15) {
         println("if let", ifValue)
     }
 
     boxes = [Box(16)]
-    for let Box(loopValue) <- boxes {
+    for let Box { value as loopValue } <- boxes {
         println("for let", loopValue)
     }
 

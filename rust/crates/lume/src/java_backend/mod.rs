@@ -2750,9 +2750,9 @@ def main() Unit {
     streamClosed = stream.close()!
     println(stream.closed)
     match stream.read(1) {
-        case Ok(_) => println("open")
-        case Err(Closed { path: _ }) => println("closed")
-        case Err(_) => println("error")
+        case Ok { value: _ } => println("open")
+        case Err { error: Closed { path: _ } } => println("closed")
+        case Err { error: _ } => println("error")
     }
 
     reader = File.openText(path)!
@@ -2764,13 +2764,13 @@ def main() Unit {
     readerClosed = reader.close()!
 
     match File.readText(OS.args[1]) {
-        case Err(InvalidEncoding { offset }) => println("invalid", offset)
+        case Err { error: InvalidEncoding { offset } } => println("invalid", offset)
         case _ => println("unexpected")
     }
 
     invalidReader = File.openText(OS.args[1])!
     match invalidReader.readLine() {
-        case Err(InvalidEncoding { offset }) => println("stream invalid", offset)
+        case Err { error: InvalidEncoding { offset } } => println("stream invalid", offset)
         case _ => println("unexpected stream")
     }
 }
@@ -3172,7 +3172,7 @@ def main() Unit {
         total += ifAge + ifUser.age
     }
     current User? = Some(user)
-    while let Some(nextUser) as some = current {
+    while let Some { value as nextUser } as some = current {
         total += nextUser.age + some.value.age
         break
     }
@@ -4321,7 +4321,7 @@ def inserted() Str {
 module demo/early
 
 def valueOrZero(value Option[Int]) Int {
-    if let Some(item) = value {
+    if let Some { value as item } = value {
         return item
     }
     0
@@ -4338,7 +4338,7 @@ def firstPositive(values [Int]) Int {
 }
 
 def cached(values Map[Str, Int], key Str) Int {
-    if let Some(value) = values.get(key) {
+    if let Some { value } = values.get(key) {
         return value
     }
     0
@@ -4780,7 +4780,7 @@ def main() Int = calculate(4) ?? 0
 module demo/let_conditions
 
 def positive(ready Bool, value Int?) Int {
-    if ready && let Some(item) = value && item > 0 {
+    if ready && let Some { value as item } = value && item > 0 {
         return item
     }
     0
@@ -4926,7 +4926,7 @@ def main() Unit {
 module demo/let_else
 
 def explicit(value Int?) Int {
-    let Some(item) = value else return 0
+    let Some { value as item } = value else return 0
     item
 }
 
@@ -4953,7 +4953,7 @@ def scalarFallback(value Int?) Int {
 }
 
 def tupleFallback(value Option[(Int, Int)]) Int {
-    let Some(pair) = value else (5, 6)
+    let Some { value as pair } = value else (5, 6)
     pair[0] + pair[1]
 }
 
@@ -5193,7 +5193,7 @@ def choiceValue(choice Choice) Int = match choice {
 
 def observe(value Option[Int]) Unit = {
     match value {
-        case Some(_) => ()
+        case Some { value: _ } => ()
         case None => ()
     }
 }
@@ -5859,7 +5859,7 @@ def describe(value Int) Str = match value {
     case _ as other => other.toStr()
 }
 def optionValue(value Int?) Int = match value {
-    case Some(item) => item
+    case Some { value as item } => item
     case None => 0
 }
 def petName(value Pet) Str = match value {
@@ -6736,17 +6736,17 @@ def describeReview(value ReviewState) Str = match value {
 }
 
 def describeMaybe(value Option[Int]) Str = match value {
-    case Some(item) as some => some.value.toStr() + " " + item.toStr()
+    case Some { value as item } as some => some.value.toStr() + " " + item.toStr()
     case None => "none"
 }
 
 def describeNoneAlias(value Option[Int]) Str = match value {
-    case Some(_) => "error"
+    case Some { value: _ } => "error"
     case None as none => none.toStr()
 }
 
 def describePayload(value Payload) Str = match value {
-    case Payload.Item(item) as whole => whole.value.toStr() + " " + item.toStr()
+    case Payload.Item { value as item } as whole => whole.value.toStr() + " " + item.toStr()
     case Payload.Empty => "empty"
 }
 

@@ -1,0 +1,11 @@
+# FAIL_REGEX:
+# .*interface bodies contain only 'get' and 'def' signatures, not nested declarations.*
+
+interface Reader {
+    shape Position {
+        offset Int
+    }
+
+    get position Int
+    def read() Str
+}

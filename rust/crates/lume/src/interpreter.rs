@@ -10984,7 +10984,7 @@ $name
 
             ext OptionX[T] {
                 def isDefined() Bool = match this {
-                    case SomeX(_) => true
+                    case SomeX { value: _ } => true
                     case NoneX => false
                 }
             }

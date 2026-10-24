@@ -726,6 +726,13 @@ impl<'a> Parser<'a> {
                     mixins.push(self.parse_type_ref()?);
                 }
                 TokenKind::Keyword(Keyword::Type) if self.starts_type_alias_decl() => {
+                    if kind == TypeKind::Interface {
+                        self.diagnostics.push(
+                            crate::typecheck_diagnostics::interface_nested_declaration(
+                                self.current_span(),
+                            ),
+                        );
+                    }
                     if kind == TypeKind::Mixin {
                         self.error_at_current(
                             "mixin_nested_declaration",
@@ -742,6 +749,13 @@ impl<'a> Parser<'a> {
                 | TokenKind::Keyword(Keyword::Object)
                 | TokenKind::Keyword(Keyword::Mixin)
                 | TokenKind::Keyword(Keyword::Interface) => {
+                    if kind == TypeKind::Interface {
+                        self.diagnostics.push(
+                            crate::typecheck_diagnostics::interface_nested_declaration(
+                                self.current_span(),
+                            ),
+                        );
+                    }
                     if kind == TypeKind::Mixin {
                         self.error_at_current(
                             "mixin_nested_declaration",

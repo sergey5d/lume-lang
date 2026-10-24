@@ -542,12 +542,12 @@ println(typeOf[User].kind)
 
 classType ClassType[User] = typeOf[User].asClass() !
 fields = classType.fields
-let Some(nameField) = classType.field("name") else panic("expected name field")
+let Some { value as nameField } = classType.field("name") else panic("expected name field")
 println(nameField.fieldType.name !)
 println(nameField.isPrivate)
 
 unionType UnionType[Status] = typeOf[Status].asUnion() !
-let Some(pending) = unionType.alternative("Pending") else panic("expected Pending alternative")
+let Some { value as pending } = unionType.alternative("Pending") else panic("expected Pending alternative")
 println(pending.name)
 constructedAlternative Result[Any, ReflectionError] = pending.construct()
 ```
@@ -560,7 +560,7 @@ constructed Result[User, ReflectionError] = classType.construct("Ada", 42)
 user User = constructed !
 nameValue Result[Any, ReflectionError] = nameField.get(user)
 
-let Some(greetMethod) = classType.method("greet") else panic("expected greet method")
+let Some { value as greetMethod } = classType.method("greet") else panic("expected greet method")
 greeting Result[Any, ReflectionError] = greetMethod.call(user)
 ```
 
@@ -1074,8 +1074,9 @@ type OptionX[T] =
 
 Named `class`, `shape`, `interface`, `mixin`, `object`, and `annotation`
 declarations, as well as `type` aliases and declared unions, may appear inside
-named classes, shapes, interfaces, objects, or annotations. Mixin bodies contain
-only methods and getters:
+named classes, shapes, objects, or annotations. Interfaces contain only `get`
+and `def` signatures; mixin bodies contain only getter and method implementations.
+Neither supports nested declarations:
 
 ```txt
 class Parser {
@@ -2910,8 +2911,10 @@ class Bag with Sized {
   chain. A mixin has no instance identity or runtime type metadata, and mixin
   declarations cannot be annotated.
 
-Interfaces contain signatures only. Shared implementations belong in explicitly
-adopted mixins, or in extensions for helpers that do not supply class members.
+Interfaces contain only public `get` and `def` signatures, not stored fields,
+constructors, nested declarations, or mixin adoption. Shared implementations
+belong in explicitly adopted mixins, or in extensions for helpers that do not
+supply class members.
 Implementing an interface does not implicitly adopt a mixin. Extension visibility
 is independent of mixin adoption.
 See `examples/features/mixins.lum` for an executable example.
@@ -3536,7 +3539,7 @@ type OptionX[T] =
 
 ext OptionX[T] {
     def isSet() Bool = match this {
-        case SomeX(_) => true
+        case SomeX { value: _ } => true
         case NoneX => false
     }
 }
@@ -3976,7 +3979,7 @@ if value > 0 {
 Pattern-test form:
 
 ```txt
-if let Some(item) = maybeValue {
+if let Some { value as item } = maybeValue {
     println(item)
 }
 ```
@@ -4076,7 +4079,7 @@ asks you to use plain `let` instead.
 When the payload needs more destructuring, prefer doing that on the next line inside the branch:
 
 ```txt
-if let Some(pair) = maybePair {
+if let Some { value as pair } = maybePair {
     let (x, y) = pair
     println(x)
     println(y)
@@ -4185,11 +4188,11 @@ fallback for recoverable refutable binding.
 The fallback may either exit control flow or supply values for the bindings:
 
 ```txt
-let Some(item) = maybeValue else {
+let Some { value as item } = maybeValue else {
     return Err("missing")
 }
 
-let Some(item) = maybeValue else defaultItem
+let Some { value as item } = maybeValue else defaultItem
 ```
 
 For success-carrying values, `<-` is shorthand for the success case:
@@ -4201,7 +4204,7 @@ let item <- maybeValue else {
 ```
 
 This is equivalent to:
-- `let Some(item) = maybeValue else { ... }` for `Option[T]`
+- `let Some { value as item } = maybeValue else { ... }` for `Option[T]`
 - `let Ok { value as item } = maybeResult else { ... }` for `Result[T, E]`
 - `let Right { value as item } = maybeEither else { ... }` for `Either[L, R]`
 
@@ -4279,8 +4282,8 @@ Grouped refutable bindings share one fallback:
 
 ```txt
 let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } else {
     return Err("missing")
 }
@@ -4293,7 +4296,7 @@ is still one value when that binding itself has a tuple type:
 ```txt
 let item <- maybeItem else defaultItem
 
-let Some(pair) = maybePair else (1, 2)
+let Some { value as pair } = maybePair else (1, 2)
 ```
 
 A pattern or grouped extraction with multiple bindings requires a shape whose
@@ -4337,7 +4340,7 @@ relationship expressed by the successful pattern:
 
 ```txt
 let User { name } as user = candidate else return       # valid
-let Some(User { name }) = candidate else "Unknown"      # valid: one binding
+let Some { value: User { name } } = candidate else "Unknown"      # valid: one binding
 
 let User { name } as user = candidate else {            # invalid
     name: "Unknown"
@@ -4372,7 +4375,7 @@ let item <- maybe          # error: '<-' extraction requires else
 For assertive extraction, write an explicit `panic(...)` fallback:
 
 ```txt
-let Some(item) = maybeValue else panic("expected Some")
+let Some { value as item } = maybeValue else panic("expected Some")
 let item <- maybeValue else panic("expected value")
 ```
 
@@ -4380,8 +4383,8 @@ Grouped assertive extraction uses the same `let { ... } else` form:
 
 ```txt
 let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } else panic("expected both values")
 ```
 
@@ -4510,12 +4513,11 @@ optional Int? = ^5
 inferred = ^"ready" # Option[Str]
 ```
 
-Patterns have the same three layers. `Some(value)` is canonical, the record
-form exposes the general named-field rule, and `^value` is shorthand:
+Named-value patterns use braces, including single-field alternatives such as
+`Some`. `^value` remains optional-payload shorthand:
 
 ```txt
-let Some(canonicalValue) = optional else return
-let Some { value as recordValue } = optional else return
+let Some { value as canonicalValue } = optional else return
 let ^shortValue = optional else return
 ```
 
@@ -4584,13 +4586,13 @@ statements or as a grouped `let` block with `else`:
 ```txt
 left = try maybeLeft
 
-let Some(right) = maybeRight else {
+let Some { value as right } = maybeRight else {
     return Err("missing")
 }
 
 let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } else {
     return Err("missing")
 }
@@ -4600,8 +4602,8 @@ let {
 
 ```txt
 if let {
-    Some(left) = maybeLeft
-    Some(right) = maybeRight
+    Some { value as left } = maybeLeft
+    Some { value as right } = maybeRight
 } {
     println(left + right)
 }
@@ -4638,7 +4640,7 @@ an extraction clause must be grouped explicitly. Newlines after `&&` do not
 change clause recognition:
 
 ```txt
-if let Some(left) = maybeLeft && let Ok { value as right } = compute() && right > left {
+if let Some { value as left } = maybeLeft && let Ok { value as right } = compute() && right > left {
     println(left + right)
 }
 
@@ -4723,7 +4725,7 @@ Refutable logic goes in the loop body:
 
 ```txt
 for maybeItem <- items {
-    let Some(item) = maybeItem else {
+    let Some { value as item } = maybeItem else {
         continue
     }
     println(item)
@@ -4735,8 +4737,8 @@ These generator heads are invalid:
 ```txt
 for (x, y) <- pairs { ... }
 for { name, age } <- users { ... }
-for Some(item) <- values { ... }
-for let Some(item) <- values { ... }
+for Some { value as item } <- values { ... }
+for let Some { value as item } <- values { ... }
 for let worker Worker <- values { ... }
 for item Int <- items { ... }
 ```
@@ -4949,7 +4951,7 @@ not clause forms. Put that logic in the body or use helpers such as `filterMap`:
 
 ```txt
 result = items.filterMap(item => match item {
-    case Some(value) => Some(value)
+    case Some { value } => Some(value)
     case None => None
 })
 ```
@@ -5035,7 +5037,7 @@ while running && let candidate <- current.next && candidate.value == expected {
 Both refutable pattern forms are supported:
 
 ```txt
-while let Some(item) = nextItem() {
+while let Some { value as item } = nextItem() {
     consume(item)
 }
 
@@ -5185,14 +5187,13 @@ Supported pattern families:
 
 - wildcard: `_`
 - whole-value alias: `_ as x`, `42 as value`, `None as none`,
-  `Some(value) as some`, `[first, ...rest] as list`,
+  `Some { value } as some`, `[first, ...rest] as list`,
   `User { name } as user`
 - literal/value patterns: `1`, `-1`, `-3.5`, `"hello"`, `true`
 - case alternatives: `case A | B => ...`
 - tuple patterns: `(x, y)`
 - zero-payload cases and singletons: `None`, `Pending`, `Ready`
-- optional payload shorthand: `^value`, equivalent to `Some(value)`
-- unary named-data patterns: `Some(x)`, `Box(item)`
+- optional payload shorthand: `^value`, equivalent to `Some { value }`
 - named-field record patterns: `User { name }`, `Ok { value }`
 - unheaded record patterns for statically known values: `{ name, age }`
 - type patterns: `item Worker`, `_ Other`
@@ -5296,15 +5297,22 @@ alternative head because the payload is not present on every alternative.
 Interface values do not provide a concrete record layout and therefore require
 a type or case pattern before record fields can be matched.
 
-Parentheses provide unary named-data extraction only:
+Named-value unpacking always uses braces, even when there is only one field.
+Parenthesized constructor syntax is for construction, not patterns:
 
 ```txt
-case Some(x) => ...
-case Ok(value) => ...
-case Err(error) => ...
-case Box(item) => ...
-case UserId(id) => ...
+case Some { value as x } => ...
+case Ok { value } => ...
+case Err { error } => ...
+case Box { value as item } => ...
+case UserId { value as id } => ...
+
+case Ok(value) => ... # invalid: use Ok { value }
 ```
+
+This applies in every pattern position, including `let`, `if let`, `while let`,
+and generators. Tuple patterns such as `(left, right)` and construction
+expressions such as `Ok(value)` are unchanged.
 
 Because prefix `^` constructs `Some` in expressions, it also matches `Some`
 in pattern positions:
@@ -5322,20 +5330,20 @@ match maybeValue {
 }
 ```
 
-`^pattern` is exactly shorthand for `Some(pattern)`. It accepts any nested
+`^pattern` is exactly shorthand for `Some { value: pattern }`. It accepts any nested
 pattern, supports whole-pattern aliases, and composes one layer at a time, so
-`^^value` matches `Some(Some(value))`. The source must have a compatible
+`^^value` matches `Some { value: Some { value } }`. The source must have a compatible
 `Option` type, and refutable `let` forms still require an `else` fallback.
 
-`Type(pattern)` accepts one complete nested pattern, not merely a binding:
+Each named field accepts a complete nested pattern, not merely a binding:
 
 ```txt
-case Some(0) => ...
-case Some(_) => ...
-case Some(User { name }) => ...
-case Box(Some(x)) => ...
-case Ok(value Worker) => ...
-case Some(x) as some => println(x, some.value)
+case Some { value: 0 } => ...
+case Some { value: _ } => ...
+case Some { value: User { name } } => ...
+case Box { value: Some { value as x } } => ...
+case Ok { value Worker } => ...
+case Some { value as x } as some => println(x, some.value)
 ```
 
 Typed wildcard patterns compose at every nesting depth. Replacing a binding
@@ -5344,13 +5352,13 @@ forms:
 
 ```txt
 case _ Int => ...
-case Some(_ Int) => ...
+case Some { value: _ Int } => ...
 case (_ Int, _) => ...
 case [_ Int, _ Str] => ...
 case User { age: _ Int } => ...
 ```
 
-Aliasing a unary union-alternative pattern retains that concrete alternative view,
+Aliasing a union-alternative record pattern retains that concrete alternative view,
 so the complete alias exposes the matched fields while the nested pattern
 continues to bind or test its payload.
 
@@ -5375,7 +5383,7 @@ if let User { name } as user = value {
     println(name, user.name)
 }
 
-while let Some(value) as some = current {
+while let Some { value } as some = current {
     println(value, some.value)
 }
 
@@ -5390,9 +5398,9 @@ patterns. The surrounding construct determines whether the pattern may fail:
 ```txt
 let (left, right) as pair = source
 
-let (Some(value), label) = pair else return
+let (Some { value }, label) = pair else return
 
-if let (Some(value), label) = pair {
+if let (Some { value }, label) = pair {
     println(value, label)
 }
 
@@ -5414,13 +5422,8 @@ closed.
 Field aliases remain available inside record patterns, for example
 `let { location as home } = user`.
 
-The parenthesized form requires exactly one extractable field. Classes and
-shapes count visible data fields; union alternatives count their payload
-fields; constructor parameters never participate in matching. The Option
-spelling discussion above shows how this concise form relates to record
-patterns and `^`.
-
-Named data with multiple fields uses braces and fields are selected by name:
+Named data uses braces regardless of its number of fields. Fields are selected
+by name; constructor parameters never participate in matching:
 
 ```txt
 case User {

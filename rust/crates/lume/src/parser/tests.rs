@@ -92,13 +92,22 @@ fn interfaces_are_signatures_only_and_mixins_accept_visibility() {
 }
 
 #[test]
-fn interfaces_reject_storage_but_allow_signatures_and_nested_declarations() {
-    let accepted =
-        parse("interface Contract {\nget id Int\ndef read() Str\nshape Nested { value Int }\n}");
+fn interfaces_reject_storage_but_allow_getter_and_method_signatures() {
+    let accepted = parse("interface Contract {\nget id Int\ndef read() Str\n}");
     assert!(
         accepted.diagnostics.is_empty(),
         "{:?}",
         accepted.diagnostics
+    );
+    let program = accepted.program.expect("program");
+    let Item::Type(contract) = &program.items[0] else {
+        panic!("expected Contract interface");
+    };
+    assert_eq!(contract.members.len(), 2);
+    assert!(
+        contract.members.iter().all(|member| {
+            matches!(member, TypeMember::Method(method) if method.body.is_none())
+        })
     );
     for field in [
         "id Int",
@@ -119,6 +128,46 @@ fn interfaces_reject_storage_but_allow_signatures_and_nested_declarations() {
                 .iter()
                 .any(|help| help.contains("get id Type"))
         );
+    }
+}
+
+#[test]
+fn interfaces_reject_all_nested_declaration_kinds() {
+    for declaration in [
+        "class Nested {}",
+        "shape Nested {}",
+        "interface Nested {}",
+        "object Nested {}",
+        "annotation Nested {}",
+        "mixin Nested {}",
+        "type Nested = Str",
+        "type Nested = class Present { value Str } | object Missing {}",
+    ] {
+        for owner in ["interface Contract", "class Outer { interface Contract"] {
+            let closing = if owner.starts_with("class") {
+                "}}"
+            } else {
+                "}"
+            };
+            let parsed = parse(&format!("{owner} {{\n{declaration}\n{closing}"));
+            let diagnostic = parsed
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "interface_nested_declaration")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "accepted {declaration} in {owner}: {:?}",
+                        parsed.diagnostics
+                    )
+                });
+            assert!(diagnostic.message.contains("'get' and 'def' signatures"));
+            assert!(
+                diagnostic
+                    .helps
+                    .iter()
+                    .any(|help| help.contains("module scope"))
+            );
+        }
     }
 }
 
@@ -978,7 +1027,7 @@ fn parses_for_let_refutable_generator_pattern() {
     let result = parse(
         r#"
 def run(values Vector[Option[Int]]) Unit {
-    for let Some(value) <- values {
+    for let Some { value } <- values {
         println(value)
     }
 }
@@ -992,7 +1041,7 @@ def run(values Vector[Option[Int]]) Unit {
                 Stmt::For(for_stmt) => {
                     assert!(matches!(
                         for_stmt.bindings[0].pattern,
-                        Some(Pattern::Constructor { .. })
+                        Some(Pattern::Record { .. })
                     ));
                     assert!(for_stmt.bindings[0].iterable.is_some());
                 }
@@ -1340,7 +1389,7 @@ fn parses_for_yield_let_refutable_generator_pattern() {
         r#"
 def run(values Vector[Option[Int]]) [Int] {
     mapped = for {
-        let Some(value) <- values
+        let Some { value } <- values
     } yield value
     return mapped
 }
@@ -1353,10 +1402,7 @@ def run(values Vector[Option[Int]]) [Int] {
             CallableBody::Block(block) => match &block.statements[0] {
                 Stmt::Binding(binding) => match &binding.values[0] {
                     Expr::ForYield { bindings, .. } => {
-                        assert!(matches!(
-                            bindings[0].pattern,
-                            Some(Pattern::Constructor { .. })
-                        ));
+                        assert!(matches!(bindings[0].pattern, Some(Pattern::Record { .. })));
                         assert!(bindings[0].iterable.is_some());
                     }
                     other => panic!("expected for-yield expression, got {other:#?}"),
@@ -1463,8 +1509,8 @@ class Namespace {
 }
 
 #[test]
-fn allows_named_declarations_in_every_named_declaration_kind() {
-    for owner_kind in ["class", "shape", "interface", "object", "annotation"] {
+fn allows_named_declarations_in_concrete_declaration_bodies() {
+    for owner_kind in ["class", "shape", "object", "annotation"] {
         for nested_kind in ["class", "shape", "interface", "object", "annotation"] {
             let source = format!("{owner_kind} Outer {{\n    {nested_kind} Inner {{}}\n}}");
             let result = parse(&source);
@@ -2915,7 +2961,7 @@ fn allows_trailing_commas_in_delimited_forms() {
         "def main() Unit { pair = (1, 2,) }",
         "def main() Unit { mapper = (left, right,) => left + right }",
         "def main() Unit { let (left, right,) = (1, 2) }",
-        "def main(value Int?) Unit { match value { case Some(item,) => println(item) case None => () } }",
+        "def main(value Int?) Unit { match value { case Some { value as item, } => println(item) case None => () } }",
         "def main(values [Int]) Unit { match values { case [left, right,] => println(left + right) case _ => () } }",
         "class User { name Str age Int }\ndef main(user User) Unit { match user { case User { name, } => println(name) case _ => () } }",
         "use app/models/{User, Account,}",
@@ -4032,7 +4078,7 @@ fn parses_inline_let_else_return_body() {
     let result = parse(
         r#"
 def run(value Option[Int]) Unit {
-    let Some(item) = value else return ()
+    let Some { value as item } = value else return ()
     OS.println(item)
 }
 "#,
@@ -4063,7 +4109,7 @@ fn parses_let_else_recoverable_binding() {
     let result = parse(
         r#"
 def run(value Option[Int]) Unit {
-    let Some(item) = value else return ()
+    let Some { value as item } = value else return ()
     OS.println(item)
 }
 "#,
@@ -4089,7 +4135,7 @@ def run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
         first: "left"
         second: "right"
     }
-    let Some(pair) = maybePair else ("left", "right")
+    let Some { value as pair } = maybePair else ("left", "right")
     let item <- left else "fallback"
     let {
         a <- left
@@ -4190,7 +4236,7 @@ fn parses_plain_let_pattern_binding() {
     let result = parse(
         r#"
 def run(value Option[Int]) Int {
-    let Some(item) = value
+    let Some { value as item } = value
     return item
 }
 "#,
@@ -4204,9 +4250,9 @@ def run(value Option[Int]) Int {
     match &function.body {
         CallableBody::Block(block) => match &block.statements[0] {
             Stmt::PatternBinding(stmt) => match &stmt.pattern {
-                Pattern::Constructor { path, args, .. } => {
+                Pattern::Record { path, fields, .. } => {
                     assert_eq!(path, &vec!["Some".to_string()]);
-                    assert_eq!(args.len(), 1);
+                    assert_eq!(fields.len(), 1);
                 }
                 other => panic!("expected pattern binding, got {other:#?}"),
             },
@@ -4376,7 +4422,7 @@ def run(user User, maybeUser User?, maybeLeft Int?, maybeRight Int?) Unit {
 #[test]
 fn parses_typed_wildcards_in_nested_patterns() {
     let cases = [
-        "Some(_ Int)",
+        "Some { value: _ Int }",
         "(_ Int, _)",
         "[_ Int]",
         "User { age: _ Int }",
@@ -4400,6 +4446,57 @@ fn parses_typed_wildcards_in_nested_patterns() {
             } if name == "Int"
         ));
     }
+}
+
+#[test]
+fn rejects_parenthesized_named_unpacking_in_every_pattern_context() {
+    for pattern in [
+        "Ok(value)",
+        "Err(error)",
+        "Some(item)",
+        "models.Box(item)",
+        "Pair(left, right)",
+        "None()",
+    ] {
+        for body in [
+            format!("match input {{\ncase {pattern} => ()\ncase _ => ()\n}}"),
+            format!("let {pattern} = input else return"),
+            format!("let {{\n{pattern} = input\n}} else return"),
+            format!("if let {pattern} = input {{}}"),
+            format!("while let {pattern} = input {{ break }}"),
+            format!("for let {pattern} <- inputs {{}}"),
+            format!("items = for let {pattern} <- inputs yield 1"),
+            format!("items = for {{\nlet {pattern} <- inputs\n}} yield 1"),
+        ] {
+            let result = parse(&format!("def run(input Any, inputs [Any]) {{\n{body}\n}}"));
+            let diagnostic = result
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "parenthesized_pattern")
+                .unwrap_or_else(|| panic!("accepted {body}: {:?}", result.diagnostics));
+            assert!(diagnostic.message.contains("uses braces"));
+            assert!(
+                diagnostic
+                    .helps
+                    .iter()
+                    .any(|help| help.contains("as binding"))
+            );
+        }
+    }
+}
+
+#[test]
+fn checker_rejects_parenthesized_unpacking_when_parser_diagnostics_are_ignored() {
+    let parsed = parse("def run(input Any) { let Ok(value) = input else return }");
+    let checked = crate::check_program(&parsed.program.expect("recovered program"));
+    assert!(
+        checked
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "parenthesized_pattern"),
+        "{:?}",
+        checked.diagnostics
+    );
 }
 
 #[test]
@@ -4516,7 +4613,7 @@ fn composes_tuple_patterns_with_aliases_and_refutable_elements() {
         r#"
 def run(pair (Int?, Str), pairs [(Int, Int)]) [Int] {
     let (left, right) as whole = (10, 20)
-    let (Some(value), label) = pair else return []
+    let (Some { value }, label) = pair else return []
     return for {
         let (x, y) as item <- pairs
     } yield x + y + item[0] + value + label.size
@@ -4543,7 +4640,7 @@ def run(pair (Int?, Str), pairs [(Int, Int)]) [Int] {
         Stmt::LetElse(LetElseStmt {
             pattern: Pattern::Tuple { elements, .. },
             ..
-        }) if matches!(&elements[0], Pattern::Constructor { .. })
+        }) if matches!(&elements[0], Pattern::Record { .. })
     ));
 }
 
@@ -5674,7 +5771,7 @@ def main() Unit {
     }
 
     match boxes(Box { value: 1 })[0] {
-        case Some(box) => println(box.value)
+        case Some { value as box } => println(box.value)
         case None => ()
     }
 }
@@ -7320,7 +7417,7 @@ def main() Unit {
     positional = identity(5)
     named = identity(get = 6)
     match Some(value) {
-        case Some(get) => println(get)
+        case Some { value as get } => println(get)
         case None => ()
     }
 }
@@ -7452,10 +7549,14 @@ fn anonymous_shape_signatures_end_before_following_interface_members() {
         ("get position { x Int, y Int }", true),
         ("def position() { x Int, y Int }", false),
     ] {
-        for (following, description) in [
-            ("get label Str", "getter"),
-            ("def label() Str", "method"),
-            ("shape Metadata { value Str }", "nested declaration"),
+        for (following, description, expected_error) in [
+            ("get label Str", "getter", None),
+            ("def label() Str", "method", None),
+            (
+                "shape Metadata { value Str }",
+                "nested declaration",
+                Some("interface_nested_declaration"),
+            ),
         ] {
             let result = parse(&format!(
                 r#"
@@ -7465,8 +7566,13 @@ interface Positioned {{
 }}
 "#,
             ));
-            assert!(
-                result.diagnostics.is_empty(),
+            assert_eq!(
+                result
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.code)
+                    .collect::<Vec<_>>(),
+                expected_error.into_iter().collect::<Vec<_>>(),
                 "{callable} followed by {description}: {:#?}",
                 result.diagnostics
             );

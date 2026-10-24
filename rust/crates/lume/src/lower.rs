@@ -12470,7 +12470,7 @@ mod tests {
                 | object Empty {}
 
             def read(payload Payload) Int = match payload {
-                case Payload.Item(item) as whole => whole.value + item
+                case Payload.Item { value as item } as whole => whole.value + item
             }
             "#,
         );

@@ -18,7 +18,7 @@ Possible later ergonomics, after the analysis model is complete:
 
 ```txt
 values.map(match {
-    case Some(value) => value
+    case Some { value } => value
     case None => 0
 })
 ```

@@ -10466,6 +10466,17 @@ impl<'a> Checker<'a> {
                 option_shorthand,
                 ..
             } => {
+                if *parenthesized && !*option_shorthand {
+                    self.diagnostics
+                        .push(typecheck_diagnostics::parenthesized_pattern(
+                            path,
+                            pattern.span(),
+                        ));
+                    for argument in args {
+                        self.bind_pattern(argument, &Ty::Unknown);
+                    }
+                    return;
+                }
                 if let [name] = path.as_slice()
                     && self.report_ambiguous_union_alternative(name, pattern.span())
                 {
@@ -10505,22 +10516,6 @@ impl<'a> Checker<'a> {
                             ),
                             pattern.span(),
                         );
-                    } else if *parenthesized
-                        && !args.is_empty()
-                        && (extractable.len() != 1 || args.len() != 1)
-                    {
-                        self.add_error(
-                            "invalid_unary_pattern",
-                            unary_pattern_diagnostic(
-                                &case_name,
-                                args.len(),
-                                &extractable
-                                    .iter()
-                                    .map(|field| field.name.clone())
-                                    .collect::<Vec<_>>(),
-                            ),
-                            pattern.span(),
-                        );
                     }
                     let mut subst = HashMap::new();
                     infer_type_subst(&case.result, scrutinee, &mut subst);
@@ -10548,19 +10543,6 @@ impl<'a> Checker<'a> {
                         self.add_error(
                             "bare_type_pattern",
                             bare_type_pattern_diagnostic(&case_name),
-                            pattern.span(),
-                        );
-                    } else if !args.is_empty() && (fields.len() != 1 || args.len() != 1) {
-                        self.add_error(
-                            "invalid_unary_pattern",
-                            unary_pattern_diagnostic(
-                                &case_name,
-                                args.len(),
-                                &fields
-                                    .iter()
-                                    .map(|(name, _)| name.clone())
-                                    .collect::<Vec<_>>(),
-                            ),
                             pattern.span(),
                         );
                     }
@@ -14497,7 +14479,8 @@ impl<'a> Checker<'a> {
 fn bare_payload_pattern_diagnostic(case_name: &str, field_names: &[String]) -> String {
     if field_names.len() == 1 {
         return format!(
-            "bare case pattern '{case_name}' has a payload; use '{case_name}(_)' to ignore it or '{case_name}(pattern)' to match it"
+            "bare case pattern '{case_name}' has a payload; use '{case_name} {{ {} }}' to unpack it or '{case_name} {{ {}: _ }}' to ignore it",
+            field_names[0], field_names[0]
         );
     }
     format!(
@@ -14510,23 +14493,6 @@ fn bare_payload_pattern_diagnostic(case_name: &str, field_names: &[String]) -> S
 fn bare_type_pattern_diagnostic(type_name: &str) -> String {
     format!(
         "bare type pattern '{type_name}' is not supported; use '_ {type_name}' to ignore the matched value, 'value {type_name}' to bind it, or '{type_name} {{ field }}' to extract fields"
-    )
-}
-
-fn unary_pattern_diagnostic(
-    type_name: &str,
-    argument_count: usize,
-    field_names: &[String],
-) -> String {
-    let field_count = field_names.len();
-    if field_count == 0 {
-        return format!(
-            "'{type_name}' has no payload field; match the zero-payload case with its bare name '{type_name}'"
-        );
-    }
-    format!(
-        "unary pattern '{type_name}(...)' requires exactly one extractable field and one pattern; '{type_name}' has {field_count} extractable fields and the pattern contains {argument_count}. Use '{type_name} {{ {} }}' for named field matching",
-        field_names.join(", ")
     )
 }
 
@@ -21552,7 +21518,7 @@ class User {
 
 def main() Unit {
     maybePair Option[(Int, Int)] = None
-    let Some(pair) = maybePair else (1, 2)
+    let Some { value as pair } = maybePair else (1, 2)
 
     candidate Any = 0
     let User { name, value } = candidate else {
@@ -21644,7 +21610,7 @@ def read(candidate Any) Str {
 
 def main() Unit {
     candidate Option[User] = None
-    let Some(User { name }) = candidate else "Unknown"
+    let Some { value: User { name } } = candidate else "Unknown"
     OS.println(name)
 }
 "#,
@@ -22091,11 +22057,11 @@ def main(value Any, status Status, maybe Option[Int], payload Payload) Unit {
         case Ready => ()
     }
     match maybe {
-        case Some(item) as some => println(item, some.value)
+        case Some { value as item } as some => println(item, some.value)
         case None => ()
     }
     match payload {
-        case Payload.Item(item) as whole => println(item, whole.value)
+        case Payload.Item { value as item } as whole => println(item, whole.value)
         case Payload.Empty => ()
     }
 }
@@ -22261,7 +22227,7 @@ def main(value) Int {
         let program = parse_inline(
             r#"
 def values(options [Int?]) [Int] =
-    for let Some(value) <- options yield value
+    for let Some { value } <- options yield value
 "#,
         );
         let result = check_program(&program);
@@ -22820,7 +22786,7 @@ type Maybe[T] with Iterable[T] =
 
 ext Maybe[T] {
     def iterator() Iterator[T] = match this {
-        case Present(value) => [value].iterator()
+        case Present { value } => [value].iterator()
         case Missing => Vector[T]().iterator()
     }
 }

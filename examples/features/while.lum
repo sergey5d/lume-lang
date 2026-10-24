@@ -53,7 +53,7 @@ def main() Int {
     }
 
     nextValue := Some(4)
-    while let Some(value) = nextValue {
+    while let Some { value } = nextValue {
         println("case " + value)
         nextValue := None
     }
