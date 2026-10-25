@@ -2746,8 +2746,39 @@ extra = ["beta", "gamma"]
 describe("task", "alpha", ...extra, "omega")
 ```
 
-Spread arguments are valid only as positional arguments for a `vararg`
-parameter. Fixed-arity parameters reject `...value`.
+Vector spreads are positional arguments for a `vararg` parameter. A vector
+cannot supply fixed-arity inputs.
+
+A statically known shape can instead expand into named arguments:
+
+```txt
+def report(value Str, error Int, amount Decimal) Unit
+
+options = { error: 6, amount: 11d }
+report(...{ value: "ready", error: 5, amount: 10d })
+report("ready", ...options)
+report("ready", 5, ...options)          # explicit error wins
+report("ready", error = 5, ...options)  # explicit named error wins
+```
+
+For calls containing shape spreads:
+
+- Write positional inputs first, then explicit named inputs, then shape spreads.
+- Explicit inputs take precedence over fields supplied by any spread. Duplicate explicit inputs are errors.
+- Two spreads supplying the same input conflict unless an explicit input chooses its value. Spread order never chooses a winner.
+- Every expanded field must name an accepted parameter. Ordinary defaults fill omitted parameters; missing required inputs remain errors.
+- Only named and anonymous shapes expand into named inputs, not classes, maps, `Any`, or unions. A function value without parameter names cannot accept named expansion.
+- Known parameter types supply context to fresh inline shape fields, including empty collections and contextual constructors.
+
+This expands function and method arguments, not positional constructor inputs.
+Named construction retains its existing spread syntax, such as `User { ...data }`.
+
+The receiver is evaluated first. Explicit eager expressions and spread sources
+are then evaluated once, in written order, before their values are arranged into
+parameter slots. A spread source is evaluated even when all its fields are
+overridden. Its fields are already values: supplying one to a by-name parameter
+does not defer constructing the source or reevaluate it on each parameter read.
+Ordinary explicit by-name arguments retain their normal lazy behavior.
 
 Function and method parameters may be by-name:
 

@@ -5567,6 +5567,19 @@ impl<'a> FunctionLowerer<'a> {
             return ir::Type::named("Any");
         }
         let normalized_args = self.normalize_trailing_brace_call_args(callee, args, style);
+        let normalized_args = self.expand_shape_call_arguments(&normalized_args);
+        if normalized_args.iter().any(|arg| arg.from_shape_spread) {
+            let (target, explicit) = self.split_generic_call_callee(callee);
+            if let Some((id, mut subst)) = self.reified_call_target(target, &normalized_args)
+                && let Some(function) = self.program.function(id)
+            {
+                for (name, ty) in function.type_params.iter().zip(explicit) {
+                    subst.insert(name.clone(), ty);
+                }
+                self.infer_function_call_subst(id, &normalized_args, &mut subst);
+                return substitute_ir_type(&function.return_ty, &subst);
+            }
+        }
         if let Some(ty) = self.infer_builtin_case_call_type(callee, &normalized_args, overrides) {
             return ty;
         }
@@ -5615,6 +5628,240 @@ impl<'a> FunctionLowerer<'a> {
                 expected,
                 Some(ir::Type::Named { name, args }) if name == "Map" && args.len() == 2
             )
+    }
+
+    fn shape_argument_fields(&self, value: &Expr) -> Option<Vec<ir::NamedType>> {
+        match self.infer_expr_type(value) {
+            ir::Type::Record(fields) => Some(fields),
+            ir::Type::Named { name, args } => {
+                let ty = self
+                    .program
+                    .types
+                    .iter()
+                    .find(|ty| ty.name == name && ty.kind == ast::TypeKind::Record)?;
+                let subst = ir_type_subst(ty, &args);
+                let owner = match self.function().kind {
+                    ir::FunctionKind::Method { owner } => Some(owner),
+                    _ => None,
+                };
+                Some(
+                    ty.fields
+                        .iter()
+                        .filter(|field| {
+                            field.visibility != ast::Visibility::Private || owner == Some(ty.id)
+                        })
+                        .map(|field| ir::NamedType {
+                            name: field.name.clone(),
+                            ty: substitute_ir_type(&field.ty, &subst),
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
+    fn expand_shape_call_arguments(&self, args: &[core::CallArg]) -> Vec<core::CallArg> {
+        args.iter()
+            .flat_map(|arg| {
+                let Expr::Spread { value, .. } = &arg.value else {
+                    return vec![arg.clone()];
+                };
+                let Some(fields) = self.shape_argument_fields(value) else {
+                    return vec![arg.clone()];
+                };
+                fields
+                    .into_iter()
+                    .map(|field| core::CallArg {
+                        from_shape_spread: true,
+                        name: Some(field.name.clone()),
+                        ty: None,
+                        value: Expr::Member {
+                            receiver: value.clone(),
+                            name: field.name,
+                            span: arg.span,
+                        },
+                        span: arg.span,
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn prepare_shape_call_arguments(
+        &mut self,
+        source: &[core::CallArg],
+        expanded: &[core::CallArg],
+        specs: &[Option<ExpectedArgSpec>],
+    ) -> Option<(Vec<core::CallArg>, ir::SourceArgumentExpansion)> {
+        let specs = specs.iter().cloned().collect::<Option<Vec<_>>>()?;
+        let mut positional = 0;
+        let mut explicit = HashSet::new();
+        let source_specs = source
+            .iter()
+            .map(|arg| {
+                if let Expr::Spread { value, .. } = &arg.value
+                    && self.shape_argument_fields(value).is_some()
+                {
+                    return None;
+                }
+                let index = if let Some(name) = &arg.name {
+                    specs
+                        .iter()
+                        .position(|spec| spec.name.as_ref() == Some(name))?
+                } else {
+                    let index = positional.min(specs.len().saturating_sub(1));
+                    positional += 1;
+                    index
+                };
+                if let Some(name) = &specs.get(index)?.name {
+                    explicit.insert(name.clone());
+                }
+                Some(index)
+            })
+            .collect::<Vec<_>>();
+        let active = expanded
+            .iter()
+            .filter(|arg| {
+                !arg.from_shape_spread
+                    || !arg
+                        .name
+                        .as_ref()
+                        .is_some_and(|name| explicit.contains(name))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut prepared = Vec::new();
+        let mut fields_by_source = Vec::new();
+        let mut rewritten = Vec::new();
+        for (index, arg) in source.iter().enumerate() {
+            let shape = match &arg.value {
+                Expr::Spread { value, .. } => self.shape_argument_fields(value),
+                _ => None,
+            };
+            if let Some(fields) = shape {
+                let Expr::Spread { value, .. } = &arg.value else {
+                    unreachable!()
+                };
+                let winning = fields
+                    .iter()
+                    .filter(|field| !explicit.contains(&field.name))
+                    .map(|field| field.name.clone())
+                    .collect::<Vec<_>>();
+                let actual = self.infer_expr_type(value);
+                let ty = if matches!(actual, ir::Type::Record(_)) {
+                    ir::Type::Record(
+                        fields
+                            .into_iter()
+                            .map(|field| {
+                                let expected = winning
+                                    .contains(&field.name)
+                                    .then(|| {
+                                        specs
+                                            .iter()
+                                            .find(|spec| spec.name.as_ref() == Some(&field.name))
+                                    })
+                                    .flatten()
+                                    .map(|spec| &spec.ty);
+                                ir::NamedType {
+                                    name: field.name,
+                                    ty: expected
+                                        .map(|expected| {
+                                            contextualize_inferred_ir_type(
+                                                field.ty.clone(),
+                                                expected,
+                                            )
+                                        })
+                                        .unwrap_or(field.ty),
+                                }
+                            })
+                            .collect(),
+                    )
+                } else {
+                    actual
+                };
+                let operand = self.lower_expr_with_expected(value, Some(&ty));
+                let local = self.add_temp(ty);
+                self.push_statement(ir::Statement::assign(
+                    ir::Place::Local(local),
+                    ir::RValue::Use(operand),
+                ));
+                let alias = format!("$shapeArgument{}_{index}", arg.span.start);
+                self.bind_existing(&alias, local);
+                for field in &winning {
+                    if let Some(original) = active.iter().find(|candidate| {
+                        candidate.from_shape_spread
+                            && candidate.span == arg.span
+                            && candidate.name.as_ref() == Some(field)
+                    }) {
+                        let mut projected = original.clone();
+                        projected.value = Expr::Member {
+                            receiver: Box::new(Expr::Identifier {
+                                name: alias.clone(),
+                                span: value.span(),
+                            }),
+                            name: field.clone(),
+                            span: arg.span,
+                        };
+                        rewritten.push(projected);
+                    }
+                }
+                prepared.push(Some(local));
+                fields_by_source.push(Some(winning));
+            } else {
+                let mut rewritten_arg = arg.clone();
+                let spec = specs.get(source_specs[index]?)?;
+                if spec.lazy {
+                    prepared.push(None);
+                } else {
+                    let mut spec = spec.clone();
+                    if spec.variadic
+                        && arg.name.is_none()
+                        && !matches!(arg.value, Expr::Spread { .. })
+                    {
+                        if let ir::Type::Named { args, .. } = &spec.ty {
+                            spec.ty = args.first().cloned().unwrap_or(ir::Type::Unknown);
+                        }
+                        spec.variadic = false;
+                    }
+                    let operand = self.lower_call_arg(arg, Some(&spec));
+                    let value = match &arg.value {
+                        Expr::Spread { value, .. } => value.as_ref(),
+                        other => other,
+                    };
+                    let ty = self.infer_expr_type_against_with_overrides(value, &spec.ty, &[]);
+                    let local = self.add_temp(ty);
+                    self.push_statement(ir::Statement::assign(
+                        ir::Place::Local(local),
+                        ir::RValue::Use(operand),
+                    ));
+                    let alias = format!("$callArgument{}_{index}", arg.span.start);
+                    self.bind_existing(&alias, local);
+                    let identifier = Expr::Identifier {
+                        name: alias,
+                        span: value.span(),
+                    };
+                    rewritten_arg.value = if let Expr::Spread { span, .. } = &arg.value {
+                        Expr::Spread {
+                            value: Box::new(identifier),
+                            span: *span,
+                        }
+                    } else {
+                        identifier
+                    };
+                    prepared.push(Some(local));
+                }
+                fields_by_source.push(None);
+                rewritten.push(rewritten_arg);
+            }
+        }
+        Some((
+            rewritten,
+            ir::SourceArgumentExpansion {
+                prepared,
+                fields: fields_by_source,
+            },
+        ))
     }
 
     fn infer_spread_map_type(&self, items: &[Expr]) -> ir::Type {
@@ -5716,7 +5963,25 @@ impl<'a> FunctionLowerer<'a> {
         let Some(function) = self.program.function(function_id) else {
             return;
         };
-        for (arg, param_index) in args.iter().zip(source_param_indices(function)) {
+        let indices = source_param_indices(function);
+        let names = param_names_from_function(function);
+        let ordered =
+            arrange_named_call_args(&names, args).unwrap_or_else(|| args.iter().collect());
+        let mut positional = 0;
+        for arg in ordered {
+            let source_index = if let Some(name) = &arg.name {
+                let Some(index) = names.iter().position(|candidate| candidate == name) else {
+                    continue;
+                };
+                index
+            } else {
+                let index = positional;
+                positional += 1;
+                index
+            };
+            let Some(param_index) = indices.get(source_index).copied() else {
+                continue;
+            };
             let Some(param) = function.params.get(param_index) else {
                 continue;
             };
@@ -6516,6 +6781,10 @@ impl<'a> FunctionLowerer<'a> {
             match (name.as_str(), args) {
                 ("filter" | "sort" | "take", [_]) => return Some(receiver_ty),
                 ("fold", [initial, _]) => {
+                    let initial = args
+                        .iter()
+                        .find(|arg| arg.name.as_deref() == Some("initial"))
+                        .unwrap_or(initial);
                     return Some(self.infer_expr_type_with_overrides(&initial.value, overrides));
                 }
                 ("map", [mapper]) => {
@@ -6962,6 +7231,7 @@ impl<'a> FunctionLowerer<'a> {
                                 span,
                             }),
                             args: vec![core::CallArg {
+                                from_shape_spread: false,
                                 name: None,
                                 ty: None,
                                 value: expr.clone(),
@@ -7110,9 +7380,11 @@ impl<'a> FunctionLowerer<'a> {
                     self.split_generic_call_callee(callee);
                 let candidate_normalized_args =
                     self.normalize_trailing_brace_call_args(candidate_callee, args, *style);
+                let candidate_expanded_args =
+                    self.expand_shape_call_arguments(&candidate_normalized_args);
                 let use_generic_callee = !candidate_type_args.is_empty()
                     && (self
-                        .reified_call_target(candidate_callee, &candidate_normalized_args)
+                        .reified_call_target(candidate_callee, &candidate_expanded_args)
                         .and_then(|(function, _)| self.program.function(function))
                         .is_some_and(|function| !function.type_params.is_empty())
                         || self.is_builtin_reified_metadata_call(candidate_callee)
@@ -7121,7 +7393,7 @@ impl<'a> FunctionLowerer<'a> {
                                 && (declared_type_exists(self.program, &path[0])
                                     || runtime_collection_constructor_name(&path[0]))
                         }));
-                let (call_callee, explicit_type_args, normalized_args) = if use_generic_callee {
+                let (call_callee, explicit_type_args, source_args) = if use_generic_callee {
                     (
                         candidate_callee,
                         candidate_type_args,
@@ -7134,16 +7406,57 @@ impl<'a> FunctionLowerer<'a> {
                         self.normalize_trailing_brace_call_args(callee, args, *style),
                     )
                 };
+                let mut normalized_args = self.expand_shape_call_arguments(&source_args);
+                let has_shape_spread = source_args.iter().any(|arg| matches!(&arg.value, Expr::Spread { value, .. } if self.shape_argument_fields(value).is_some()));
                 let structural = call_uses_structural_record_arg(&normalized_args, *style);
                 // A record spread is one named-construction payload. Applying
                 // callable defaults here would turn it into several positional
                 // arguments before the constructor can apply field defaults.
-                let expected_args = (!structural)
-                    .then(|| self.call_expected_arg_specs(call_callee, &normalized_args, expected))
+                let mut expected_args = (!structural)
+                    .then(|| {
+                        self.call_expected_arg_specs(
+                            call_callee,
+                            &normalized_args,
+                            expected,
+                            has_shape_spread,
+                        )
+                    })
                     .flatten();
+                if has_shape_spread
+                    && !explicit_type_args.is_empty()
+                    && let Some((id, _)) = self.reified_call_target(call_callee, &normalized_args)
+                    && let Some(function) = self.program.function(id)
+                {
+                    let subst = function
+                        .type_params
+                        .iter()
+                        .cloned()
+                        .zip(explicit_type_args.iter().cloned())
+                        .collect();
+                    for spec in expected_args.iter_mut().flatten().flatten() {
+                        spec.ty = substitute_ir_type(&spec.ty, &subst);
+                    }
+                }
                 // Evaluate the callee (including a method receiver) before any explicit
                 // arguments. Argument binding order is handled separately below.
                 let lowered_callee = self.lower_callee(call_callee);
+                let mut argument_expansion = None;
+                if has_shape_spread {
+                    self.push_scope();
+                    if let Some((prepared, expansion)) =
+                        expected_args.as_deref().and_then(|specs| {
+                            self.prepare_shape_call_arguments(&source_args, &normalized_args, specs)
+                        })
+                    {
+                        normalized_args = prepared;
+                        argument_expansion = Some(expansion);
+                    } else {
+                        self.invariant(
+                            "shape argument expansion requires resolved parameter names",
+                            *span,
+                        );
+                    }
+                }
                 let (ordered_args, mut lowered_args) = expected_args
                     .as_deref()
                     .and_then(|specs| self.lower_call_args_with_defaults(&normalized_args, specs))
@@ -7170,12 +7483,17 @@ impl<'a> FunctionLowerer<'a> {
                 let reified_arg_count = reified_args.len() + builtin_reified_args.len();
                 lowered_args.extend(reified_args);
                 lowered_args.extend(builtin_reified_args);
+                if has_shape_spread {
+                    self.pop_scope();
+                }
                 self.program.source_calls.push(ir::SourceCall {
                     function: self.function_id,
                     span: *span,
                     callee: lowered_callee.clone(),
                     lowered_args: lowered_args.clone(),
                     ordered_arg_spans: ordered_args.iter().map(|arg| arg.span).collect(),
+                    ordered_arg_names: ordered_args.iter().map(|arg| arg.name.clone()).collect(),
+                    argument_expansion,
                     reified_arg_count,
                     param_specs: expected_args
                         .unwrap_or_default()
@@ -7226,6 +7544,7 @@ impl<'a> FunctionLowerer<'a> {
                 {
                     let [
                         core::CallArg {
+                            from_shape_spread: false,
                             value: record @ Expr::RecordLiteral { .. },
                             ..
                         },
@@ -7729,6 +8048,108 @@ impl<'a> FunctionLowerer<'a> {
     fn call_expected_arg_specs(
         &self,
         callee: &Expr,
+        args: &[core::CallArg],
+        expected: Option<&ir::Type>,
+        shape_expansion: bool,
+    ) -> Option<Vec<Option<ExpectedArgSpec>>> {
+        let specs = self.call_expected_arg_specs_inner(callee, args, expected);
+        if !shape_expansion
+            || specs.as_ref().is_some_and(|specs| {
+                specs
+                    .iter()
+                    .all(|spec| spec.as_ref().is_some_and(|spec| spec.name.is_some()))
+            })
+        {
+            return specs;
+        }
+        let Expr::Member { receiver, name, .. } = callee else {
+            return specs;
+        };
+        let receiver_ty = self.infer_expr_type(receiver);
+        let static_owner = match receiver.as_ref() {
+            Expr::Identifier { name, .. }
+                if self.lookup_scoped_type(name).is_none()
+                    && self.lookup_global_type(name).is_none() =>
+            {
+                Some(name.as_str())
+            }
+            _ => None,
+        };
+        let owner = match (&receiver_ty, static_owner) {
+            (_, Some(owner)) => owner,
+            (ir::Type::Int, _) => "Int",
+            (ir::Type::Float, _) => "Float",
+            (ir::Type::Str, _) => "Str",
+            (ir::Type::Bool, _) => "Bool",
+            (ir::Type::Named { name, .. }, _) => name,
+            _ => return specs,
+        };
+        let Some((type_params, signatures)) =
+            crate::typecheck::runtime_callable_parameters(owner, name, static_owner.is_some())
+        else {
+            return specs;
+        };
+        let native = signatures.into_iter().find(|params| {
+            specs
+                .as_ref()
+                .is_none_or(|specs| specs.len() == params.len())
+                && args.iter().all(|arg| {
+                    arg.name.as_ref().is_none_or(|name| {
+                        params.iter().any(|param| param.name.as_ref() == Some(name))
+                    })
+                })
+                && args.iter().filter(|arg| arg.name.is_none()).count() <= params.len()
+        })?;
+        let type_args = match &receiver_ty {
+            ir::Type::Named { args, .. } => args.as_slice(),
+            _ => &[],
+        };
+        let mut subst = type_params
+            .into_iter()
+            .zip(type_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        let mut positional = 0;
+        for arg in args {
+            let param = if let Some(name) = &arg.name {
+                native
+                    .iter()
+                    .find(|param| param.name.as_ref() == Some(name))
+            } else {
+                let param = native.get(positional);
+                positional += 1;
+                param
+            };
+            if let Some(param) = param {
+                let actual = self.infer_expr_type(&arg.value);
+                infer_ir_type_subst(&substitute_ir_type(&param.ty, &subst), &actual, &mut subst);
+            }
+        }
+        Some(
+            native
+                .into_iter()
+                .enumerate()
+                .map(|(index, param)| {
+                    let existing = specs
+                        .as_ref()
+                        .and_then(|specs| specs.get(index))
+                        .and_then(Option::as_ref);
+                    Some(ExpectedArgSpec {
+                        name: param.name,
+                        ty: existing
+                            .map(|spec| spec.ty.clone())
+                            .unwrap_or_else(|| substitute_ir_type(&param.ty, &subst)),
+                        lazy: param.lazy,
+                        variadic: param.variadic,
+                        default: existing.and_then(|spec| spec.default.clone()),
+                    })
+                })
+                .collect(),
+        )
+    }
+
+    fn call_expected_arg_specs_inner(
+        &self,
+        callee: &Expr,
         ordered_args: &[core::CallArg],
         expected: Option<&ir::Type>,
     ) -> Option<Vec<Option<ExpectedArgSpec>>> {
@@ -7811,6 +8232,9 @@ impl<'a> FunctionLowerer<'a> {
                     {
                         infer_ir_type_subst(&function.return_ty, expected, &mut subst);
                     }
+                    if ordered_args.iter().any(|arg| arg.from_shape_spread) {
+                        self.infer_function_call_subst(id, ordered_args, &mut subst);
+                    }
                     return self.function_expected_arg_specs(id, &subst);
                 }
                 if let Some(specs) = self.constructor_expected_arg_specs(name, ordered_args) {
@@ -7836,7 +8260,11 @@ impl<'a> FunctionLowerer<'a> {
                 if name == "fold" && ordered_args.len() == 2 {
                     if let ir::Type::Named { name, args } = &receiver_ty {
                         if matches!(name.as_str(), "Vector" | "LinkedList") && args.len() == 1 {
-                            let accumulator = self.infer_expr_type(&ordered_args[0].value);
+                            let initial = ordered_args
+                                .iter()
+                                .find(|arg| arg.name.as_deref() == Some("initial"))
+                                .unwrap_or(&ordered_args[0]);
+                            let accumulator = self.infer_expr_type(&initial.value);
                             return Some(vec![
                                 Some(ExpectedArgSpec {
                                     name: None,
@@ -8153,6 +8581,7 @@ impl<'a> FunctionLowerer<'a> {
     ) -> ir::RValue {
         let [
             core::CallArg {
+                from_shape_spread: false,
                 value: Expr::RecordLiteral { fields, values, .. },
                 ..
             },
@@ -11059,6 +11488,7 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
     let param_indices = source_param_indices(function);
     let param_count = param_indices.len();
     let mut slots = vec![0usize; param_count];
+    let mut explicit_slots = vec![false; param_count];
     let mut positional_index = 0usize;
     let mut used_variadic_positionally = false;
 
@@ -11073,9 +11503,13 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
                 })
             })?;
             if slots[index] > 0 {
+                if arg.from_shape_spread && explicit_slots[index] {
+                    continue;
+                }
                 return None;
             }
             slots[index] = 1;
+            explicit_slots[index] = !arg.from_shape_spread;
             continue;
         }
 
@@ -11104,6 +11538,7 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
                 return None;
             }
             slots[positional_index] = 1;
+            explicit_slots[positional_index] = true;
             if !param_indices
                 .get(positional_index)
                 .and_then(|index| function.param_variadic.get(*index))
@@ -11145,8 +11580,8 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
             .copied()
             .unwrap_or(false)
     });
-    if !has_variadic && args.len() == param_count {
-        return Some(400 + args.len());
+    if !has_variadic && omitted_defaults == 0 {
+        return Some(400 + param_count);
     }
     if !has_variadic {
         return Some(300usize.saturating_sub(omitted_defaults));
@@ -11807,6 +12242,7 @@ fn callable_reference_call_expr(reference: &Expr, param_names: &[String], span: 
         args: param_names
             .iter()
             .map(|name| core::CallArg {
+                from_shape_spread: false,
                 name: None,
                 ty: None,
                 value: Expr::Identifier {
@@ -12092,12 +12528,15 @@ fn arrange_named_call_args<'a>(
     params: &[String],
     args: &'a [core::CallArg],
 ) -> Option<Vec<&'a core::CallArg>> {
-    let mut slots = vec![None; params.len()];
+    let mut slots: Vec<Option<&core::CallArg>> = vec![None; params.len()];
     let mut positional_index = 0usize;
     for arg in args {
         if let Some(name) = &arg.name {
             let index = params.iter().position(|param| param == name)?;
-            if slots[index].is_some() {
+            if let Some(previous) = slots[index] {
+                if arg.from_shape_spread && !previous.from_shape_spread {
+                    continue;
+                }
                 return None;
             }
             slots[index] = Some(arg);
@@ -12122,6 +12561,7 @@ fn call_uses_structural_record_arg(args: &[core::CallArg], style: core::CallStyl
         && matches!(
             args,
             [core::CallArg {
+                from_shape_spread: false,
                 name: None,
                 value: Expr::RecordLiteral { .. },
                 ..
@@ -12132,6 +12572,7 @@ fn call_uses_structural_record_arg(args: &[core::CallArg], style: core::CallStyl
 fn brace_record_constructor_args(args: &[core::CallArg]) -> Option<Vec<core::CallArg>> {
     let [
         core::CallArg {
+            from_shape_spread: false,
             name: None,
             value: Expr::RecordLiteral { fields, values, .. },
             ..

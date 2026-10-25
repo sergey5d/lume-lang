@@ -2685,6 +2685,7 @@ fn parses_punned_qualified_and_generic_constructors() {
         assert!(matches!(
             args.as_slice(),
             [CallArg {
+                from_shape_spread: false,
                 value: Expr::RecordLiteral { fields, values, .. },
                 ..
             }] if !fields.is_empty() && values.is_empty()

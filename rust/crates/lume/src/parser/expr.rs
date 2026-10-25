@@ -540,6 +540,7 @@ impl<'a> Parser<'a> {
                         span,
                     } => {
                         fields.push(CallArg {
+                            from_shape_spread: false,
                             name: Some(name),
                             ty,
                             value,
@@ -548,6 +549,7 @@ impl<'a> Parser<'a> {
                     }
                     RecordEntry::Spread { value, span } => {
                         fields.push(CallArg {
+                            from_shape_spread: false,
                             name: None,
                             ty: None,
                             value: Expr::Spread {
@@ -903,6 +905,7 @@ impl<'a> Parser<'a> {
             let span = *span;
             return Some(Expr::ContextualNew {
                 args: vec![CallArg {
+                    from_shape_spread: false,
                     name: None,
                     ty: None,
                     value: record,
@@ -1611,6 +1614,7 @@ impl<'a> Parser<'a> {
                 expr = Expr::Call {
                     callee: Box::new(expr),
                     args: vec![CallArg {
+                        from_shape_spread: false,
                         name: None,
                         ty: None,
                         span: arg_span,
@@ -1676,12 +1680,14 @@ impl<'a> Parser<'a> {
                         span: colon,
                     };
                     args.push(CallArg {
+                        from_shape_spread: false,
                         name: None,
                         ty: None,
                         span: zero.span(),
                         value: zero,
                     });
                     args.push(CallArg {
+                        from_shape_spread: false,
                         name: None,
                         ty: None,
                         span: end_expr.span(),
@@ -1689,6 +1695,7 @@ impl<'a> Parser<'a> {
                     });
                 }
                 (Some(start_expr), None) => args.push(CallArg {
+                    from_shape_spread: false,
                     name: None,
                     ty: None,
                     span: start_expr.span(),
@@ -1696,12 +1703,14 @@ impl<'a> Parser<'a> {
                 }),
                 (Some(start_expr), Some(end_expr)) => {
                     args.push(CallArg {
+                        from_shape_spread: false,
                         name: None,
                         ty: None,
                         span: start_expr.span(),
                         value: start_expr,
                     });
                     args.push(CallArg {
+                        from_shape_spread: false,
                         name: None,
                         ty: None,
                         span: end_expr.span(),
@@ -2013,6 +2022,7 @@ impl<'a> Parser<'a> {
                 let value = self.parse_expr()?;
                 let span = start.cover(value.span());
                 args.push(CallArg {
+                    from_shape_spread: false,
                     name: None,
                     ty: None,
                     span,
@@ -2027,6 +2037,7 @@ impl<'a> Parser<'a> {
                 let value = self.parse_expr()?;
                 let span = name_span.cover(value.span());
                 args.push(CallArg {
+                    from_shape_spread: false,
                     name: Some(name),
                     ty: None,
                     value,
@@ -2035,6 +2046,7 @@ impl<'a> Parser<'a> {
             } else {
                 let value = self.parse_expr()?;
                 args.push(CallArg {
+                    from_shape_spread: false,
                     name: None,
                     ty: None,
                     span: value.span(),
@@ -2487,6 +2499,7 @@ impl<'a> Parser<'a> {
             args: entries
                 .into_iter()
                 .map(|value| CallArg {
+                    from_shape_spread: false,
                     name: None,
                     ty: None,
                     span: value.span(),

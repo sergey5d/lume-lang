@@ -898,6 +898,8 @@ pub enum LambdaBody {
 /// A call argument, optionally carrying a source-level name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallArg {
+    /// Internal named field projection produced by call-site shape expansion.
+    pub from_shape_spread: bool,
     pub name: Option<String>,
     pub ty: Option<TypeRef>,
     pub value: Expr,

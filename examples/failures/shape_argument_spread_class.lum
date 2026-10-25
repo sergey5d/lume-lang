@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*call argument spread requires a statically known shape or a vector vararg value, got 'Options'.*
+
+class Options { value Int }
+def consume(value Int) {}
+def main() {
+    consume(...Options(1))
+}

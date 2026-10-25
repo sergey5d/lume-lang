@@ -6563,7 +6563,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 if matches!(
                     self.expr_type(expr, bindings),
                     Some(ir::Type::Function { .. })
-                ) {
+                ) && !self.expr_type(receiver, bindings).is_some_and(|receiver_ty| {
+                    JavaIrSupport::new(self.bundle, self.function, self.names)
+                        .field_type(&receiver_ty, name).is_some()
+                }) {
                     if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
                         eprintln!(
                             "readable java classified member '{name}' as a function in '{}': {expr:?}",
@@ -7660,6 +7663,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     span: *span,
                 };
                 let args = [core::CallArg {
+                    from_shape_spread: false,
                     name: None,
                     ty: None,
                     value: expr.clone(),
@@ -7678,6 +7682,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
                 if let [
                     core::CallArg {
+                        from_shape_spread: false,
                         value: core::Expr::RecordLiteral { fields, values, .. },
                         ..
                     },
@@ -8076,6 +8081,7 @@ impl<'a> SourceBodyEmitter<'a> {
     ) -> Option<String> {
         let [
             core::CallArg {
+                from_shape_spread: false,
                 value: core::Expr::RecordLiteral { fields, values, .. },
                 ..
             },
@@ -8536,6 +8542,16 @@ impl<'a> SourceBodyEmitter<'a> {
         expected: &ir::Type,
     ) -> Option<String> {
         if let ir::Type::Record(expected_fields) = expected {
+            let emit_value = |value: &core::Expr, ty: &ir::Type| {
+                let value = self.emit_expr_against(value, bindings, ty)?;
+                // LumeShape.of accepts Object values, so Java lambdas need an
+                // explicit functional-interface target before being boxed.
+                Some(if matches!(ty, ir::Type::Function { .. }) {
+                    format!("(({}) ({value}))", self.names.value_type(ty))
+                } else {
+                    value
+                })
+            };
             let mut parts = Vec::with_capacity(expected_fields.len() * 2);
             if fields.is_empty() && !values.is_empty() {
                 if values.len() != expected_fields.len() {
@@ -8543,7 +8559,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 }
                 for (field, value) in expected_fields.iter().zip(values) {
                     parts.push(java_string_literal(&field.name));
-                    parts.push(self.emit_expr_against(value, bindings, &field.ty)?);
+                    parts.push(emit_value(value, &field.ty)?);
                 }
             } else {
                 for field in expected_fields {
@@ -8552,7 +8568,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         .iter()
                         .find(|value| value.name.as_deref() == Some(field.name.as_str()))
                     {
-                        parts.push(self.emit_expr_against(&value.value, bindings, &field.ty)?);
+                        parts.push(emit_value(&value.value, &field.ty)?);
                     } else {
                         let spread = fields.iter().rev().find_map(|value| {
                             let core::Expr::Spread { value, .. } = &value.value else {
@@ -8726,6 +8742,7 @@ impl<'a> SourceBodyEmitter<'a> {
             && let core::Expr::Identifier { name, .. } = callee
             && let [
                 core::CallArg {
+                    from_shape_spread: false,
                     value: core::Expr::RecordLiteral { fields, values, .. },
                     ..
                 },
@@ -8745,10 +8762,141 @@ impl<'a> SourceBodyEmitter<'a> {
         {
             return self.emit_call(callee, fields, span, core::CallStyle::Paren, bindings);
         }
+        if self
+            .source_call(span)
+            .is_some_and(|call| call.argument_expansion.is_some())
+        {
+            return self.emit_shape_argument_call(callee, args, span, style, bindings);
+        }
         if let Some(wrapped) = self.emit_reordered_call(callee, args, span, style, bindings) {
             return Some(wrapped);
         }
         self.emit_call_direct(callee, args, span, style, bindings)
+    }
+
+    fn emit_shape_argument_call(
+        &self,
+        callee: &core::Expr,
+        args: &[core::CallArg],
+        span: crate::source::Span,
+        style: core::CallStyle,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        let call = self.source_call(span)?;
+        let expansion = call.argument_expansion.as_ref()?;
+        let function = self.bundle.ir.function(call.function)?;
+        let cache = self.synthetic_name("shapeArguments", "arguments", span.start);
+        let mut values = Vec::new();
+        let mut declarations = Vec::new();
+        let mut rewritten_bindings = bindings.clone();
+        let mut rewritten_callee = callee.clone();
+        let target = match callee {
+            core::Expr::Index { receiver, .. } => receiver.as_ref(),
+            target => target,
+        };
+        if matches!(call.callee, ir::Callee::Method { .. })
+            && let core::Expr::Member {
+                receiver,
+                name,
+                span: member_span,
+            } = target
+        {
+            let ty = self.expr_type(receiver, bindings)?;
+            let java_name = self.synthetic_name("shapeCallReceiver", "receiver", span.start);
+            values.push(self.emit_receiver_expr(receiver, bindings)?);
+            declarations.push(format!(
+                "{} {java_name} = ({}) {cache}[0];",
+                self.names.value_type(&ty),
+                self.names.value_type(&ty)
+            ));
+            rewritten_bindings.insert(java_name.clone(), java_name.clone());
+            let member = core::Expr::Member {
+                receiver: Box::new(core::Expr::Identifier {
+                    name: java_name,
+                    span: receiver.span(),
+                }),
+                name: name.clone(),
+                span: *member_span,
+            };
+            if let core::Expr::Index { receiver, .. } = &mut rewritten_callee {
+                *receiver = Box::new(member);
+            } else {
+                rewritten_callee = member;
+            }
+        }
+        let mut expanded_args = Vec::new();
+        for (index, arg) in args.iter().enumerate() {
+            let Some(local_id) = *expansion.prepared.get(index)? else {
+                expanded_args.push(arg.clone());
+                continue;
+            };
+            let local = function.locals.get(local_id.0)?;
+            let java_name = java_local_name(function, local);
+            let value = match &arg.value {
+                core::Expr::Spread { value, .. } => value.as_ref(),
+                other => other,
+            };
+            let emitted = self.emit_expr_against(value, bindings, &local.ty)?;
+            let position = values.len();
+            values.push(emitted);
+            declarations.push(format!(
+                "{} {java_name} = ({}) {cache}[{position}];",
+                self.names.value_type(&local.ty),
+                self.names.value_type(&local.ty)
+            ));
+            rewritten_bindings.insert(local.name.clone(), java_name);
+            let identifier = core::Expr::Identifier {
+                name: local.name.clone(),
+                span: value.span(),
+            };
+            if let Some(fields) = expansion.fields.get(index)?.as_ref() {
+                for field in fields {
+                    expanded_args.push(core::CallArg {
+                        from_shape_spread: true,
+                        name: Some(field.clone()),
+                        ty: None,
+                        value: core::Expr::Member {
+                            receiver: Box::new(identifier.clone()),
+                            name: field.clone(),
+                            span: arg.span,
+                        },
+                        span: arg.span,
+                    });
+                }
+            } else {
+                let mut rewritten = arg.clone();
+                rewritten.value = if let core::Expr::Spread { span, .. } = &arg.value {
+                    core::Expr::Spread {
+                        value: Box::new(identifier),
+                        span: *span,
+                    }
+                } else {
+                    identifier
+                };
+                expanded_args.push(rewritten);
+            }
+        }
+        let invocation = self.emit_call_direct(
+            &rewritten_callee,
+            &expanded_args,
+            span,
+            style,
+            &rewritten_bindings,
+        )?;
+        let result_ty = self.source_expr_type(span)?;
+        let tail = if is_java_void_type(&result_ty) {
+            format!("{invocation}; return lume.core.LumeUnit.INSTANCE;")
+        } else {
+            format!("return {invocation};")
+        };
+        // Evaluate the receiver and eager sources outside the closure, in source order.
+        // This also avoids capturing reassigned caller locals in generated Java.
+        Some(format!(
+            "((java.util.function.Function<Object[], {}>) {cache} -> {{ {} {tail} }}).apply(new Object[] {{ {} }})",
+            self.names.value_type(&result_ty),
+            declarations.join(" "),
+            values.join(", ")
+        ))
     }
 
     fn emit_reordered_call(
@@ -8912,6 +9060,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 && matches!(
                     args,
                     [core::CallArg {
+                        from_shape_spread: false,
                         value: core::Expr::RecordLiteral { .. },
                         ..
                     }]
@@ -8934,6 +9083,7 @@ impl<'a> SourceBodyEmitter<'a> {
             {
                 let [
                     core::CallArg {
+                        from_shape_spread: false,
                         value: core::Expr::RecordLiteral { fields, values, .. },
                         ..
                     },
@@ -9808,7 +9958,12 @@ impl<'a> SourceBodyEmitter<'a> {
     ) -> Option<Vec<&'call core::CallArg>> {
         call.ordered_arg_spans
             .iter()
-            .map(|span| find_source_call_arg(args, *span))
+            .zip(&call.ordered_arg_names)
+            .map(|(span, name)| {
+                args.iter()
+                    .find(|arg| arg.span == *span && arg.name == *name)
+                    .or_else(|| find_source_call_arg(args, *span))
+            })
             .collect()
     }
 
@@ -10193,6 +10348,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 value => value,
             };
             if matches!(arg.value, core::Expr::Spread { .. })
+                || (arg.name.is_some() && arg.name == variadic.name)
                 || self.expr_type(value, bindings).as_ref() == Some(&variadic.ty)
             {
                 emitted.push(self.emit_source_arg_for_param_spec(arg, bindings, variadic)?);
@@ -10224,7 +10380,10 @@ impl<'a> SourceBodyEmitter<'a> {
             return Some(emitted);
         }
 
-        let mut packed = "lume.core.LumeVector.empty()".to_string();
+        let mut packed = format!(
+            "lume.core.LumeVector.<{}>empty()",
+            self.names.value_type(element_ty)
+        );
         for arg in rest {
             packed = match &arg.value {
                 core::Expr::Spread { value, .. } => format!(
@@ -10404,6 +10563,9 @@ impl<'a> SourceBodyEmitter<'a> {
         if let core::Expr::Member { receiver, name, .. } = expr {
             let receiver_ty = self.expr_type(receiver, bindings)?;
             let support = JavaIrSupport::new(self.bundle, self.function, self.names);
+            if let Some(ty) = support.field_type(&receiver_ty, name) {
+                return Some(ty);
+            }
             if support.type_has_getter_for_receiver(&receiver_ty, name) {
                 return support.getter_return_type_for_receiver(&receiver_ty, name);
             }

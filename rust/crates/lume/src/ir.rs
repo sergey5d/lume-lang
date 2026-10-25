@@ -51,8 +51,17 @@ pub struct SourceCall {
     pub callee: Callee,
     pub lowered_args: Vec<Operand>,
     pub ordered_arg_spans: Vec<Span>,
+    pub ordered_arg_names: Vec<Option<String>>,
+    pub argument_expansion: Option<SourceArgumentExpansion>,
     pub reified_arg_count: usize,
     pub param_specs: Vec<Option<SourceCallParamSpec>>,
+}
+
+/// Eager argument snapshots and winning shape fields, in original source order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceArgumentExpansion {
+    pub prepared: Vec<Option<LocalId>>,
+    pub fields: Vec<Option<Vec<String>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

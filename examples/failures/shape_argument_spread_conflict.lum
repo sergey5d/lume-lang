@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*shape argument spreads both supply 'value'; provide an explicit argument before the spreads to choose its value.*
+
+def consume(value Int) {}
+def main() {
+    consume(...{ value: 1 }, ...{ value: 2 })
+}

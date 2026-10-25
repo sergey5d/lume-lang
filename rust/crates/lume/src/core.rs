@@ -464,6 +464,7 @@ pub enum ElseExprBranch {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallArg {
+    pub from_shape_spread: bool,
     pub name: Option<String>,
     pub ty: Option<TypeRef>,
     pub value: Expr,

@@ -125,6 +125,80 @@ fn default_inline_ambient() -> AmbientInfo {
         .unwrap_or_default()
 }
 
+/// Native calls still use the parameter names declared by the standard library.
+pub(crate) fn runtime_callable_parameters(
+    owner: &str,
+    member: &str,
+    static_member: bool,
+) -> Option<(Vec<String>, Vec<Vec<crate::ir::SourceCallParamSpec>>)> {
+    let world = World::from_program(&Program::default());
+    let checker = Checker::new(&world, world.root_module.as_ref()?);
+    let sig = if static_member {
+        world.ambient.objects.get(owner)?
+    } else {
+        world.ambient.types.get(owner)?
+    };
+    let methods = checker.method_sigs_for_type(sig, member)?;
+    let signatures = methods
+        .into_iter()
+        .filter(|method| !method.getter)
+        .map(|method| {
+            method
+                .params
+                .into_iter()
+                .map(|param| crate::ir::SourceCallParamSpec {
+                    name: Some(param.name),
+                    ty: runtime_signature_type(&param.ty),
+                    lazy: param.lazy,
+                    variadic: param.variadic,
+                    default: None,
+                })
+                .collect()
+        })
+        .collect();
+    Some((sig.type_params.clone(), signatures))
+}
+
+fn runtime_signature_type(ty: &Ty) -> crate::ir::Type {
+    use crate::ir::Type;
+    match ty {
+        Ty::Unknown | Ty::Wildcard | Ty::Capture(_) => Type::Unknown,
+        Ty::Never => Type::Never,
+        Ty::Named(name, args) => {
+            if args.is_empty() {
+                match name.as_str() {
+                    "Unit" => return Type::Unit,
+                    "Bool" => return Type::Bool,
+                    "Int" => return Type::Int,
+                    "Float" => return Type::Float,
+                    "Str" => return Type::Str,
+                    _ => {}
+                }
+            }
+            Type::Named {
+                name: name.clone(),
+                args: args.iter().map(runtime_signature_type).collect(),
+            }
+        }
+        Ty::Union(members) => Type::Union(members.iter().map(runtime_signature_type).collect()),
+        Ty::Tuple(items) => Type::Tuple(items.iter().map(runtime_signature_type).collect()),
+        Ty::Record(fields) => Type::Record(
+            fields
+                .iter()
+                .map(|(name, ty)| crate::ir::NamedType {
+                    name: name.clone(),
+                    ty: runtime_signature_type(ty),
+                })
+                .collect(),
+        ),
+        Ty::Function(params, ret) => Type::Function {
+            params: params.iter().map(runtime_signature_type).collect(),
+            ret: Box::new(runtime_signature_type(ret)),
+        },
+        Ty::TypeParam(name) => Type::TypeParam(name.clone()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Ty {
     Unknown,
@@ -5946,6 +6020,7 @@ impl<'a> Checker<'a> {
                 {
                     let span = expr.span();
                     let args = [crate::ast::CallArg {
+                        from_shape_spread: false,
                         name: None,
                         ty: None,
                         value: expr.clone(),
@@ -6568,6 +6643,24 @@ impl<'a> Checker<'a> {
 
         let normalized_args =
             self.normalize_trailing_brace_call_args(callee, args, uses_brace_syntax);
+        // Bracket map literals are represented as Map calls. Their spreads
+        // combine map entries rather than expand named callable arguments.
+        if matches!(callee, Expr::Identifier { name, .. } if name == "Map")
+            && let Some(ty) = self.try_check_constructor_call(
+                callee,
+                &normalized_args,
+                uses_brace_syntax,
+                span,
+                expected,
+            )
+        {
+            return ty;
+        }
+        let source_args = normalized_args;
+        let has_shape_spread = source_args.iter().any(|arg| {
+            matches!(&arg.value, Expr::Spread { value, .. } if self.shape_target_fields(&self.probe_shape_argument_source(value)).is_some())
+        });
+        let normalized_args = self.expand_shape_call_arguments(&source_args);
         if let Expr::Member { receiver, name, .. } = callee
             && normalized_args.len() == 1
             && name == "equals"
@@ -6584,19 +6677,30 @@ impl<'a> Checker<'a> {
             return Ty::never();
         }
         if self.is_builtin_print_call(callee) {
+            if has_shape_spread {
+                self.add_error(
+                    "invalid_shape_argument_spread_target",
+                    "shape argument expansion requires a callable with named parameters",
+                    span,
+                );
+            }
             for arg in &normalized_args {
                 self.check_expr(&arg.value);
             }
             return Ty::unit();
         }
-        if let Some(ty) =
-            self.check_builtin_static_method_call(callee, &normalized_args, span, expected)
+        if !has_shape_spread
+            && let Some(ty) =
+                self.check_builtin_static_method_call(callee, &normalized_args, span, expected)
         {
             return ty;
         }
-        if let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span) {
+        if !has_shape_spread
+            && let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span)
+        {
             return ty;
         }
+        self.check_shape_call_argument_layout(&source_args);
         if self.check_extension_private_method_call(callee, &normalized_args) {
             return Ty::Unknown;
         }
@@ -6700,6 +6804,90 @@ impl<'a> Checker<'a> {
                 );
                 Ty::Unknown
             }
+        }
+    }
+
+    fn expand_shape_call_arguments(
+        &self,
+        args: &[crate::ast::CallArg],
+    ) -> Vec<crate::ast::CallArg> {
+        args.iter()
+            .flat_map(|arg| {
+                let Expr::Spread { value, .. } = &arg.value else {
+                    return vec![arg.clone()];
+                };
+                let Some(fields) =
+                    self.shape_target_fields(&self.probe_shape_argument_source(value))
+                else {
+                    return vec![arg.clone()];
+                };
+                fields
+                    .into_iter()
+                    .map(|field| crate::ast::CallArg {
+                        from_shape_spread: true,
+                        name: Some(field.name.clone()),
+                        ty: None,
+                        value: Expr::Member {
+                            receiver: value.clone(),
+                            name: field.name,
+                            span: arg.span,
+                        },
+                        span: arg.span,
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn check_shape_call_argument_layout(&mut self, args: &[crate::ast::CallArg]) {
+        let shapes = args
+            .iter()
+            .map(|arg| match &arg.value {
+                Expr::Spread { value, .. } => {
+                    self.shape_target_fields(&self.probe_shape_argument_source(value))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let has_shape = shapes.iter().any(Option::is_some);
+        let mut named = false;
+        let mut spread = false;
+        for (arg, fields) in args.iter().zip(shapes) {
+            if let Some(fields) = fields {
+                spread = true;
+                if fields.is_empty()
+                    && let Expr::Spread { value, .. } = &arg.value
+                {
+                    self.check_expr(value);
+                }
+            } else {
+                if has_shape && (spread || (named && arg.name.is_none())) {
+                    self.add_error("shape_spread_argument_order", "shape argument expansion requires positional arguments, then explicit named arguments, then shape spreads", arg.span);
+                }
+                named |= arg.name.is_some();
+                if let Expr::Spread { value, .. } = &arg.value {
+                    let ty = self.probe_expr_type(value);
+                    if !matches!(&ty, Ty::Named(name, _) if name == "Vector") {
+                        self.add_error("invalid_shape_argument_spread", format!("call argument spread requires a statically known shape or a vector vararg value, got '{}'", ty.describe()), arg.span);
+                    }
+                }
+            }
+        }
+    }
+
+    fn probe_shape_argument_source(&self, source: &Expr) -> Ty {
+        match source {
+            Expr::Group { inner, .. } => self.probe_shape_argument_source(inner),
+            Expr::ContextualNew {
+                args,
+                uses_brace_syntax: true,
+                default_initialize: false,
+                ..
+            } => args
+                .first()
+                .map(|arg| self.probe_expr_type(&arg.value))
+                .unwrap_or(Ty::Unknown),
+            _ => self.probe_expr_type(source),
         }
     }
 
@@ -6900,6 +7088,7 @@ impl<'a> Checker<'a> {
             if !concrete_target {
                 let [
                     crate::ast::CallArg {
+                        from_shape_spread: false,
                         value: record @ Expr::RecordLiteral { .. },
                         ..
                     },
@@ -7104,6 +7293,7 @@ impl<'a> Checker<'a> {
     ) -> Ty {
         let [
             crate::ast::CallArg {
+                from_shape_spread: false,
                 value: record @ Expr::RecordLiteral { fields, values, .. },
                 ..
             },
@@ -8137,10 +8327,12 @@ impl<'a> Checker<'a> {
         } else {
             params.len()
         };
-        let argument_shape_valid = arrangement.overflow == 0
-            && arrangement.missing_required == 0
-            && args.len() >= min_required
-            && args.len() <= max_allowed;
+        for (name, spread, span) in &arrangement.conflicts {
+            self.add_error(if *spread { "conflicting_shape_arguments" } else { "duplicate_argument" },
+                if *spread { format!("shape argument spreads both supply '{name}'; provide an explicit argument before the spreads to choose its value") }
+                else { format!("parameter '{name}' is supplied more than once explicitly") }, *span);
+        }
+        let argument_shape_valid = arrangement.overflow == 0 && arrangement.missing_required == 0;
         if !argument_shape_valid && unknown_named_args.is_empty() {
             let prefix_message = args
                 .iter()
@@ -8170,6 +8362,57 @@ impl<'a> Checker<'a> {
                 span,
             );
         }
+        // Independently known values seed inference before contextual spread fields.
+        if args.iter().any(|arg| arg.from_shape_spread) {
+            for (index, param) in params.iter().enumerate() {
+                for arg in &arrangement.slots[index] {
+                    let expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
+                    infer_type_subst(
+                        &expected,
+                        &self.probe_expr_type(call_arg_value_expr(arg)),
+                        &mut subst,
+                    );
+                }
+            }
+        }
+        let mut spread_types = HashMap::new();
+        for arg in args.iter().filter(|arg| arg.from_shape_spread) {
+            let Expr::Member { receiver, .. } = &arg.value else {
+                continue;
+            };
+            if spread_types.contains_key(&(receiver.span().start, receiver.span().end)) {
+                continue;
+            }
+            let source_ty = self.probe_shape_argument_source(receiver);
+            let expected = if matches!(source_ty, Ty::Record(_)) {
+                Ty::Record(
+                    self.shape_target_fields(&source_ty)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|field| {
+                            let active = params.iter().enumerate().find(|(index, param)| {
+                                param.name == field.name
+                                    && arrangement.slots[*index]
+                                        .iter()
+                                        .any(|slot| slot.from_shape_spread && slot.span == arg.span)
+                            });
+                            (
+                                field.name,
+                                active
+                                    .map(|(_, param)| {
+                                        materialize_type(&substitute_type(&param.ty, &subst))
+                                    })
+                                    .unwrap_or(field.ty),
+                            )
+                        })
+                        .collect(),
+                )
+            } else {
+                source_ty
+            };
+            let actual = self.check_expr_against(receiver, &expected);
+            spread_types.insert((receiver.span().start, receiver.span().end), actual);
+        }
         let mut checked_args = Vec::new();
         for (index, param) in params.iter().enumerate() {
             let slot = arrangement
@@ -8178,7 +8421,7 @@ impl<'a> Checker<'a> {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             for arg in slot {
-                if param.lazy {
+                if param.lazy && !arg.from_shape_spread {
                     if let Some(reason_span) = lazy_arg_forbidden_control_flow_span(&arg.value) {
                         self.add_error(
                             "invalid_by_name_argument",
@@ -8203,8 +8446,17 @@ impl<'a> Checker<'a> {
                 // must be able to infer `T = Unit` for a `(…) => Result[T, E]`
                 // parameter.
                 let check_expected = materialize_type(&expected);
-                let actual =
-                    self.check_call_arg_expr_against(call_arg_value_expr(arg), &check_expected);
+                let actual = if arg.from_shape_spread {
+                    match &arg.value {
+                        Expr::Member { receiver, name, .. } => spread_types
+                            .get(&(receiver.span().start, receiver.span().end))
+                            .and_then(|ty| self.member_type(ty, name))
+                            .unwrap_or(Ty::Unknown),
+                        _ => Ty::Unknown,
+                    }
+                } else {
+                    self.check_call_arg_expr_against(call_arg_value_expr(arg), &check_expected)
+                };
                 infer_type_subst(&expected, &actual, &mut subst);
                 checked_args.push((arg.span, actual, raw_expected.clone()));
             }
@@ -12471,6 +12723,7 @@ impl<'a> Checker<'a> {
                 }
                 let normalized_args =
                     self.normalize_trailing_brace_call_args(callee, args, *uses_brace_syntax);
+                let normalized_args = self.expand_shape_call_arguments(&normalized_args);
                 self.callable_signature_for_args_probe_with_locals(
                     callee,
                     &normalized_args,
@@ -15755,6 +16008,7 @@ struct ArgArrangement<'a> {
     slots: Vec<Vec<&'a crate::ast::CallArg>>,
     overflow: usize,
     missing_required: usize,
+    conflicts: Vec<(String, bool, crate::source::Span)>,
 }
 
 fn arrange_param_args<'a>(
@@ -15764,13 +16018,21 @@ fn arrange_param_args<'a>(
     let mut slots = vec![Vec::new(); params.len()];
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
+    let mut conflicts = Vec::new();
     for arg in args {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
                 if slots[index].is_empty() {
                     slots[index].push(arg);
+                } else if arg.from_shape_spread && !slots[index][0].from_shape_spread {
+                    // Explicit arguments take precedence over every shape source.
                 } else {
                     overflow += 1;
+                    conflicts.push((
+                        name.clone(),
+                        arg.from_shape_spread && slots[index][0].from_shape_spread,
+                        arg.span,
+                    ));
                 }
             } else {
                 overflow += 1;
@@ -15818,6 +16080,7 @@ fn arrange_param_args<'a>(
         slots,
         overflow,
         missing_required,
+        conflicts,
     }
 }
 
@@ -15828,13 +16091,20 @@ fn arrange_constructor_args<'a>(
     let mut slots = vec![Vec::new(); params.len()];
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
+    let mut conflicts = Vec::new();
     for arg in args {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
                 if slots[index].is_empty() {
                     slots[index].push(arg);
+                } else if arg.from_shape_spread && !slots[index][0].from_shape_spread {
                 } else {
                     overflow += 1;
+                    conflicts.push((
+                        name.clone(),
+                        arg.from_shape_spread && slots[index][0].from_shape_spread,
+                        arg.span,
+                    ));
                 }
             } else {
                 overflow += 1;
@@ -15882,6 +16152,7 @@ fn arrange_constructor_args<'a>(
         slots,
         overflow,
         missing_required,
+        conflicts,
     }
 }
 
@@ -15893,6 +16164,7 @@ fn has_single_record_literal_arg(args: &[crate::ast::CallArg]) -> bool {
     matches!(
         args,
         [crate::ast::CallArg {
+            from_shape_spread: false,
             name: None,
             value: Expr::RecordLiteral { .. },
             ..
@@ -15903,6 +16175,7 @@ fn has_single_record_literal_arg(args: &[crate::ast::CallArg]) -> bool {
 fn brace_record_constructor_args(args: &[crate::ast::CallArg]) -> Option<Vec<crate::ast::CallArg>> {
     let [
         crate::ast::CallArg {
+            from_shape_spread: false,
             name: None,
             value: Expr::RecordLiteral { fields, values, .. },
             ..
@@ -15922,7 +16195,10 @@ fn brace_record_constructor_args(args: &[crate::ast::CallArg]) -> Option<Vec<cra
 fn trailing_brace_call_has_lambda_arg(args: &[crate::ast::CallArg]) -> bool {
     let [
         crate::ast::CallArg {
-            name: None, value, ..
+            from_shape_spread: false,
+            name: None,
+            value,
+            ..
         },
     ] = args
     else {
@@ -15945,6 +16221,7 @@ fn trailing_brace_call_has_lambda_arg(args: &[crate::ast::CallArg]) -> bool {
 fn format_factory_help_args(args: &[crate::ast::CallArg]) -> Option<String> {
     if let [
         crate::ast::CallArg {
+            from_shape_spread: false,
             name: None,
             value: Expr::RecordLiteral { fields, values, .. },
             ..
@@ -18065,6 +18342,83 @@ class MethodId with Identified {
             "{:?}",
             checked.diagnostics
         );
+    }
+
+    #[test]
+    fn checks_shape_argument_spread_precedence() {
+        let program = parse_inline(
+            r#"
+def consume(first Int, second Str = "default") Int = first
+def main() {
+    options = { first: "ignored", second: "spread" }
+    consume(1, ...options)
+    consume(first = 1, ...options)
+    consume(1, "explicit", ...options, ...{ first: false })
+    consume(...{ first: 1 })
+}
+"#,
+        );
+        let checked = check_program(&program);
+        assert!(checked.diagnostics.is_empty(), "{:?}", checked.diagnostics);
+    }
+
+    #[test]
+    fn rejects_invalid_shape_argument_spreads() {
+        for (body, code) in [
+            (
+                "consume(...{ value: 1 }, value = 2)",
+                "shape_spread_argument_order",
+            ),
+            ("consume(...{ value: 1 }, 2)", "shape_spread_argument_order"),
+            (
+                "consume(...{ value: 1 }, ...{ value: 2 })",
+                "conflicting_shape_arguments",
+            ),
+            (
+                "consume(1, value = 2, ...{ value: 3 })",
+                "duplicate_argument",
+            ),
+            ("consume(...{ value: 1, typo: 2 })", "unknown_argument_name"),
+            ("consume(...{ value: \"wrong\" })", "invalid_argument_type"),
+            ("consume(...Options(1))", "invalid_shape_argument_spread"),
+            (
+                "consume(...[\"value\": 1])",
+                "invalid_shape_argument_spread",
+            ),
+            ("consume(...{ unrelated: 1 })", "unknown_argument_name"),
+        ] {
+            let program = parse_inline(&format!(
+                "class Options {{ value Int }}\ndef consume(value Int) {{}}\ndef main() {{ {body} }}"
+            ));
+            let checked = check_program(&program);
+            assert!(
+                checked
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
+                "expected {code} for {body}: {:?}",
+                checked.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn shape_argument_spreads_require_static_fields_and_parameter_names() {
+        for source in [
+            "def consume(value Int) {}\ndef bad(options Any) { consume(...options) }",
+            "def consume(value Int) {}\ndef bad(options { value Int } | { other Int }) { consume(...options) }",
+            "def bad(consume fn(Int) Int) Int = consume(...{ value: 1 })",
+        ] {
+            let checked = check_program(&parse_inline(source));
+            assert!(
+                checked.diagnostics.iter().any(|diagnostic| matches!(
+                    diagnostic.code,
+                    "invalid_shape_argument_spread" | "unknown_argument_name"
+                )),
+                "{source}: {:?}",
+                checked.diagnostics
+            );
+        }
     }
 
     #[test]

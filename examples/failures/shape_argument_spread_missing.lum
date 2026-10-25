@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*call expects 2\.\.2 arguments, got 1.*
+
+def consume(first Int, second Int) {}
+def main() {
+    consume(...{ first: 1 })
+}

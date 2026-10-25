@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*argument has type 'Str' but parameter expects 'Int'.*
+
+def consume(value Int) {}
+def main() {
+    consume(...{ value: "wrong" })
+}

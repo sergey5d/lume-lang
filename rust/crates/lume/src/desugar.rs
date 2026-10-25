@@ -249,6 +249,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             fields: fields
                 .iter()
                 .map(|arg| core::CallArg {
+                    from_shape_spread: false,
                     name: arg.name.clone(),
                     ty: arg.ty.clone(),
                     value: desugar_expr(&arg.value),
@@ -380,6 +381,7 @@ fn desugar_lambda_body(body: &ast::LambdaBody) -> core::Expr {
 fn desugar_call_arg(arg: &ast::CallArg, style: core::CallStyle) -> core::CallArg {
     let value = normalize_brace_lambda_arg(style, desugar_expr(&arg.value));
     core::CallArg {
+        from_shape_spread: arg.from_shape_spread,
         name: arg.name.clone(),
         ty: arg.ty.clone(),
         value,
