@@ -5,7 +5,7 @@ use crate::{
     ir,
 };
 
-use super::{builtin_method, force_lazy_arg};
+use super::{builtin_method, invoke_callback};
 use crate::runtime::{
     RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
 };
@@ -30,9 +30,19 @@ pub(super) fn define() -> RuntimeType {
                 }],
                 option_map,
             ),
-            builtin_method(4, "orElse", vec![ir::Type::Unknown], option_or_else),
-            builtin_method(5, "toResult", vec![ir::Type::Unknown], option_to_result),
-            builtin_method(6, "toEither", vec![ir::Type::Unknown], option_to_either),
+            builtin_method(4, "orElse", vec![super::callback_type()], option_or_else),
+            builtin_method(
+                5,
+                "toResult",
+                vec![super::callback_type()],
+                option_to_result,
+            ),
+            builtin_method(
+                6,
+                "toEither",
+                vec![super::callback_type()],
+                option_to_either,
+            ),
             builtin_method(7, "iterator", Vec::new(), option_iterator),
             builtin_method(8, "isSuccess", Vec::new(), option_is_set),
             builtin_method(
@@ -157,7 +167,7 @@ fn option_or_else(
     if case_id == SOME_CASE {
         Ok(receiver)
     } else {
-        force_lazy_arg(interpreter, args[0].clone(), span)
+        invoke_callback(interpreter, args[0].clone(), span)
     }
 }
 
@@ -174,7 +184,7 @@ fn option_to_result(
     if case_id == SOME_CASE {
         Ok(interpreter.result_ok(first_field.expect("Option.Some payload")))
     } else {
-        let error = force_lazy_arg(interpreter, args[0].clone(), span)?;
+        let error = invoke_callback(interpreter, args[0].clone(), span)?;
         Ok(interpreter.result_err(error))
     }
 }
@@ -192,7 +202,7 @@ fn option_to_either(
     if case_id == SOME_CASE {
         Ok(interpreter.either_right(first_field.expect("Option.Some payload")))
     } else {
-        let left = force_lazy_arg(interpreter, args[0].clone(), span)?;
+        let left = invoke_callback(interpreter, args[0].clone(), span)?;
         Ok(interpreter.either_left(left))
     }
 }

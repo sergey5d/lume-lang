@@ -35,8 +35,8 @@ def last[T](first T, second T) T = second
 def keep[T](value T) T = value
 def itemCount(items [Int]) Int = items.size
 def pointSum(point Point) Int = point.x + point.y
-def useLazy(first => Int, second Int) Int = second
-def readTwice(first Int, second => Int) Int = first + second + second
+def useCallback(first fn() Int, second Int) Int = second
+def readTwice(first Int, second fn() Int) Int = first + second() + second()
 def sum(values [Int] vararg) Int = values.fold(0, (acc, value) => acc + value)
 
 object StaticService {
@@ -116,12 +116,12 @@ def main() {
     trace = Trace()
     assert(service(trace).sum(trace.mark("A", 1), ...trace.options()) == 3)
     assert(trace.text == "RASBX")
-    assert(useLazy(trace.mark("N", 99), ... { second: 2 }) == 2)
+    assert(useCallback({ => trace.mark("N", 99) }, ... { second: 2 }) == 2)
     assert(trace.text == "RASBX")
-    assert(readTwice(1, ... { second: trace.mark("L", 2) }) == 5)
-    assert(trace.text == "RASBXL")
+    assert(readTwice(1, ... { second: { => trace.mark("L", 2) } }) == 5)
+    assert(trace.text == "RASBXLL")
     verify(defaulted("heh", ...trace.empty()), 3, 2d)
-    assert(trace.text == "RASBXLE")
+    assert(trace.text == "RASBXLLE")
 
     var supplied = { error: 1, whoAteMyCookie: 4d }
     verify(methodA("heh", ...supplied), 1, 4d)

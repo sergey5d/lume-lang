@@ -1096,10 +1096,15 @@ impl<'a> Parser<'a> {
             None
         };
         let (name, start) = self.expect_identifier("expected constructor parameter name")?;
-        let (lazy, ty) = if self.match_token(TokenKind::FatArrow) {
-            (true, Some(self.parse_type_ref()?))
-        } else if self.can_start_type_ref() {
-            (false, Some(self.parse_type_ref()?))
+        if self.at(TokenKind::FatArrow) {
+            self.error_at_current(
+                "by_name_parameters_removed",
+                "by-name parameters are not supported; use 'name fn() T' and pass an explicit lambda such as '{ => expression }'",
+            );
+            return None;
+        }
+        let ty = if self.can_start_type_ref() {
+            Some(self.parse_type_ref()?)
         } else {
             self.error_at_current("expected_type", "expected constructor parameter type");
             return None;
@@ -1130,7 +1135,6 @@ impl<'a> Parser<'a> {
             ty,
             initializer,
             variadic,
-            lazy,
             span: prefix_vararg.unwrap_or(start).cover(end),
         })
     }

@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*argument has type 'Int' but parameter expects 'fn\(\) Int'.*
+
+def invoke(work fn() Int) Int = work()
+
+def main() {
+    invoke(5)
+}

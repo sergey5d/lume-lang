@@ -23,8 +23,8 @@ ext Either[L, R] {
         case Right { value: _ } => panic("Either has no left value")
     }
 
-    def orElse(fallback => Either[L, R]) Either[L, R] = match this {
-        case Left { value: _ } => fallback
+    def orElse(fallback fn() Either[L, R]) Either[L, R] = match this {
+        case Left { value: _ } => fallback()
         case Right { value } => Right(value)
     }
 

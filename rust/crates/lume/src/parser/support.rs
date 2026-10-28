@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
             return true;
         }
         if parser.at(TokenKind::LBrace) {
-            return !parser.looks_like_trailing_lambda_block_start();
+            return !parser.looks_like_braced_lambda_start();
         }
 
         if !parser.can_start_type_ref() || parser.parse_type_ref().is_none() {

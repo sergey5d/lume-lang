@@ -22,13 +22,13 @@ type Boxed[T] =
     | object Empty {}
 
 ext Boxed[T] {
-    def valueOr(fallback => T) T = match this {
+    def valueOr(fallback fn() T) T = match this {
         case Box { value } => value
-        case Empty => fallback
+        case Empty => fallback()
     }
 }
 
-def main() Unit {
+def main() {
     success Outcome = Success { value: "Great" }
     failure Outcome = Failure { message: "nope" }
     cancelled Outcome = Cancelled
@@ -38,5 +38,5 @@ def main() Unit {
     println(cancelled.result())
 
     boxed Boxed[Int] = Box { value: 7 }
-    println(boxed.valueOr(0))
+    println(boxed.valueOr { => 0 })
 }

@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*argument has type 'fn\(\) Int' but parameter expects 'fn\(Int\) Int'.*
+
+def main() {
+    values = [1, 2]
+    values.map { => 42 }
+}

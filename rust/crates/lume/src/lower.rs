@@ -766,18 +766,13 @@ impl<'a> Lowerer<'a> {
             function.add_local(this_name, this_ty, false, ir::LocalKind::Capture);
         }
         for (index, param) in params.iter().enumerate() {
-            let source_ty = param
+            let runtime_ty = param
                 .ty
                 .as_ref()
                 .map(|ty| {
                     lower_type_ref_with_type_params(ty, &available_type_params, &self.type_aliases)
                 })
                 .unwrap_or(ir::Type::Unknown);
-            let runtime_ty = if param.lazy {
-                lazy_storage_type(source_ty)
-            } else {
-                source_ty
-            };
             function.add_param(param.name.clone(), runtime_ty);
             function.set_param_default(
                 index,
@@ -787,7 +782,6 @@ impl<'a> Lowerer<'a> {
                     .and_then(lower_param_default_constant),
             );
             function.set_param_variadic(index, param.variadic);
-            function.set_param_lazy(index, param.lazy);
         }
         for name in function.reified_type_params.clone() {
             function.add_param(
@@ -1018,7 +1012,6 @@ struct FunctionLowerer<'a> {
     capture_sources: HashMap<String, CaptureSource>,
     capture_locals: HashMap<String, ir::LocalId>,
     closure_captures: Vec<ir::Operand>,
-    lazy_values: HashMap<String, ir::Type>,
     this_local: Option<ir::LocalId>,
     loop_exits: Vec<ir::BlockId>,
     loop_continues: Vec<ir::BlockId>,
@@ -1029,7 +1022,6 @@ struct FunctionLowerer<'a> {
 struct CaptureSource {
     operand: ir::Operand,
     ty: ir::Type,
-    lazy_value_ty: Option<ir::Type>,
 }
 
 #[derive(Debug, Clone)]
@@ -1043,7 +1035,6 @@ struct IrTypeNarrowing {
 struct ExpectedArgSpec {
     name: Option<String>,
     ty: ir::Type,
-    lazy: bool,
     variadic: bool,
     default: Option<ir::Constant>,
 }
@@ -1140,7 +1131,6 @@ impl<'a> FunctionLowerer<'a> {
             capture_sources: HashMap::new(),
             capture_locals: HashMap::new(),
             closure_captures: Vec::new(),
-            lazy_values: HashMap::new(),
             this_local: None,
             loop_exits: Vec::new(),
             loop_continues: Vec::new(),
@@ -1272,15 +1262,6 @@ impl<'a> FunctionLowerer<'a> {
             return;
         }
         self.bind_existing(&param.name, local);
-        if param.lazy {
-            let value_ty = self
-                .function()
-                .locals
-                .get(local.0)
-                .and_then(|local| lazy_value_type(&local.ty))
-                .unwrap_or(ir::Type::Unknown);
-            self.lazy_values.insert(param.name.clone(), value_ty);
-        }
     }
 
     fn bind_reified_type_params(&mut self) {
@@ -1639,19 +1620,13 @@ impl<'a> FunctionLowerer<'a> {
         );
         nested.span = Some(function.span);
         for (index, param) in function.params.iter().enumerate() {
-            let source_ty = param
+            let runtime_ty = param
                 .ty
                 .as_ref()
                 .map(|ty| self.lower_type_ref(ty))
                 .unwrap_or(ir::Type::Unknown);
-            let runtime_ty = if param.lazy {
-                lazy_storage_type(source_ty)
-            } else {
-                source_ty
-            };
             nested.add_param(param.name.clone(), runtime_ty);
             nested.set_param_variadic(index, param.variadic);
-            nested.set_param_lazy(index, param.lazy);
         }
         let function_id = self.program.add_function(nested);
         let capture_sources = self.visible_capture_sources(Some(&function.name));
@@ -1818,19 +1793,13 @@ impl<'a> FunctionLowerer<'a> {
         );
         nested.span = Some(span);
         for (index, param) in params.iter().enumerate() {
-            let source_ty = param
+            let runtime_ty = param
                 .ty
                 .as_ref()
                 .map(|ty| self.lower_type_ref(ty))
                 .unwrap_or(ir::Type::Unknown);
-            let runtime_ty = if param.lazy {
-                lazy_storage_type(source_ty)
-            } else {
-                source_ty
-            };
             nested.add_param(param.name.clone(), runtime_ty);
             nested.set_param_variadic(index, param.variadic);
-            nested.set_param_lazy(index, param.lazy);
         }
         let function_id = self.program.add_function(nested);
         if let Some(body) = body {
@@ -1968,19 +1937,13 @@ impl<'a> FunctionLowerer<'a> {
                 ir::LocalKind::Capture,
             );
             for (index, param) in method.params.iter().enumerate() {
-                let source_ty = param
+                let runtime_ty = param
                     .ty
                     .as_ref()
                     .map(|ty| self.lower_type_ref(ty))
                     .unwrap_or(ir::Type::Unknown);
-                let runtime_ty = if param.lazy {
-                    lazy_storage_type(source_ty)
-                } else {
-                    source_ty
-                };
                 function.add_param(param.name.clone(), runtime_ty);
                 function.set_param_variadic(index, param.variadic);
-                function.set_param_lazy(index, param.lazy);
             }
             let id = self.program.add_function(function);
             method_ids.push(id);
@@ -2096,13 +2059,11 @@ impl<'a> FunctionLowerer<'a> {
                     .get(local.0)
                     .map(|local| local.ty.clone())
                     .unwrap_or(ir::Type::Unknown);
-                let lazy_value_ty = self.lazy_values.get(name).cloned();
                 sources.insert(
                     name.clone(),
                     CaptureSource {
                         operand: ir::Operand::Copy(Box::new(ir::Place::Local(*local))),
                         ty,
-                        lazy_value_ty,
                     },
                 );
             }
@@ -2118,7 +2079,6 @@ impl<'a> FunctionLowerer<'a> {
                         .get(this_local.0)
                         .map(|local| local.ty.clone())
                         .unwrap_or(ir::Type::Unknown),
-                    lazy_value_ty: None,
                 });
         }
         sources
@@ -4612,23 +4572,6 @@ impl<'a> FunctionLowerer<'a> {
         ir::Operand::Copy(Box::new(ir::Place::Local(temp)))
     }
 
-    fn force_lazy_value(
-        &mut self,
-        thunk: ir::Operand,
-        value_ty: ir::Type,
-        span: Span,
-    ) -> ir::Operand {
-        self.emit_temp_from_rvalue(
-            ir::RValue::Call {
-                callee: ir::Callee::Indirect(thunk),
-                args: Vec::new(),
-                structural: false,
-            },
-            value_ty,
-            Some(span),
-        )
-    }
-
     fn combine_conditions(&mut self, conditions: Vec<ir::Operand>, span: Span) -> ir::Operand {
         let mut iter = conditions.into_iter();
         let Some(first) = iter.next() else {
@@ -4771,9 +4714,6 @@ impl<'a> FunctionLowerer<'a> {
         match expr {
             Expr::Identifier { name, span } => {
                 if let Some(value) = self.lookup_scoped_or_captured_value(name) {
-                    if let Some(value_ty) = self.lazy_values.get(name).cloned() {
-                        return self.force_lazy_value(value, value_ty, *span);
-                    }
                     return value;
                 }
                 {
@@ -5531,10 +5471,12 @@ impl<'a> FunctionLowerer<'a> {
             Expr::AnonymousObject { span, .. } => {
                 ir::Type::named(crate::source::anonymous_object_type_name(*span))
             }
+            Expr::Lambda { .. } => {
+                self.infer_expr_type_against_with_overrides(expr, &ir::Type::Unknown, overrides)
+            }
             Expr::Match { .. }
             | Expr::ForYield { .. }
             | Expr::Unary { .. }
-            | Expr::Lambda { .. }
             | Expr::Placeholder { .. } => ir::Type::Unknown,
         }
     }
@@ -5811,46 +5753,40 @@ impl<'a> FunctionLowerer<'a> {
             } else {
                 let mut rewritten_arg = arg.clone();
                 let spec = specs.get(source_specs[index]?)?;
-                if spec.lazy {
-                    prepared.push(None);
-                } else {
-                    let mut spec = spec.clone();
-                    if spec.variadic
-                        && arg.name.is_none()
-                        && !matches!(arg.value, Expr::Spread { .. })
-                    {
-                        if let ir::Type::Named { args, .. } = &spec.ty {
-                            spec.ty = args.first().cloned().unwrap_or(ir::Type::Unknown);
-                        }
-                        spec.variadic = false;
+                let mut spec = spec.clone();
+                if spec.variadic && arg.name.is_none() && !matches!(arg.value, Expr::Spread { .. })
+                {
+                    if let ir::Type::Named { args, .. } = &spec.ty {
+                        spec.ty = args.first().cloned().unwrap_or(ir::Type::Unknown);
                     }
-                    let operand = self.lower_call_arg(arg, Some(&spec));
-                    let value = match &arg.value {
-                        Expr::Spread { value, .. } => value.as_ref(),
-                        other => other,
-                    };
-                    let ty = self.infer_expr_type_against_with_overrides(value, &spec.ty, &[]);
-                    let local = self.add_temp(ty);
-                    self.push_statement(ir::Statement::assign(
-                        ir::Place::Local(local),
-                        ir::RValue::Use(operand),
-                    ));
-                    let alias = format!("$callArgument{}_{index}", arg.span.start);
-                    self.bind_existing(&alias, local);
-                    let identifier = Expr::Identifier {
-                        name: alias,
-                        span: value.span(),
-                    };
-                    rewritten_arg.value = if let Expr::Spread { span, .. } = &arg.value {
-                        Expr::Spread {
-                            value: Box::new(identifier),
-                            span: *span,
-                        }
-                    } else {
-                        identifier
-                    };
-                    prepared.push(Some(local));
+                    spec.variadic = false;
                 }
+                let operand = self.lower_call_arg(arg, Some(&spec));
+                let value = match &arg.value {
+                    Expr::Spread { value, .. } => value.as_ref(),
+                    other => other,
+                };
+                let ty = self.infer_expr_type_against_with_overrides(value, &spec.ty, &[]);
+                let local = self.add_temp(ty);
+                self.push_statement(ir::Statement::assign(
+                    ir::Place::Local(local),
+                    ir::RValue::Use(operand),
+                ));
+                let alias = format!("$callArgument{}_{index}", arg.span.start);
+                self.bind_existing(&alias, local);
+                let identifier = Expr::Identifier {
+                    name: alias,
+                    span: value.span(),
+                };
+                rewritten_arg.value = if let Expr::Spread { span, .. } = &arg.value {
+                    Expr::Spread {
+                        value: Box::new(identifier),
+                        span: *span,
+                    }
+                } else {
+                    identifier
+                };
+                prepared.push(Some(local));
                 fields_by_source.push(None);
                 rewritten.push(rewritten_arg);
             }
@@ -6211,9 +6147,6 @@ impl<'a> FunctionLowerer<'a> {
     fn lookup_scoped_type(&self, name: &str) -> Option<ir::Type> {
         for scope in self.scopes.iter().rev() {
             if let Some(local) = scope.get(name).copied() {
-                if let Some(value_ty) = self.lazy_values.get(name) {
-                    return Some(value_ty.clone());
-                }
                 return self
                     .function()
                     .locals
@@ -6221,12 +6154,9 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|local| local.ty.clone());
             }
         }
-        self.capture_sources.get(name).map(|source| {
-            source
-                .lazy_value_ty
-                .clone()
-                .unwrap_or_else(|| source.ty.clone())
-        })
+        self.capture_sources
+            .get(name)
+            .map(|source| source.ty.clone())
     }
 
     fn type_narrowing_for_condition(
@@ -6244,9 +6174,7 @@ impl<'a> FunctionLowerer<'a> {
                 let Expr::Identifier { name, .. } = left.as_ref() else {
                     return None;
                 };
-                if self.lazy_values.contains_key(name)
-                    || lower_runtime_type_ref_has_arguments(target)
-                {
+                if lower_runtime_type_ref_has_arguments(target) {
                     return None;
                 }
                 let local = self.lookup_scoped_local(name)?;
@@ -7502,7 +7430,6 @@ impl<'a> FunctionLowerer<'a> {
                             spec.map(|spec| ir::SourceCallParamSpec {
                                 name: spec.name,
                                 ty: spec.ty,
-                                lazy: spec.lazy,
                                 variadic: spec.variadic,
                                 default: spec.default,
                             })
@@ -7688,12 +7615,6 @@ impl<'a> FunctionLowerer<'a> {
         let Some(expected) = expected else {
             return self.lower_expr(value);
         };
-        if expected.lazy {
-            if let Some(thunk) = self.lazy_forward_operand(value) {
-                return thunk;
-            }
-            return self.lower_lazy_argument(value, expected.ty.clone(), arg.span);
-        }
         self.lower_expr_with_expected(value, Some(&expected.ty))
     }
 
@@ -7753,7 +7674,6 @@ impl<'a> FunctionLowerer<'a> {
         let element_spec = ExpectedArgSpec {
             name: None,
             ty: element_ty.clone(),
-            lazy: false,
             variadic: false,
             default: None,
         };
@@ -7909,7 +7829,6 @@ impl<'a> FunctionLowerer<'a> {
         let element_spec = ExpectedArgSpec {
             name: None,
             ty: element_ty.clone(),
-            lazy: false,
             variadic: false,
             default: None,
         };
@@ -7992,57 +7911,6 @@ impl<'a> FunctionLowerer<'a> {
             debug_assert_ne!(Some(index), variadic_index);
         }
         Some((ordered_args, lowered))
-    }
-
-    fn lazy_forward_operand(&mut self, expr: &Expr) -> Option<ir::Operand> {
-        let Expr::Identifier { name, .. } = expr else {
-            return None;
-        };
-        self.lazy_values
-            .contains_key(name)
-            .then(|| self.lookup_scoped_or_captured_value(name))
-            .flatten()
-    }
-
-    fn lower_lazy_argument(&mut self, expr: &Expr, return_ty: ir::Type, span: Span) -> ir::Operand {
-        let rvalue = self.lower_lazy_argument_closure(expr, return_ty.clone(), span);
-        self.emit_temp_from_rvalue(rvalue, lazy_storage_type(return_ty), Some(span))
-    }
-
-    fn lower_lazy_argument_closure(
-        &mut self,
-        expr: &Expr,
-        return_ty: ir::Type,
-        span: Span,
-    ) -> ir::RValue {
-        let nested_name = format!(
-            "lazy${}${}",
-            self.function_id.0,
-            self.function().blocks.len()
-        );
-        let mut nested = ir::Function::new(nested_name, ir::FunctionKind::Lambda, return_ty);
-        nested.span = Some(span);
-        let function_id = self.program.add_function(nested);
-        let capture_sources = self.visible_capture_sources(None);
-        let captures = {
-            let mut lowerer = FunctionLowerer::new(
-                self.program,
-                self.core_bodies,
-                function_id,
-                self.globals,
-                self.functions,
-                self.case_fields,
-                self.type_aliases,
-                self.diagnostics,
-            )
-            .with_capture_sources(capture_sources);
-            lowerer.lower_callable_body(&CallableBody::Expr(expr.clone()), span);
-            lowerer.finish_closure_captures()
-        };
-        ir::RValue::Closure {
-            function: function_id,
-            captures,
-        }
     }
 
     fn call_expected_arg_specs(
@@ -8138,7 +8006,6 @@ impl<'a> FunctionLowerer<'a> {
                         ty: existing
                             .map(|spec| spec.ty.clone())
                             .unwrap_or_else(|| substitute_ir_type(&param.ty, &subst)),
-                        lazy: param.lazy,
                         variadic: param.variadic,
                         default: existing.and_then(|spec| spec.default.clone()),
                     })
@@ -8163,7 +8030,6 @@ impl<'a> FunctionLowerer<'a> {
                         Some(ExpectedArgSpec {
                             name: None,
                             ty,
-                            lazy: false,
                             variadic: false,
                             default: None,
                         })
@@ -8179,14 +8045,12 @@ impl<'a> FunctionLowerer<'a> {
                         Some(ExpectedArgSpec {
                             name: Some("condition".to_string()),
                             ty: ir::Type::Bool,
-                            lazy: false,
                             variadic: false,
                             default: None,
                         }),
                         Some(ExpectedArgSpec {
                             name: Some("message".to_string()),
                             ty: ir::Type::Str,
-                            lazy: false,
                             variadic: false,
                             default: Some(ir::Constant::String(
                                 crate::DEFAULT_ASSERT_MESSAGE.to_string(),
@@ -8205,16 +8069,14 @@ impl<'a> FunctionLowerer<'a> {
                     };
                     return Some(vec![
                         Some(ExpectedArgSpec {
-                            name: None,
+                            name: Some("condition".to_string()),
                             ty: ir::Type::Bool,
-                            lazy: false,
                             variadic: false,
                             default: None,
                         }),
                         Some(ExpectedArgSpec {
-                            name: None,
-                            ty: error_ty,
-                            lazy: true,
+                            name: Some("error".to_string()),
+                            ty: zero_arg_function_type(error_ty),
                             variadic: false,
                             default: None,
                         }),
@@ -8251,7 +8113,6 @@ impl<'a> FunctionLowerer<'a> {
                     return Some(vec![Some(ExpectedArgSpec {
                         name: None,
                         ty: transactional_work_type(value_ty),
-                        lazy: false,
                         variadic: false,
                         default: None,
                     })]);
@@ -8269,7 +8130,6 @@ impl<'a> FunctionLowerer<'a> {
                                 Some(ExpectedArgSpec {
                                     name: None,
                                     ty: accumulator.clone(),
-                                    lazy: false,
                                     variadic: false,
                                     default: None,
                                 }),
@@ -8279,7 +8139,6 @@ impl<'a> FunctionLowerer<'a> {
                                         params: vec![accumulator.clone(), args[0].clone()],
                                         ret: Box::new(accumulator),
                                     },
-                                    lazy: false,
                                     variadic: false,
                                     default: None,
                                 }),
@@ -8372,7 +8231,6 @@ impl<'a> FunctionLowerer<'a> {
                     Some(ExpectedArgSpec {
                         name: Some(field.name.clone()),
                         ty: field.ty.clone(),
-                        lazy: false,
                         variadic: false,
                         default: field.initializer.clone(),
                     })
@@ -8403,7 +8261,6 @@ impl<'a> FunctionLowerer<'a> {
                     Some(ExpectedArgSpec {
                         name: Some(field.name.clone()),
                         ty: field.ty.clone(),
-                        lazy: false,
                         variadic: false,
                         default: field.initializer.clone(),
                     })
@@ -8426,16 +8283,10 @@ impl<'a> FunctionLowerer<'a> {
                         .params
                         .get(index)
                         .and_then(|param| function.locals.get(param.0))?;
-                    let lazy = function.param_lazy.get(index).copied().unwrap_or(false);
-                    let ty = if lazy {
-                        lazy_value_type(&local.ty).unwrap_or(ir::Type::Unknown)
-                    } else {
-                        local.ty.clone()
-                    };
+                    let ty = local.ty.clone();
                     Some(ExpectedArgSpec {
                         name: Some(local.name.clone()),
                         ty: substitute_ir_type(&ty, subst),
-                        lazy,
                         variadic: function.param_variadic.get(index).copied().unwrap_or(false),
                         default: function.param_defaults.get(index).cloned().flatten(),
                     })
@@ -9046,7 +8897,8 @@ impl<'a> FunctionLowerer<'a> {
             && !self.callee_receiver_is_static_namespace(receiver)
         {
             let receiver_ty = self.infer_expr_type(receiver);
-            if self.is_getter_member_for_type(&receiver_ty, name)
+            if (self.is_getter_member_for_type(&receiver_ty, name)
+                || self.type_has_data_field(&receiver_ty, name))
                 && matches!(self.infer_expr_type(callee), ir::Type::Function { .. })
             {
                 return ir::Callee::Indirect(self.lower_expr(callee));
@@ -9109,7 +8961,8 @@ impl<'a> FunctionLowerer<'a> {
 
         if let Expr::Member { receiver, name, .. } = callee {
             let receiver_ty = self.infer_expr_type(receiver);
-            if self.is_getter_member_for_type(&receiver_ty, name)
+            if (self.is_getter_member_for_type(&receiver_ty, name)
+                || self.type_has_data_field(&receiver_ty, name))
                 && matches!(self.infer_expr_type(callee), ir::Type::Function { .. })
             {
                 return ir::Callee::Indirect(self.lower_expr(callee));
@@ -9730,9 +9583,6 @@ impl<'a> FunctionLowerer<'a> {
         if name == "this" {
             self.this_local = Some(local);
         }
-        if let Some(value_ty) = source.lazy_value_ty {
-            self.lazy_values.insert(name.to_string(), value_ty);
-        }
         self.capture_locals.insert(name.to_string(), local);
         self.closure_captures.push(source.operand);
         Some(local)
@@ -10069,17 +9919,10 @@ fn lower_runtime_type_ref_has_arguments(reference: &TypeRef) -> bool {
     }
 }
 
-fn lazy_storage_type(value_ty: ir::Type) -> ir::Type {
+fn zero_arg_function_type(value_ty: ir::Type) -> ir::Type {
     ir::Type::Function {
         params: Vec::new(),
         ret: Box::new(value_ty),
-    }
-}
-
-fn lazy_value_type(storage_ty: &ir::Type) -> Option<ir::Type> {
-    match storage_ty {
-        ir::Type::Function { params, ret } if params.is_empty() => Some((**ret).clone()),
-        _ => None,
     }
 }
 
@@ -10597,11 +10440,10 @@ fn builtin_member_expected_arg_specs(
         return None;
     };
     let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
-    let spec = |ty: ir::Type, lazy: bool| {
+    let spec = |ty: ir::Type| {
         Some(ExpectedArgSpec {
             name: None,
             ty,
-            lazy,
             variadic: false,
             default: None,
         })
@@ -10609,7 +10451,7 @@ fn builtin_member_expected_arg_specs(
     match (type_name.as_str(), name) {
         ("Database", "transactionally") => {
             let value_ty = transactionally_result_value_type(expected).unwrap_or(ir::Type::Unknown);
-            Some(vec![spec(transactional_work_type(value_ty), false)])
+            Some(vec![spec(transactional_work_type(value_ty))])
         }
         ("Option", "map") => {
             let mapped = match expected {
@@ -10618,13 +10460,10 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::Unknown,
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![item.clone()],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![item.clone()],
+                ret: Box::new(mapped),
+            })])
         }
         ("Option", "flatMap") => {
             let mapped = match expected {
@@ -10633,15 +10472,12 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::option(ir::Type::Unknown),
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![item.clone()],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![item.clone()],
+                ret: Box::new(mapped),
+            })])
         }
-        ("Option", "orElse") => Some(vec![spec(receiver.clone(), true)]),
+        ("Option", "orElse") => Some(vec![spec(zero_arg_function_type(receiver.clone()))]),
         ("Option", "toResult") => {
             let error = match expected {
                 Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
@@ -10649,7 +10485,7 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::Unknown,
             };
-            Some(vec![spec(error, true)])
+            Some(vec![spec(zero_arg_function_type(error))])
         }
         ("Option", "toEither") => {
             let left = match expected {
@@ -10658,7 +10494,7 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::Unknown,
             };
-            Some(vec![spec(left, true)])
+            Some(vec![spec(zero_arg_function_type(left))])
         }
         ("Result", "map") => {
             let mapped = match expected {
@@ -10667,13 +10503,10 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::Unknown,
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![item.clone()],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![item.clone()],
+                ret: Box::new(mapped),
+            })])
         }
         ("Result", "flatMap") => {
             let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
@@ -10689,15 +10522,12 @@ fn builtin_member_expected_arg_specs(
                     args: vec![ir::Type::Unknown, error],
                 },
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![item.clone()],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![item.clone()],
+                ret: Box::new(mapped),
+            })])
         }
-        ("Result", "orElse") => Some(vec![spec(receiver.clone(), true)]),
+        ("Result", "orElse") => Some(vec![spec(zero_arg_function_type(receiver.clone()))]),
         ("Result", "mapError") => {
             let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
             let mapped = match expected {
@@ -10706,13 +10536,10 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::Unknown,
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![error],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![error],
+                ret: Box::new(mapped),
+            })])
         }
         ("Either", "map") => {
             let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
@@ -10722,13 +10549,10 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::Unknown,
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![right],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![right],
+                ret: Box::new(mapped),
+            })])
         }
         ("Either", "flatMap") => {
             let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
@@ -10745,15 +10569,12 @@ fn builtin_member_expected_arg_specs(
                     args: vec![left, ir::Type::Unknown],
                 },
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![right],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![right],
+                ret: Box::new(mapped),
+            })])
         }
-        ("Either", "orElse") => Some(vec![spec(receiver.clone(), true)]),
+        ("Either", "orElse") => Some(vec![spec(zero_arg_function_type(receiver.clone()))]),
         ("Either", "merge") => Some(Vec::new()),
         ("Either", "mapLeft") => {
             let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
@@ -10763,13 +10584,10 @@ fn builtin_member_expected_arg_specs(
                 }
                 _ => ir::Type::Unknown,
             };
-            Some(vec![spec(
-                ir::Type::Function {
-                    params: vec![left],
-                    ret: Box::new(mapped),
-                },
-                false,
-            )])
+            Some(vec![spec(ir::Type::Function {
+                params: vec![left],
+                ret: Box::new(mapped),
+            })])
         }
         _ => None,
     }
@@ -10894,18 +10712,18 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             ret: Box::new(ir::Type::option(ir::Type::Unknown)),
         }),
         ("Option", "orElse") => Some(ir::Type::Function {
-            params: vec![receiver.clone()],
+            params: vec![zero_arg_function_type(receiver.clone())],
             ret: Box::new(receiver.clone()),
         }),
         ("Option", "toResult") => Some(ir::Type::Function {
-            params: vec![ir::Type::Unknown],
+            params: vec![zero_arg_function_type(ir::Type::Unknown)],
             ret: Box::new(ir::Type::Named {
                 name: "Result".to_string(),
                 args: vec![item.clone(), ir::Type::Unknown],
             }),
         }),
         ("Option", "toEither") => Some(ir::Type::Function {
-            params: vec![ir::Type::Unknown],
+            params: vec![zero_arg_function_type(ir::Type::Unknown)],
             ret: Box::new(ir::Type::Named {
                 name: "Either".to_string(),
                 args: vec![ir::Type::Unknown, item.clone()],
@@ -10945,7 +10763,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             })
         }
         ("Result", "orElse") => Some(ir::Type::Function {
-            params: vec![receiver.clone()],
+            params: vec![zero_arg_function_type(receiver.clone())],
             ret: Box::new(receiver.clone()),
         }),
         ("Result", "mapError") => {
@@ -10993,7 +10811,7 @@ fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
             })
         }
         ("Either", "orElse") => Some(ir::Type::Function {
-            params: vec![receiver.clone()],
+            params: vec![zero_arg_function_type(receiver.clone())],
             ret: Box::new(receiver.clone()),
         }),
         ("Either", "merge") => Some(ir::Type::Function {
@@ -13484,9 +13302,8 @@ mod tests {
         assert_eq!(call.param_specs.len(), 2);
         assert!(
             call.param_specs.iter().all(|spec| {
-                spec.as_ref().is_some_and(|spec| {
-                    spec.ty == ir::Type::named("Int") && !spec.lazy && !spec.variadic
-                })
+                spec.as_ref()
+                    .is_some_and(|spec| spec.ty == ir::Type::named("Int") && !spec.variadic)
             }),
             "{:#?}",
             call.param_specs

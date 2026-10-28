@@ -12,7 +12,7 @@ class Counter {
         this.value
     }
 
-    def reset() Unit =
+    def reset() =
         this.value := 0
 
     def current() Int =
@@ -20,29 +20,29 @@ class Counter {
 }
 
 
-def twice(value => Int) Int =
-    value + value
+def twice(value fn() Int) Int =
+    value() + value()
 
-def inner(value => Int) Int =
-    value
+def inner(value fn() Int) Int =
+    value()
 
-def outer(value => Int) Int =
+def outer(value fn() Int) Int =
     inner(value) + inner(value)
 
-def cachedOnce(value => Int) Int {
-    cached Int = value
+def cachedOnce(value fn() Int) Int {
+    cached Int = value()
     cached + cached
 }
 
-def main() Unit {
+def main() {
     counter Counter = Counter()
 
-    println(twice(counter.next()))
+    println(twice { => counter.next() })
     println(counter.current())
 
     counter.reset()
-    println(outer(counter.next()))
+    println(outer { => counter.next() })
 
     counter.reset()
-    println(cachedOnce(counter.next()))
+    println(cachedOnce { => counter.next() })
 }

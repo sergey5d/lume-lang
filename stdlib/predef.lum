@@ -7,9 +7,9 @@ public def assert(condition Bool, message Str = "assert condition was false") Un
 
 public def identity[T](value T) T = value
 
-public def ensure[E](condition Bool, error => E) Result[Unit, E] =
+public def ensure[E](condition Bool, error fn() E) Result[Unit, E] =
     if condition {
         Ok(())
     } else {
-    Err(error)
-}
+        Err(error())
+    }

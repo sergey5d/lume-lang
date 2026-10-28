@@ -2692,7 +2692,6 @@ extra values positionally.
 
 ```txt
 callable-parameter    = name Type [vararg] [= default]
-                      | name => Type [= default]
 constructor-parameter = name Type [vararg] [= default]
 ```
 
@@ -2702,7 +2701,6 @@ Rules:
 - A variadic parameter must have an explicit vector type `[T]`.
 - Only the final parameter may be variadic.
 - A parameter list may contain at most one variadic parameter.
-- A by-name parameter cannot also be variadic.
 - Defaults may appear anywhere in a parameter list.
 - Positional arguments bind a contiguous declaration-order prefix.
 - A positional call may stop only when every remaining parameter has a default.
@@ -2773,68 +2771,65 @@ For calls containing shape spreads:
 This expands function and method arguments, not positional constructor inputs.
 Named construction retains its existing spread syntax, such as `User { ...data }`.
 
-The receiver is evaluated first. Explicit eager expressions and spread sources
+The receiver is evaluated first. Explicit argument expressions and spread sources
 are then evaluated once, in written order, before their values are arranged into
 parameter slots. A spread source is evaluated even when all its fields are
-overridden. Its fields are already values: supplying one to a by-name parameter
-does not defer constructing the source or reevaluate it on each parameter read.
-Ordinary explicit by-name arguments retain their normal lazy behavior.
+overridden. Function values are passed without invoking their bodies, including
+when supplied through a shape spread.
 
-Function and method parameters may be by-name:
+### Explicit Deferred Work
+
+Deferred work uses ordinary zero-argument function parameters. The caller
+explicitly supplies a function; the implementation explicitly invokes it:
 
 ```txt
-def twice(value => Int) Int =
-    value + value
+def twice(value fn() Int) Int =
+    value() + value()
 
-def debug(message => Str) Unit
+twice { => calculate() }
+twice(() => calculate())
 ```
 
-Rules:
-
-- `name => Type` is allowed on function and method parameters only.
-- A by-name argument expression is captured as a zero-argument closure.
-- Reading the parameter evaluates that closure.
-- By-name parameters are not memoized; each read evaluates the captured expression again.
-- By-name parameters cannot be `vararg`.
-- By-name argument expressions cannot contain non-local `return`, `break`, `continue`, or `try`.
-- Use an explicit `fn() T` parameter when the caller should pass, store, or return the thunk itself.
-
-Style:
-
-- Use by-name parameters only for conditional-value APIs such as `assert`, `debug`, and `orElse`.
-- Use `fn() T` for callbacks, schedulers, retry operations, event handlers, and stored work.
-
-Forwarding rules:
+`{ => expression }` is an ordinary [zero-argument lambda](#lambdas), not a special
+argument mode. Ordinary values are never implicitly wrapped into callbacks.
+Reading a function parameter obtains the function itself; forwarding it does
+not invoke it:
 
 ```txt
-def inner(value => Int) Int = value
+def inner(value fn() Int) Int = value()
 
-def outer(value => Int) Int =
+def outer(value fn() Int) Int =
     inner(value)
 ```
 
-- Passing a by-name parameter to a normal parameter evaluates it first.
-- Passing a by-name parameter to another by-name parameter forwards the delayed expression.
-- Reading a by-name parameter in any other expression evaluates it immediately.
-
-If a callee needs one evaluation, bind the value explicitly:
+Callbacks are not memoized: invoking one twice executes its body twice. To
+evaluate it once, bind its result explicitly:
 
 ```txt
-def cached(value => Int) Int {
-    item = value
+def cached(value fn() Int) Int {
+    item = value()
     item + item
 }
 ```
 
-Core fallback APIs use by-name parameters so fallback work only runs on the
-fallback branch. Mapper callbacks such as `map`, `flatMap`, `mapLeft`, and
-`mapError` are ordinary function values; only the callback body is conditional
-on the container branch:
+Normal callable boundaries apply. `return` exits the callback, `try` uses its
+return contract, and loop jumps cannot escape it.
+
+`Option.orElse`, `Result.orElse`, and `Either.orElse` accept zero-argument
+callbacks returning their respective container. `Option.toResult` and
+`Option.toEither` accept callbacks producing the error or left value. `ensure`
+accepts a zero-argument error callback. These APIs invoke the callback only on
+the missing or failure branch. Existing function references may be passed
+directly when their signatures match.
+
+`??` remains a short-circuiting operator, not a callback API. Its right operand
+can perform control flow in the enclosing callable or loop:
 
 ```txt
 value = maybe ?? expensiveDefault()
-result = maybe.toResult(makeError())
-next = result.orElse(recover())
+user = maybeUser ?? return None
+result = maybe.toResult { => makeError() }
+next = result.orElse { => recover() }
 mapped = maybe.map(value => value + 1)
 leftMapped = either.mapLeft(error => error.toStr())
 ```
@@ -2959,7 +2954,7 @@ interfaces cannot declare them.
 - `new(...) { body }` declares a block-bodied constructor.
 - `new(...) = expression` declares an expression-bodied constructor.
 - Constructor parameters use `name Type`; they are inputs to the body and do not have to correspond to stored fields.
-- Defaults, named arguments, positional-prefix binding, and `vararg` follow the shared [callable parameter rules](#callable-parameters). By-name parameters remain function- and method-only.
+- Defaults, named arguments, positional-prefix binding, and `vararg` follow the shared [callable parameter rules](#callable-parameters).
 - `Type {}` is valid when the selected constructor has no required inputs.
 - Declaring any explicit `new` disables the implicit public-field constructor for that class.
 - A variadic constructor input can be supplied as one vector-valued named construction field.
@@ -3074,6 +3069,7 @@ Accepted lambda parameter forms are deliberately small:
 
 ```txt
 () => expr
+{ => expr }
 x => expr
 _ => expr
 (x) => expr
@@ -3089,6 +3085,19 @@ Typed single-parameter lambdas must use parentheses, so write
 `(x Int) => x + 1`, not `x Int => x + 1`. Parenthesized parameter lists
 must also be either fully typed or fully untyped; `(x Int, y) => ...` is
 invalid. Plain `(x, y) => ...` always means two parameters.
+
+An empty parameter section before `=>` in a braced lambda means exactly zero
+parameters. This form works in any expression position, not just trailing calls:
+
+```txt
+fallback fn() Str = { => loadDefault() }
+consume({ => 5 })
+option.orElse { => recover() }
+```
+
+`items.map { => 42 }` is invalid when `map` requires one parameter; write
+`items.map { _ => 42 }` to explicitly ignore that parameter. A braced lambda may
+contain multiple statements after its arrow, and they execute only when invoked.
 
 Single-parameter lambda:
 
@@ -3284,9 +3293,9 @@ items.map {
     x => x + 1
 }
 
-items.repeat { () => 5 }
+items.repeat { => 5 }
 
-runner.zero { () => 26 }
+runner.zero { => 26 }
 
 items.zipMap { (left, right) => left + right }
 
@@ -3312,7 +3321,7 @@ runner.zero {
 }
 
 # valid
-runner.zero { () => 26 }
+runner.zero { => 26 }
 ```
 
 If a callback is passed alongside ordinary arguments, include it in the same
@@ -3321,7 +3330,7 @@ completed `(...)` call; that would imply currying or calling the result of the
 first call.
 
 ```txt
-processNamed("compares values", { () => println("inside callback") })
+processNamed("compares values", { => println("inside callback") })
 ```
 
 In a control-flow header, trailing brace-call syntax is disabled only at the
@@ -3612,8 +3621,8 @@ Named class construction, contextual `new` construction, and shape construction
 follow the same evaluation-order rule: supplied field expressions evaluate in
 written order, even though their values are placed into constructor inputs or
 shape fields in declaration order. Defaults are supplied after explicit
-arguments have been evaluated. By-name parameters remain lazy; their
-expressions evaluate only when the callee reads them.
+arguments have been evaluated. Passing a callback constructs a function value;
+its body executes only when that function is explicitly invoked.
 
 Methods are called explicitly:
 
@@ -4094,7 +4103,7 @@ for a direct negative type test.
 This narrowing is intentionally local and conservative:
 
 - mutable bindings are not narrowed, because another read may observe a different value
-- by-name parameters, member reads, indexes, and arbitrary expressions are not narrowed
+- member reads, indexes, and arbitrary expressions are not narrowed
 - narrowing is propagated across top-level `&&` condition clauses, but nested
   compound Boolean expressions do not currently combine narrowing facts
 - the checker does not currently infer negative types or report unreachable type-test branches
@@ -4453,7 +4462,7 @@ The success type may differ; the propagated failure side must still be compatibl
 Failure mapping is ordinary container transformation before `try`:
 
 ```txt
-user = try maybeUser.toResult(AppError.NotFound(id))
+user = try maybeUser.toResult { => AppError.NotFound(id) }
 row = try Db.query(id).mapError { err => AppError.Db(err) }
 value = try sourceEither.mapLeft { left => AppError.FromLeft(left) }
 ```
@@ -4461,7 +4470,7 @@ value = try sourceEither.mapLeft { left => AppError.FromLeft(left) }
 `try` propagates the value it receives. If the source has the wrong failure type,
 transform the container first:
 
-- `Option[T].toResult(error)` converts absence into `Err(error)`.
+- `Option[T].toResult(error)` invokes the zero-argument `error` callback on absence and returns `Err(error())`.
 - `Result[T, E].mapError(f)` maps `Err(E)` into another error type.
 - `Result[T, E].expectErr()` extracts `E` and panics when the result is `Ok`.
 - `Either[L, R].mapLeft(f)` maps `Left(L)` into another left type.
@@ -5781,7 +5790,7 @@ Other operators / constructs:
 - `^` as shorthand for wrapping a value in `Some`
 - `!` for unsafe extraction through `Option`, `Result`, and `Either`
 - `fn(...) T` for function types
-- `=>` for lambdas and by-name parameters
+- `=>` for lambdas
 - `=>` for match cases
 - `with` for interface implementation and generic bounds
 - `when` for generic bound and equality conditions

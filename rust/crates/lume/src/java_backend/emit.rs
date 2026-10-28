@@ -1903,7 +1903,6 @@ struct JavaParamSpec {
     name: Option<String>,
     ty: ir::Type,
     variadic: bool,
-    lazy: bool,
     default: Option<ir::Constant>,
     coercion: Option<JavaPrimitiveCoercion>,
 }
@@ -1919,7 +1918,6 @@ fn function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
                 name: Some(local.name.clone()),
                 ty: local.ty.clone(),
                 variadic: function.param_variadic.get(index).copied().unwrap_or(false),
-                lazy: function.param_lazy.get(index).copied().unwrap_or(false),
                 default: function.param_defaults.get(index).cloned().flatten(),
                 coercion: None,
             })
@@ -1939,7 +1937,6 @@ fn source_function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
                     name: Some(local.name.clone()),
                     ty: local.ty.clone(),
                     variadic: function.param_variadic.get(index).copied().unwrap_or(false),
-                    lazy: function.param_lazy.get(index).copied().unwrap_or(false),
                     default: function.param_defaults.get(index).cloned().flatten(),
                     coercion: None,
                 }
@@ -1955,28 +1952,22 @@ fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
             name: None,
             ty,
             variadic: false,
-            lazy: false,
             default: None,
             coercion: None,
         })
         .collect()
 }
 
-fn java_param_spec(ty: ir::Type, lazy: bool) -> JavaParamSpec {
+fn java_callback_param_spec(ret: ir::Type) -> JavaParamSpec {
     JavaParamSpec {
         name: None,
-        ty,
+        ty: ir::Type::Function {
+            params: Vec::new(),
+            ret: Box::new(ret),
+        },
         variadic: false,
-        lazy,
         default: None,
         coercion: None,
-    }
-}
-
-fn lazy_param_value_type(ty: &ir::Type) -> &ir::Type {
-    match ty {
-        ir::Type::Function { params, ret } if params.is_empty() => ret.as_ref(),
-        _ => ty,
     }
 }
 
@@ -2314,6 +2305,15 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                 }
                 core::Stmt::Return(statement) => {
+                    if self.lambda_returns_unit() {
+                        if let Some(value) = &statement.value {
+                            self.emit_returning_expr(out, value, indent, bindings, binding_types)?;
+                        } else {
+                            out.push_str(indent);
+                            out.push_str("return lume.core.LumeUnit.INSTANCE;\n");
+                        }
+                        continue;
+                    }
                     out.push_str(indent);
                     out.push_str("return");
                     if let Some(value) = &statement.value {
@@ -4963,6 +4963,21 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
     ) -> Option<()> {
+        if self.lambda_returns_unit() {
+            if !matches!(expr, core::Expr::Unit { .. }) {
+                let emitted = self.emit_expr(expr, bindings)?;
+                out.push_str(indent);
+                if !matches!(expr, core::Expr::Call { .. }) {
+                    let ignored = self.synthetic_name("unitResult", "ignored", expr.span().start);
+                    out.push_str(&format!("Object {ignored} = "));
+                }
+                out.push_str(&emitted);
+                out.push_str(";\n");
+            }
+            out.push_str(indent);
+            out.push_str("return lume.core.LumeUnit.INSTANCE;\n");
+            return Some(());
+        }
         match expr {
             core::Expr::If {
                 condition_clauses,
@@ -6347,7 +6362,6 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Identifier { name, .. } => bindings
                 .get(name)
                 .cloned()
-                .or_else(|| self.lazy_param_value_reference(name))
                 .or_else(|| self.param_reference(name))
                 .or_else(|| self.implicit_field_reference(name))
                 .or_else(|| self.implicit_getter_reference(name))
@@ -8836,7 +8850,10 @@ impl<'a> SourceBodyEmitter<'a> {
                 core::Expr::Spread { value, .. } => value.as_ref(),
                 other => other,
             };
-            let emitted = self.emit_expr_against(value, bindings, &local.ty)?;
+            let mut emitted = self.emit_expr_against(value, bindings, &local.ty)?;
+            if matches!(local.ty, ir::Type::Function { .. }) {
+                emitted = format!("(({}) ({emitted}))", self.names.value_type(&local.ty));
+            }
             let position = values.len();
             values.push(emitted);
             declarations.push(format!(
@@ -8971,11 +8988,6 @@ impl<'a> SourceBodyEmitter<'a> {
         };
 
         for (index, (arg, spec)) in args.iter().zip(source_specs).enumerate() {
-            // By-name expressions are evaluated by the callee, not while the
-            // call site prepares its eager arguments.
-            if spec.lazy {
-                continue;
-            }
             let argument_name = self.synthetic_name("callArgument", "argument", arg.span.start);
             let (value_expr, argument_ty) = if spec.variadic
                 && arg.name.is_none()
@@ -9191,11 +9203,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .map(|arg| self.emit_call_arg(arg, bindings))
                     .collect::<Option<Vec<_>>>()?;
-                let target = if self.is_lazy_param(name) {
-                    format!("{}.get()", self.param_reference(name)?)
-                } else {
-                    self.param_reference(name)?
-                };
+                let target = self.param_reference(name)?;
                 emit_functional_call(&target, &args)
             }
             core::Expr::Identifier { name, .. } if bindings.contains_key(name) => {
@@ -9835,16 +9843,11 @@ impl<'a> SourceBodyEmitter<'a> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
-                let value = self.emit_call_arg(arg, bindings)?;
-                if call
-                    .param_specs
-                    .get(index)
-                    .and_then(Option::as_ref)
-                    .is_some_and(|spec| spec.lazy)
-                {
-                    Some(format!("() -> {value}"))
+                if matches!(intrinsic, ir::Intrinsic::Ensure) && index == 1 {
+                    let spec = call.param_specs.get(index)?.as_ref()?;
+                    self.emit_expr_against(&arg.value, bindings, &spec.ty)
                 } else {
-                    Some(value)
+                    self.emit_call_arg(arg, bindings)
                 }
             })
             .collect::<Option<Vec<_>>>()?;
@@ -10029,7 +10032,6 @@ impl<'a> SourceBodyEmitter<'a> {
                             name: spec.name.clone(),
                             ty: spec.ty.clone(),
                             variadic: spec.variadic,
-                            lazy: spec.lazy,
                             default: spec.default.clone(),
                             coercion: None,
                         })
@@ -10208,35 +10210,34 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Spread { value, .. } => value.as_ref(),
             value => value,
         };
-        if !spec.lazy {
-            let actual_ty = match source {
-                core::Expr::Lambda {
-                    params, body, span, ..
-                } => {
-                    let inferred = self
-                        .infer_lambda_type(params, body, *span, bindings, &spec.ty)
-                        .or_else(|| self.expr_type(source, bindings));
-                    let inferred_ret = self
-                        .source_expr_type(body.span())
-                        .or_else(|| self.expr_type(body, bindings));
-                    match (inferred, inferred_ret) {
-                        (Some(ir::Type::Function { params, ret }), Some(inferred_ret))
-                            if matches!(ret.as_ref(), ir::Type::Unknown) =>
-                        {
-                            Some(ir::Type::Function {
-                                params,
-                                ret: Box::new(inferred_ret),
-                            })
-                        }
-                        (inferred, _) => inferred,
+        let actual_ty = match source {
+            core::Expr::Lambda {
+                params, body, span, ..
+            } => {
+                let inferred = self
+                    .infer_lambda_type(params, body, *span, bindings, &spec.ty)
+                    .or_else(|| self.expr_type(source, bindings));
+                let inferred_ret = self
+                    .source_expr_type(body.span())
+                    .or_else(|| self.expr_type(body, bindings));
+                match (inferred, inferred_ret) {
+                    (Some(ir::Type::Function { params, ret }), Some(inferred_ret))
+                        if matches!(ret.as_ref(), ir::Type::Unknown) =>
+                    {
+                        Some(ir::Type::Function {
+                            params,
+                            ret: Box::new(inferred_ret),
+                        })
                     }
+                    (inferred, _) => inferred,
                 }
-                _ => self.expr_type(source, bindings),
-            };
-            let target_ty = actual_ty
-                .map(|actual| refine_java_expected_type(&spec.ty, &actual))
-                .unwrap_or_else(|| spec.ty.clone());
-            let value = self
+            }
+            _ => self.expr_type(source, bindings),
+        };
+        let target_ty = actual_ty
+            .map(|actual| refine_java_expected_type(&spec.ty, &actual))
+            .unwrap_or_else(|| spec.ty.clone());
+        let value = self
                 .emit_expr_against(source, bindings, &target_ty)
                 .or_else(|| {
                     if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
@@ -10246,40 +10247,18 @@ impl<'a> SourceBodyEmitter<'a> {
                     }
                     None
                 })?;
-            if matches!(source, core::Expr::Lambda { .. })
-                && matches!(target_ty, ir::Type::Function { .. })
-            {
-                return Some(format!(
-                    "(({}) ({value}))",
-                    self.names.value_type(&target_ty)
-                ));
-            }
-            let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
-            let value =
-                emitter.coerce_to_target_type(value, self.expr_type(source, bindings), &target_ty);
-            return Some(coerce_to_java_primitive(value, spec.coercion));
-        }
-        if let core::Expr::Identifier { name, .. } = source
-            && self.is_lazy_param(name)
+        if matches!(source, core::Expr::Lambda { .. })
+            && matches!(target_ty, ir::Type::Function { .. })
         {
-            return self.param_reference(name);
+            return Some(format!(
+                "(({}) ({value}))",
+                self.names.value_type(&target_ty)
+            ));
         }
-        let target_ty = lazy_param_value_type(&spec.ty);
-        let value = self
-            .emit_expr_against(source, bindings, target_ty)
-            .or_else(|| {
-                if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
-                    eprintln!(
-                        "readable java cannot emit lazy source argument {source:?} against {target_ty:?}"
-                    );
-                }
-                None
-            })?;
         let emitter = JavaIrSupport::new(self.bundle, self.function, self.names);
         let value =
-            emitter.coerce_to_target_type(value, self.expr_type(source, bindings), target_ty);
-        let value = coerce_to_java_primitive(value, spec.coercion);
-        Some(format!("() -> {value}"))
+            emitter.coerce_to_target_type(value, self.expr_type(source, bindings), &target_ty);
+        Some(coerce_to_java_primitive(value, spec.coercion))
     }
 
     fn emit_source_args_for_param_specs(
@@ -10837,13 +10816,21 @@ impl<'a> SourceBodyEmitter<'a> {
             0,
         )?;
         if returns_tail
-            && block.statements.is_empty()
-            && is_java_void_type(&self.function.return_ty)
+            && self.lambda_returns_unit()
+            && !matches!(
+                block.statements.last(),
+                Some(core::Stmt::Return(_) | core::Stmt::Expr(_))
+            )
         {
             out.push_str("            return lume.core.LumeUnit.INSTANCE;\n");
         }
         out.push_str("        }");
         Some(out)
+    }
+
+    fn lambda_returns_unit(&self) -> bool {
+        matches!(self.function.kind, FunctionKind::Lambda)
+            && is_java_void_type(&self.function.return_ty)
     }
 
     fn pattern_binding_expr_type(
@@ -10923,39 +10910,6 @@ impl<'a> SourceBodyEmitter<'a> {
                 return equivalent.contains(right);
             }
         }
-    }
-
-    fn is_lazy_param(&self, name: &str) -> bool {
-        self.function
-            .params
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                self.function
-                    .param_lazy
-                    .get(*index)
-                    .copied()
-                    .unwrap_or(false)
-            })
-            .filter_map(|(_, param)| self.function.locals.get(param.0))
-            .any(|local| local.name == name)
-    }
-
-    fn lazy_param_value_reference(&self, name: &str) -> Option<String> {
-        self.function
-            .params
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                self.function
-                    .param_lazy
-                    .get(*index)
-                    .copied()
-                    .unwrap_or(false)
-            })
-            .filter_map(|(_, param)| self.function.locals.get(param.0))
-            .find(|local| local.name == name)
-            .map(|local| format!("{}.get()", java_local_name(self.function, local)))
     }
 }
 
@@ -11549,7 +11503,6 @@ impl<'a> JavaIrSupport<'a> {
                 name: Some(field.name.clone()),
                 ty: field.ty.clone(),
                 variadic: false,
-                lazy: false,
                 default: field.initializer.clone(),
                 coercion: None,
             })
@@ -11576,7 +11529,6 @@ impl<'a> JavaIrSupport<'a> {
                             name: None,
                             ty,
                             variadic: false,
-                            lazy: false,
                             default: None,
                             coercion: None,
                         }]
@@ -11603,7 +11555,6 @@ impl<'a> JavaIrSupport<'a> {
                     name: param.name.clone(),
                     ty: self.substitute_receiver_type_args(&name, &args, &param.ty),
                     variadic: param.variadic,
-                    lazy: param.lazy,
                     default: param.default.clone(),
                     coercion: param.coercion,
                 })
@@ -11980,14 +11931,10 @@ impl<'a> JavaIrSupport<'a> {
     ) -> bool {
         let Some(variadic_index) = params.iter().position(|param| param.variadic) else {
             return params.len() == operands.len()
-                && operands.iter().zip(params.iter()).all(|(operand, param)| {
-                    let target_ty = if param.lazy {
-                        lazy_param_value_type(&param.ty)
-                    } else {
-                        &param.ty
-                    };
-                    self.operand_matches_target(operand, target_ty)
-                });
+                && operands
+                    .iter()
+                    .zip(params.iter())
+                    .all(|(operand, param)| self.operand_matches_target(operand, &param.ty));
         };
 
         if operands.len() < variadic_index {
@@ -11997,14 +11944,7 @@ impl<'a> JavaIrSupport<'a> {
             .iter()
             .take(variadic_index)
             .zip(params.iter())
-            .all(|(operand, param)| {
-                let target_ty = if param.lazy {
-                    lazy_param_value_type(&param.ty)
-                } else {
-                    &param.ty
-                };
-                self.operand_matches_target(operand, target_ty)
-            })
+            .all(|(operand, param)| self.operand_matches_target(operand, &param.ty))
         {
             return false;
         }
@@ -12445,7 +12385,6 @@ impl JavaNames {
                             .map(type_ref_to_ir)
                             .unwrap_or(ir::Type::Unknown),
                         variadic: param.variadic,
-                        lazy: false,
                         default: None,
                         coercion: param.coercion,
                     })
@@ -13173,22 +13112,22 @@ fn builtin_method_param_specs(
     match receiver {
         ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
             match (method, arg_len) {
-                ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
+                ("orElse", 1) => Some(vec![java_callback_param_spec(receiver.clone())]),
                 ("toResult" | "toEither", 1) => {
-                    Some(vec![java_param_spec(ir::Type::Unknown, true)])
+                    Some(vec![java_callback_param_spec(ir::Type::Unknown)])
                 }
                 _ => None,
             }
         }
         ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
             match (method, arg_len) {
-                ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
+                ("orElse", 1) => Some(vec![java_callback_param_spec(receiver.clone())]),
                 _ => None,
             }
         }
         ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
             match (method, arg_len) {
-                ("orElse", 1) => Some(vec![java_param_spec(receiver.clone(), true)]),
+                ("orElse", 1) => Some(vec![java_callback_param_spec(receiver.clone())]),
                 _ => None,
             }
         }

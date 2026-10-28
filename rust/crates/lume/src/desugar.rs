@@ -192,10 +192,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             };
             core::Expr::Call {
                 callee: Box::new(desugar_expr(callee)),
-                args: args
-                    .iter()
-                    .map(|arg| desugar_call_arg(arg, style))
-                    .collect(),
+                args: args.iter().map(desugar_call_arg).collect(),
                 style,
                 span: *span,
             }
@@ -212,10 +209,7 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
                 core::CallStyle::Paren
             };
             core::Expr::ContextualNew {
-                args: args
-                    .iter()
-                    .map(|arg| desugar_call_arg(arg, style))
-                    .collect(),
+                args: args.iter().map(desugar_call_arg).collect(),
                 style,
                 default_initialize: *default_initialize,
                 span: *span,
@@ -378,53 +372,13 @@ fn desugar_lambda_body(body: &ast::LambdaBody) -> core::Expr {
     }
 }
 
-fn desugar_call_arg(arg: &ast::CallArg, style: core::CallStyle) -> core::CallArg {
-    let value = normalize_brace_lambda_arg(style, desugar_expr(&arg.value));
+fn desugar_call_arg(arg: &ast::CallArg) -> core::CallArg {
     core::CallArg {
         from_shape_spread: arg.from_shape_spread,
         name: arg.name.clone(),
         ty: arg.ty.clone(),
-        value,
+        value: desugar_expr(&arg.value),
         span: arg.span,
-    }
-}
-
-fn normalize_brace_lambda_arg(style: core::CallStyle, value: core::Expr) -> core::Expr {
-    if style != core::CallStyle::Brace {
-        return value;
-    }
-
-    let core::Expr::Block { body, span } = value else {
-        return value;
-    };
-    let core::Block {
-        statements,
-        span: block_span,
-    } = body;
-    let mut statements = statements;
-    if statements.len() != 1 {
-        return core::Expr::Block {
-            body: core::Block {
-                statements,
-                span: block_span,
-            },
-            span,
-        };
-    }
-
-    match statements.remove(0) {
-        core::Stmt::Expr(core::ExprStmt { expr, .. })
-            if matches!(&expr, core::Expr::Lambda { .. }) =>
-        {
-            expr
-        }
-        stmt => core::Expr::Block {
-            body: core::Block {
-                statements: vec![stmt],
-                span: block_span,
-            },
-            span,
-        },
     }
 }
 

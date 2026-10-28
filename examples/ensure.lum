@@ -10,16 +10,16 @@ def makeError(message Str) Str {
 }
 
 def requireLarge(value Int) Result[Unit, Str] {
-    try ensure(value > 10, makeError("too small"))
+    try ensure(value > 10, { => makeError("too small") })
     Ok(())
 }
 
 def requireLargeInt(value Int) Result[Int, Str] {
-    try ensure(value > 10, makeError("too small"))
+    try ensure(value > 10, { => makeError("too small") })
     Ok(value)
 }
 
-def main() Unit {
+def main() {
     first Result[Unit, Str] = requireLarge(20)
     match first {
         case Ok { value: _ } => println("ok")

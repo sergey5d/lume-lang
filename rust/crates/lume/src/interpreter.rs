@@ -3071,15 +3071,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub(crate) fn value_is_zero_arg_closure(&self, value: &Value) -> bool {
-        let Value::Closure(closure) = value else {
-            return false;
-        };
-        self.program
-            .function(closure.function)
-            .is_some_and(|function| function.params.is_empty())
-    }
-
     fn invoke_named_path(
         &mut self,
         frame: Option<&Frame>,
@@ -4059,11 +4050,7 @@ impl<'a> Interpreter<'a> {
                 if condition {
                     Ok(self.result_ok(Value::Unit))
                 } else {
-                    let error = if self.value_is_zero_arg_closure(&args[1]) {
-                        self.invoke_value(args[1].clone(), Vec::new(), span)?
-                    } else {
-                        args[1].clone()
-                    };
+                    let error = self.invoke_value(args[1].clone(), Vec::new(), span)?;
                     Ok(self.result_err(error))
                 }
             }
@@ -9593,7 +9580,7 @@ mod tests {
             def collect(prefix Int, values [Int] vararg) Int =
                 prefix + values.fold(0, (sum, value) => sum + value)
 
-            def keep(first Int, second => Int) Int = first
+            def keep(first Int, second fn() Int) Int = first
 
             def main() Unit {
                 callRecorder = Recorder {}
@@ -9651,12 +9638,12 @@ mod tests {
                 println(variadicResult, variadicRecorder.values[0],
                     variadicRecorder.values[1], variadicRecorder.values[2])
 
-                lazyRecorder = Recorder {}
-                lazyResult = keep(
-                    second = panic("must remain lazy"),
-                    first = lazyRecorder.mark(1)
+                callbackRecorder = Recorder {}
+                callbackResult = keep(
+                    second = { => panic("callback must not run") },
+                    first = callbackRecorder.mark(1)
                 )
-                println(lazyResult, lazyRecorder.values[0])
+                println(callbackResult, callbackRecorder.values[0])
             }
             "#,
         );

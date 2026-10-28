@@ -35,9 +35,9 @@ ext Result[T, E] {
         case Err { error } => Err(error)
     }
 
-    def orElse(fallback => Result[T, E]) Result[T, E] = match this {
+    def orElse(fallback fn() Result[T, E]) Result[T, E] = match this {
         case Ok { value } => Ok(value)
-        case Err { error: _ } => fallback
+        case Err { error: _ } => fallback()
     }
 
     def toOption() Option[T] = match this {

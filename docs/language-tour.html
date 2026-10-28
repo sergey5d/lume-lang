@@ -137,6 +137,13 @@ labels = names.map(name => {
     "$upper!"
 })</code></pre>
 
+        <p>Deferred work uses ordinary zero-argument function parameters. <code>{ =&gt; expression }</code> is a short zero-argument lambda; its body runs only when the function is invoked.</p>
+        <pre><code>def repeat(work fn() Int) Int = work() + work()
+
+fallback fn() Str = { => "unavailable" }
+result = repeat { => calculate() }
+recovered = maybe.orElse { => loadBackup() }</code></pre>
+
         <h2 id="java">Java source generation and interoperability</h2>
         <p>The frontend completes parsing, resolution, and type checking before Java source is generated. Java-specific class loading and descriptors live at the backend boundary, allowing the core compiler model to remain Lume-oriented.</p>
         <pre><code>cargo run --manifest-path rust/Cargo.toml -p lume -- \

@@ -5,7 +5,7 @@ use crate::{
     ir,
 };
 
-use super::{builtin_method, force_lazy_arg};
+use super::{builtin_method, invoke_callback};
 use crate::runtime::{
     RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
 };
@@ -32,7 +32,7 @@ pub(super) fn define() -> RuntimeType {
             ),
             builtin_method(3, "expectLeft", Vec::new(), either_expect_left),
             builtin_method(4, "expectRight", Vec::new(), either_expect_right),
-            builtin_method(6, "orElse", vec![ir::Type::Unknown], either_or_else),
+            builtin_method(6, "orElse", vec![super::callback_type()], either_or_else),
             builtin_method(7, "isSuccess", Vec::new(), either_is_right),
             builtin_method(
                 8,
@@ -224,7 +224,7 @@ fn either_or_else(
     if case_id == RIGHT_CASE {
         Ok(receiver)
     } else {
-        force_lazy_arg(interpreter, args[0].clone(), span)
+        invoke_callback(interpreter, args[0].clone(), span)
     }
 }
 

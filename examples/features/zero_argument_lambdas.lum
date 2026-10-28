@@ -1,0 +1,111 @@
+# EXPECT:
+# zero argument lambdas ok
+
+module examples/zerolambdas
+
+class Counter {
+    var calls Int = 0
+
+    def next() Int {
+        calls += 1
+        calls
+    }
+
+    def tick() {
+        calls += 1
+    }
+}
+
+def invoke(work fn() Int) Int = work()
+
+def twice(work fn() Int) Int = work() + work()
+
+def forward(work fn() Int) fn() Int = work
+
+def factory(counter Counter) fn() Int = { => counter.next() }
+
+def prepareFallback(counter Counter) fn() Int? {
+    counter.tick()
+    { => Some(counter.next()) }
+}
+
+def callbackReturn() Int {
+    value = invoke { => return 40 }
+    value + 2
+}
+
+def main() {
+    counter = Counter()
+    work fn() Int = { => counter.next() }
+    forwarded = forward(work)
+    assert(counter.calls == 0)
+    assert(twice(forwarded) == 3)
+    assert(counter.calls == 2)
+
+    assert(invoke { => 5 } == 5)
+    assert(invoke({ => 6 }) == 6)
+    assert(invoke {
+        => 7
+    } == 7)
+    assert(invoke { () => 8 } == 8)
+    assert(invoke(() => 9) == 9)
+
+    multiple fn() Int = { =>
+        first = counter.next()
+        second = counter.next()
+        first + second
+    }
+    assert(counter.calls == 2)
+    assert(multiple() == 7)
+    assert(counter.calls == 4)
+
+    generated = factory(counter)
+    assert(counter.calls == 4)
+    assert(generated() == 5)
+    assert(invoke(counter.next) == 6)
+
+    callbacks [fn() Int] = [{ => 10 }, { => 11 }]
+    assert(callbacks[0]() == 10)
+    record = { work: { => 12 } }
+    assert(record.work() == 12)
+    nested fn() fn() Int = { => { => 13 } }
+    inner = nested()
+    assert(inner() == 13)
+    assert(callbackReturn() == 42)
+
+    none Int? = None
+    present Int? = Some(1)
+    recovered = present.orElse { => Some(counter.next()) }
+    assert(recovered! == 1)
+    assert(counter.calls == 6)
+    recoveredMissing = none.orElse { => Some(counter.next()) }
+    assert(recoveredMissing! == 7)
+    assert(counter.calls == 7)
+
+    action fn() Unit = { => () }
+    action()
+    effects = Counter()
+    tick fn() Unit = { => effects.tick() }
+    tick()
+    returning fn() Unit = { => return effects.tick() }
+    returning()
+    bareReturn fn() Unit = { => return }
+    bareReturn()
+    conditional fn() Unit = { =>
+        if true { effects.tick() }
+    }
+    conditional()
+    looping fn() Unit = { =>
+        for value <- [1] { effects.tick() }
+    }
+    looping()
+    assert(effects.calls == 4)
+
+    # Producing the function value is eager; its body remains deferred.
+    unchanged = present.orElse(prepareFallback(effects))
+    assert(unchanged! == 1)
+    assert(effects.calls == 5)
+    failure Result[Unit, Str] = ensure(error = { => "failure" }, condition = false)
+    assert(failure.expectErr() == "failure")
+    println("zero argument lambdas ok")
+}

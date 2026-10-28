@@ -1811,31 +1811,47 @@ class Path {
 }
 
 #[test]
-fn parses_by_name_function_and_method_parameters() {
-    let result = parse(
-        r#"
-def debug(message => Str) Unit = ()
-
-class Logger {
-
-    def write(message => Str) Unit = ()
+fn rejects_by_name_parameters_in_every_callable_kind() {
+    for source in [
+        "def debug(message => Str) = ()",
+        "class Logger { def write(message => Str) = () }",
+        "interface Logger { def write(message => Str) }",
+        "class Box { new(value => Int) {} }",
+        "class Box { new { value => Int } {} }",
+        "def main() { def local(value => Int) = () }",
+        "mixin Logger { def write(message => Str) = () }",
+        "def bad(values => [Int] vararg) = ()",
+    ] {
+        let result = parse(source);
+        assert!(
+            result.diagnostics.iter().any(|diag| {
+                diag.code == "by_name_parameters_removed" && diag.message.contains("fn() T")
+            }),
+            "{source}: {:#?}",
+            result.diagnostics
+        );
+    }
 }
 
+#[test]
+fn parses_zero_argument_braced_lambdas_in_expression_positions() {
+    let result = parse(
+        r#"
+def invoke(work fn() Int) Int = work()
+def create() fn() Int = { => 5 }
+def main() {
+    work fn() Int = { => 1 }
+    invoke({ => 2 })
+    invoke { => 3 }
+    invoke {
+        => 4
+    }
+    callbacks [fn() Int] = [{ => 5 }, { () => 6 }]
+    record = { work: { => 7 } }
+}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-    let program = result.program.expect("program");
-    let Item::Function(function) = &program.items[0] else {
-        panic!("expected function");
-    };
-    assert!(function.params[0].lazy);
-    let Item::Type(decl) = &program.items[1] else {
-        panic!("expected class declaration");
-    };
-    let TypeMember::Method(method) = &decl.members[0] else {
-        panic!("expected method");
-    };
-    assert!(method.params[0].lazy);
 }
 
 #[test]
@@ -5636,16 +5652,10 @@ def make() Unit = values.map { value => value + 5 }
             assert!(uses_brace_syntax);
             assert_eq!(args.len(), 1);
             match &args[0].value {
-                Expr::Block { body, .. } => match &body.statements[0] {
-                    Stmt::Expr(ExprStmt {
-                        expr: Expr::Lambda { params, .. },
-                        ..
-                    }) => {
-                        assert_eq!(params.len(), 1);
-                        assert_eq!(params[0].name, "value");
-                    }
-                    other => panic!("expected lambda expression inside block arg, got {other:#?}"),
-                },
+                Expr::Lambda { params, .. } => {
+                    assert_eq!(params.len(), 1);
+                    assert_eq!(params[0].name, "value");
+                }
                 other => panic!("expected trailing block arg, got {other:#?}"),
             }
         }
@@ -5678,24 +5688,15 @@ def make() Unit = values.forEach { value =>
             assert!(uses_brace_syntax);
             assert_eq!(args.len(), 1);
             match &args[0].value {
-                Expr::Block { body, .. } => match &body.statements[0] {
-                    Stmt::Expr(ExprStmt {
-                        expr:
-                            Expr::Lambda {
-                                params,
-                                body: LambdaBody::Block(block),
-                                ..
-                            },
-                        ..
-                    }) => {
-                        assert_eq!(params.len(), 1);
-                        assert_eq!(params[0].name, "value");
-                        assert_eq!(block.statements.len(), 2);
-                    }
-                    other => {
-                        panic!("expected block-bodied lambda inside block arg, got {other:#?}")
-                    }
-                },
+                Expr::Lambda {
+                    params,
+                    body: LambdaBody::Block(block),
+                    ..
+                } => {
+                    assert_eq!(params.len(), 1);
+                    assert_eq!(params[0].name, "value");
+                    assert_eq!(block.statements.len(), 2);
+                }
                 other => panic!("expected trailing block arg, got {other:#?}"),
             }
         }

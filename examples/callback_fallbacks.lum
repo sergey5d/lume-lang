@@ -30,6 +30,7 @@
 # mapLeft fallback
 # mapLeft left mapped
 
+# Callback factories are evaluated only on the missing/failure branch.
 def fallbackInt(label Str, value Int) Int {
     println(label)
     value
@@ -55,7 +56,7 @@ def fallbackEither(label Str, value Int) Either[Str, Int] {
     Right(value)
 }
 
-def main() Unit {
+def main() {
     some Int? = Some(5)
     none Int? = None
     ok Result[Int, Str] = Ok(7)
@@ -78,29 +79,29 @@ def main() Unit {
     eitherLeft Int = left ?? fallbackInt("either fallback", 4)
     println("either left ${eitherLeft}")
 
-    okFromSome Result[Int, Str] = some.toResult(fallbackStr("toResult eager", "missing"))
+    okFromSome Result[Int, Str] = some.toResult({ => fallbackStr("toResult eager", "missing") })
     println("toResult ok ${okFromSome !}")
-    errFromNone Result[Int, Str] = none.toResult(fallbackStr("toResult fallback", "missing"))
+    errFromNone Result[Int, Str] = none.toResult({ => fallbackStr("toResult fallback", "missing") })
     println("toResult err ${errFromNone.expectErr()}")
 
-    rightFromSome Either[Str, Int] = some.toEither(fallbackStr("toEither eager", "missing"))
+    rightFromSome Either[Str, Int] = some.toEither({ => fallbackStr("toEither eager", "missing") })
     println("toEither right ${rightFromSome.expectRight()}")
-    leftFromNone Either[Str, Int] = none.toEither(fallbackStr("toEither fallback", "missing"))
+    leftFromNone Either[Str, Int] = none.toEither({ => fallbackStr("toEither fallback", "missing") })
     println("toEither left ${leftFromNone.expectLeft()}")
 
-    optionOrElseSome Int = some.orElse(fallbackOption("option orElse eager", 9)) !
+    optionOrElseSome Int = some.orElse({ => fallbackOption("option orElse eager", 9) }) !
     println("option orElse some ${optionOrElseSome}")
-    optionOrElseNone Int = none.orElse(fallbackOption("option orElse fallback", 9)) !
+    optionOrElseNone Int = none.orElse({ => fallbackOption("option orElse fallback", 9) }) !
     println("option orElse none ${optionOrElseNone}")
 
-    resultOrElseOk Int = ok.orElse(fallbackResult("result orElse eager", 11)) !
+    resultOrElseOk Int = ok.orElse({ => fallbackResult("result orElse eager", 11) }) !
     println("result orElse ok ${resultOrElseOk}")
-    resultOrElseErr Int = err.orElse(fallbackResult("result orElse fallback", 11)) !
+    resultOrElseErr Int = err.orElse({ => fallbackResult("result orElse fallback", 11) }) !
     println("result orElse err ${resultOrElseErr}")
 
-    eitherOrElseRight Int = right.orElse(fallbackEither("either orElse eager", 4)).expectRight()
+    eitherOrElseRight Int = right.orElse({ => fallbackEither("either orElse eager", 4) }).expectRight()
     println("either orElse right ${eitherOrElseRight}")
-    eitherOrElseLeft Int = left.orElse(fallbackEither("either orElse fallback", 4)).expectRight()
+    eitherOrElseLeft Int = left.orElse({ => fallbackEither("either orElse fallback", 4) }).expectRight()
     println("either orElse left ${eitherOrElseLeft}")
 
     mapErrorOk Result[Int, Str] = ok.mapError(error => fallbackStr("mapError eager", "mapped"))

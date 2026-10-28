@@ -1590,7 +1590,7 @@ impl<'a> Parser<'a> {
             if self.allow_trailing_block_call && self.at(TokenKind::LBrace) {
                 let start = expr.span();
                 let open_span = self.current_span();
-                let arg = if let Some(arg) = self.parse_trailing_lambda_block_arg() {
+                let arg = if let Some(arg) = self.parse_braced_lambda_expr() {
                     arg
                 } else if self.looks_like_brace_record_literal(true)
                     || Self::is_constructor_like_expr(&expr)
@@ -1601,7 +1601,7 @@ impl<'a> Parser<'a> {
                     if !self.validate_trailing_lambda_block(&block) {
                         self.diagnostics.push(Diagnostic::error(
                             "invalid_trailing_lambda",
-                        "trailing lambda syntax requires an explicit parameter arrow; write '{ () => ... }' for zero-argument callbacks",
+                        "trailing lambda syntax requires an explicit parameter arrow; write '{ => ... }' for zero-argument callbacks",
                             open_span,
                         ));
                     }
@@ -1787,11 +1787,16 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_trailing_lambda_block_arg(&mut self) -> Option<Expr> {
+    fn parse_braced_lambda_expr(&mut self) -> Option<Expr> {
         let checkpoint = self.checkpoint();
         let start = self.consume(TokenKind::LBrace, "expected '{'")?;
         self.skip_newlines();
-        let Some((params, lambda_start)) = self.parse_lambda_head() else {
+        let head = if self.match_token(TokenKind::FatArrow) {
+            Some((Vec::new(), self.previous_span()))
+        } else {
+            self.parse_lambda_head()
+        };
+        let Some((params, _)) = head else {
             self.restore(checkpoint);
             return None;
         };
@@ -1813,29 +1818,17 @@ impl<'a> Parser<'a> {
             .map(Stmt::span)
             .unwrap_or(end)
             .cover(statements.last().map(Stmt::span).unwrap_or(end));
-        let lambda_span = lambda_start.cover(body_span);
-        let lambda = Expr::Lambda {
+        Some(Expr::Lambda {
             params,
             body: LambdaBody::Block(Block {
                 statements,
                 span: body_span,
             }),
-            span: lambda_span,
-        };
-        let block_span = start.cover(end);
-        Some(Expr::Block {
-            body: Block {
-                statements: vec![Stmt::Expr(ExprStmt {
-                    expr: lambda,
-                    span: lambda_span,
-                })],
-                span: block_span,
-            },
-            span: block_span,
+            span: start.cover(end),
         })
     }
 
-    pub(super) fn looks_like_trailing_lambda_block_start(&self) -> bool {
+    pub(super) fn looks_like_braced_lambda_start(&self) -> bool {
         if !self.at(TokenKind::LBrace) {
             return false;
         }
@@ -1849,7 +1842,7 @@ impl<'a> Parser<'a> {
         };
         parser.advance();
         parser.skip_newlines();
-        parser.parse_lambda_head().is_some()
+        parser.at(TokenKind::FatArrow) || parser.parse_lambda_head().is_some()
     }
 
     fn parse_lambda_head(&mut self) -> Option<(Vec<LambdaParam>, Span)> {
@@ -2270,7 +2263,10 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_expression_brace_body(&mut self) -> Option<ExpressionBraceBody> {
         debug_assert!(self.at(TokenKind::LBrace));
-        if self.looks_like_brace_record_literal(true) {
+        if self.looks_like_braced_lambda_start() {
+            self.parse_braced_lambda_expr()
+                .map(ExpressionBraceBody::Expression)
+        } else if self.looks_like_brace_record_literal(true) {
             self.parse_brace_record_literal_expr()
                 .map(ExpressionBraceBody::Expression)
         } else {

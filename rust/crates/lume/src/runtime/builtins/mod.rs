@@ -37,15 +37,18 @@ pub(super) fn builtin_method(
     }
 }
 
-pub(super) fn force_lazy_arg(
+pub(super) fn invoke_callback(
     interpreter: &mut Interpreter<'_>,
     value: Value,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    if interpreter.value_is_zero_arg_closure(&value) {
-        interpreter.invoke_value(value, Vec::new(), span)
-    } else {
-        Ok(value)
+    interpreter.invoke_value(value, Vec::new(), span)
+}
+
+pub(super) fn callback_type() -> ir::Type {
+    ir::Type::Function {
+        params: Vec::new(),
+        ret: Box::new(ir::Type::Unknown),
     }
 }
 

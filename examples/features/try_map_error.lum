@@ -16,7 +16,7 @@ def queryEither(ok Bool) Either[Str, Int] =
     if ok { Right(7) } else { Left("nope") }
 
 def loadUser(found Bool) Result[Str, Str] {
-    user = try findUser(found).toResult("missing user")
+    user = try findUser(found).toResult { => "missing user" }
     Ok(user)
 }
 
@@ -32,7 +32,7 @@ def loadEither(ok Bool) Either[Str, Int] {
     Right(value)
 }
 
-def main() Unit {
+def main() {
     println("option result " + (loadUser(true) !))
     println("option mapped " + loadUser(false).expectErr())
     println("result ok " + (loadRow(true) !))

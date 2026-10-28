@@ -21,10 +21,9 @@ pub(crate) fn method_key(method: &MethodDecl) -> String {
             .params
             .iter()
             .map(|param| format!(
-                "{}:{}:{}",
+                "{}:{}",
                 type_key(param.ty.as_ref(), &generics),
-                param.variadic,
-                param.lazy
+                param.variadic
             ))
             .collect::<Vec<_>>()
             .join(",")

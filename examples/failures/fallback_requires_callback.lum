@@ -1,0 +1,14 @@
+# FAIL_REGEX:
+# .*argument has type '.*' but parameter expects 'fn\(\).*
+
+def main() {
+    value Int? = None
+    value.orElse(Some(1))
+    value.toResult("missing")
+    value.toEither("missing")
+    result Result[Int, Str] = Err("error")
+    result.orElse(Ok(1))
+    either Either[Str, Int] = Left("error")
+    either.orElse(Right(1))
+    ensure(false, "error")
+}

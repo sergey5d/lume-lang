@@ -486,7 +486,12 @@ fn collect_callable_body_rewrites(
 ) {
     match body {
         CallableBody::Block(block) => {
-            if let Some(equals) = token_immediately_before(tokens, block.span.start)
+            // Assignment-style bodies also use Block internally, without source braces.
+            let first = tokens.partition_point(|token| token.span.start < block.span.start);
+            if tokens
+                .get(first)
+                .is_some_and(|token| token.kind == TokenKind::LBrace)
+                && let Some(equals) = token_immediately_before(tokens, block.span.start)
                 && equals.kind == TokenKind::Eq
                 && equals.span.start >= callable_span.start
             {
@@ -1710,6 +1715,19 @@ def main() {
     }
 
     #[test]
+    fn formats_zero_argument_braced_lambdas() {
+        let result = format(
+            "def invoke(work fn() Int) Int = work()\ndef main() {\nwork fn() Int={=>\nfirst=1\nfirst + 2\n}\ninvoke {=>\nwork()\n}\ninvoke({=>4})\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "def invoke(work fn() Int) Int = work()\ndef main() {\n    work fn() Int = { =>\n        first = 1\n        first + 2\n    }\n    invoke { =>\n        work()\n    }\n    invoke({ => 4 })\n}\n"
+        );
+        assert_eq!(format(&result.text).text, result.text);
+    }
+
+    #[test]
     fn formats_nested_trailing_lambdas_inside_calls() {
         let result = format(
             "class Aggregator {\nprivate def get_rollup(key Str, range IntRange?) Rollup? = {\ndef notInRange(record Record) = {\nlet r <- range else return false\nrecord.timestamp < r.start || record.timestamp >= r.end\n}\nmaybeRollup = rollupMap[key].map { records =>\nrecords.fold(Rollup(0, 0), (acc, record) => {\nif record.void || notInRange(record) {\nreturn acc\n}\nRollup {\ntotal: record.amount + acc.total\ncount: acc.count + 1\n}\n})\n}\nif let rollup <- maybeRollup && rollup.count == 0 {\nreturn None\n}\nreturn maybeRollup\n}\n}\n",
@@ -1844,6 +1862,20 @@ def main() {
             result.text,
             "class Aggregator {\n    private rollupMap [Str: [Record]] = []\n    private recordMap [Str: Record] = []\n    get coordinates (Int, Int) = (1, 2)\n    def label() Str {\n        message = \"keep  spaces\" # keep  comment spacing\n        println(\"kind\", message)\n        message\n    }\n}\n"
         );
+    }
+
+    #[test]
+    fn preserves_equals_before_assignment_style_callable_body() {
+        let result = format(
+            "class Counter {\nprivate var value Int = 0\ndef reset() Unit =\nthis.value := 0\n}\n",
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(
+            result.text,
+            "class Counter {\n    private var value Int = 0\n    def reset() =\n        this.value := 0\n}\n"
+        );
+        assert_eq!(format(&result.text).text, result.text);
+        assert!(format(&result.text).diagnostics.is_empty());
     }
 
     #[test]

@@ -893,7 +893,6 @@ fn java_library_method(
                 ty: param.ty.clone(),
                 initializer: None,
                 variadic: param.variadic,
-                lazy: false,
                 span,
             })
             .collect(),
@@ -2892,7 +2891,7 @@ public class FeatureRepo {
     }
 
     #[test]
-    fn preserves_lazy_option_to_result_in_generated_java() {
+    fn preserves_conditional_option_to_result_callback_in_generated_java() {
         if !command_available("javac") || !command_available("java") {
             eprintln!(
                 "skipping lazy Option.toResult Java test because a JDK tool is not available"
@@ -2917,8 +2916,8 @@ def fail() Str {
 
 def main() Unit {
     maybe Option[Int] = Some(5)
-    result Result[Int, Str] = maybe.toResult(fail())
-    parsed Result[Int, Str] = Int.parse("7").toResult(fail())
+    result Result[Int, Str] = maybe.toResult { => fail() }
+    parsed Result[Int, Str] = Int.parse("7").toResult { => fail() }
 
     match result {
         case Ok { value } => println("ok")
@@ -2940,7 +2939,10 @@ def main() Unit {
         let module = fs::read_to_string(out.join("demo/lazyoption/LazyoptionModule.java"))
             .expect("read module");
         assert!(module.contains(".toResult("));
-        assert!(module.contains("() -> fail()"));
+        assert!(
+            module.contains("() ->") && module.contains(".fail();"),
+            "{module}"
+        );
 
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated java");
@@ -4046,6 +4048,68 @@ def main() Unit {
     }
 
     #[test]
+    fn runs_explicit_callbacks_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for (file, main_class) in [
+            (
+                "features/zero_argument_lambdas.lum",
+                "examples.zerolambdas.ZerolambdasMain",
+            ),
+            ("callback_parameters.lum", "Callback_parametersMain"),
+            ("callback_fallbacks.lum", "Callback_fallbacksMain"),
+            ("ensure.lum", "EnsureMain"),
+        ] {
+            let source = root.join("examples").join(file);
+            let interpreted = run_path(&source, None).expect("run explicit callbacks");
+            assert!(
+                interpreted.diagnostics.is_empty(),
+                "{file}: {:?}",
+                interpreted.diagnostics
+            );
+            let source_text = fs::read_to_string(&source).unwrap();
+            let expected = source_text
+                .lines()
+                .skip(1)
+                .take_while(|line| line.starts_with("# "))
+                .map(|line| format!("{}\n", &line[2..]))
+                .collect::<String>();
+            assert_eq!(interpreted.output, expected, "{file}");
+            if !command_available("javac") || !command_available("java") {
+                continue;
+            }
+            let temp = temp_path("lume-java-explicit-callbacks");
+            let out = temp.join("out");
+            let classes = temp.join("classes");
+            let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+            assert!(
+                generated.diagnostics.is_empty(),
+                "{file}: {:?}",
+                generated.diagnostics
+            );
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).unwrap();
+            fs::create_dir_all(&classes).unwrap();
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac explicit callbacks",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg(main_class),
+                "java explicit callbacks",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                expected,
+                "{file}"
+            );
+            let _ = fs::remove_dir_all(temp);
+        }
+    }
+
+    #[test]
     fn runs_shape_argument_spreads_on_java_and_interpreter() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let source = root.join("examples/features/shape_argument_spreads.lum");
@@ -4883,30 +4947,30 @@ def main() Int = positive(true, Some(2)) + sum([1, 2, 5])
     }
 
     #[test]
-    fn readable_java_preserves_by_name_arguments_and_forwarding() {
-        let temp = temp_path("lume-java-readable-by-name");
-        let source = temp.join("by_name.lum");
+    fn readable_java_preserves_explicit_callbacks_and_forwarding() {
+        let temp = temp_path("lume-java-readable-callbacks");
+        let source = temp.join("callbacks.lum");
         let out = temp.join("generated");
         let classes = temp.join("classes");
         fs::create_dir_all(&temp).expect("create temp dir");
         fs::write(
             &source,
             r#"
-module demo/by_name
+module demo/callbacks
 
 def fallback() Int {
     println("fallback")
     9
 }
 
-def choose(useFallback Bool, value => Int) Int =
-    if useFallback { value } else { 5 }
+def choose(useFallback Bool, value fn() Int) Int =
+    if useFallback { value() } else { 5 }
 
-def forward(useFallback Bool, value => Int) Int =
+def forward(useFallback Bool, value fn() Int) Int =
     choose(useFallback, value)
 
 def direct(useFallback Bool) Int =
-    forward(useFallback, fallback())
+    forward(useFallback, { => fallback() })
 
 def optionValue() Int {
     present Int? = Some(3)
@@ -4926,12 +4990,17 @@ def main() Unit {
             .expect("generate readable Java");
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
 
-        let module = fs::read_to_string(out.join("demo/by_name/By_nameModule.java"))
+        let module = fs::read_to_string(out.join("demo/callbacks/CallbacksModule.java"))
             .expect("read module Java");
-        assert!(module.contains("choose(useFallback, value)"), "{module}");
-        assert!(module.contains("() -> fallback()"), "{module}");
+        assert!(
+            module.contains("choose(useFallback,") && module.contains("(value)"),
+            "{module}"
+        );
+        assert!(
+            module.contains("() ->") && module.contains(".fallback();"),
+            "{module}"
+        );
         assert!(module.contains("instanceof Option.Some"), "{module}");
-        assert!(!module.contains("__block"), "{module}");
 
         if command_available("javac") && command_available("java") {
             let mut sources = core_runtime_sources();
@@ -4945,7 +5014,7 @@ def main() Unit {
                 Command::new("java")
                     .arg("-cp")
                     .arg(&classes)
-                    .arg("demo.by_name.By_nameMain"),
+                    .arg("demo.callbacks.CallbacksMain"),
                 "java",
             );
             assert_eq!(
@@ -9179,7 +9248,7 @@ def combine(first Int, second Int) Int = first * 10 + second
 def collect(prefix Int, values [Int] vararg) Int =
     prefix + values.fold(0, (sum, value) => sum + value)
 
-def keep(first Int, second => Int) Int = first
+def keep(first Int, second fn() Int) Int = first
 
 def main() Int {
     callRecorder = Recorder {}
@@ -9237,12 +9306,12 @@ def main() Int {
     println(variadicResult, variadicRecorder.values[0],
         variadicRecorder.values[1], variadicRecorder.values[2])
 
-    lazyRecorder = Recorder {}
-    lazyResult = keep(
-        second = panic("must remain lazy"),
-        first = lazyRecorder.mark(1)
+    callbackRecorder = Recorder {}
+    callbackResult = keep(
+        second = { => panic("callback must not run") },
+        first = callbackRecorder.mark(1)
     )
-    println(lazyResult, lazyRecorder.values[0])
+    println(callbackResult, callbackRecorder.values[0])
     0
 }
 "#,

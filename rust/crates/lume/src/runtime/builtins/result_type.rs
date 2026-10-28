@@ -5,7 +5,7 @@ use crate::{
     ir,
 };
 
-use super::{builtin_method, force_lazy_arg};
+use super::{builtin_method, invoke_callback};
 use crate::runtime::{
     RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
 };
@@ -31,7 +31,7 @@ pub(super) fn define() -> RuntimeType {
                 result_map,
             ),
             builtin_method(3, "expectErr", Vec::new(), result_expect_err),
-            builtin_method(5, "orElse", vec![ir::Type::Unknown], result_or_else),
+            builtin_method(5, "orElse", vec![super::callback_type()], result_or_else),
             builtin_method(6, "isSuccess", Vec::new(), result_is_ok),
             builtin_method(
                 7,
@@ -208,7 +208,7 @@ fn result_or_else(
     if case_id == OK_CASE {
         Ok(receiver)
     } else {
-        force_lazy_arg(interpreter, args[0].clone(), span)
+        invoke_callback(interpreter, args[0].clone(), span)
     }
 }
 

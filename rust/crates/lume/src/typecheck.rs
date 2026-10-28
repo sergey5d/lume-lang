@@ -149,7 +149,6 @@ pub(crate) fn runtime_callable_parameters(
                 .map(|param| crate::ir::SourceCallParamSpec {
                     name: Some(param.name),
                     ty: runtime_signature_type(&param.ty),
-                    lazy: param.lazy,
                     variadic: param.variadic,
                     default: None,
                 })
@@ -443,7 +442,6 @@ struct ParamSig {
     name: String,
     ty: Ty,
     variadic: bool,
-    lazy: bool,
     has_initializer: bool,
 }
 
@@ -489,7 +487,7 @@ fn mixin_signature_key(name: &str, sig: &FunctionSig) -> String {
         sig.type_params.len(),
         sig.params
             .iter()
-            .map(|param| format!("{}:{}:{}", param.ty.describe(), param.variadic, param.lazy))
+            .map(|param| format!("{}:{}", param.ty.describe(), param.variadic))
             .collect::<Vec<_>>()
             .join(",")
     )
@@ -563,7 +561,6 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
                 name: "other".to_string(),
                 ty: Ty::any(),
                 variadic: false,
-                lazy: false,
                 has_initializer: false,
             }],
             ret: Ty::bool(),
@@ -2249,9 +2246,6 @@ impl<'a> Checker<'a> {
             }
             let ty = self.param_local_type(param, elem_ty);
             self.define_local(&param.name, ty, false);
-            if param.lazy {
-                self.mark_current_local_unstable(&param.name);
-            }
         }
         let actual = self.check_callable_body(&function.body);
         self.require_assignable(
@@ -3208,9 +3202,6 @@ impl<'a> Checker<'a> {
             }
             let ty = self.param_local_type(param, elem_ty);
             self.define_local(&param.name, ty, false);
-            if param.lazy {
-                self.mark_current_local_unstable(&param.name);
-            }
         }
         if let Some(body) = &method.body {
             let actual = self.check_callable_body(body);
@@ -3396,20 +3387,6 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-            }
-            if param.lazy && is_constructor {
-                self.add_error(
-                    "invalid_by_name_param",
-                    "constructor parameters cannot be by-name; use 'name => Type' only on function and method parameters",
-                    param.span,
-                );
-            }
-            if param.lazy && param.variadic {
-                self.add_error(
-                    "invalid_by_name_param",
-                    "by-name parameters cannot be vararg",
-                    param.span,
-                );
             }
             if param.variadic && seen_variadic {
                 self.add_error(
@@ -6789,7 +6766,6 @@ impl<'a> Checker<'a> {
                         name: String::new(),
                         ty,
                         variadic: false,
-                        lazy: false,
                         has_initializer: false,
                     })
                     .collect::<Vec<_>>();
@@ -8421,15 +8397,6 @@ impl<'a> Checker<'a> {
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             for arg in slot {
-                if param.lazy && !arg.from_shape_spread {
-                    if let Some(reason_span) = lazy_arg_forbidden_control_flow_span(&arg.value) {
-                        self.add_error(
-                            "invalid_by_name_argument",
-                            "by-name argument expressions cannot contain return, break, continue, or try; make the control flow explicit before the call",
-                            reason_span,
-                        );
-                    }
-                }
                 if matches!(arg.value, Expr::Spread { .. })
                     && (!param.variadic || arg.name.is_some())
                 {
@@ -11997,7 +11964,6 @@ impl<'a> Checker<'a> {
                                 name: param.name,
                                 ty: substitute_type(&param.ty, &subst),
                                 variadic: param.variadic,
-                                lazy: param.lazy,
                                 has_initializer: param.has_initializer,
                             })
                             .collect(),
@@ -12138,7 +12104,6 @@ impl<'a> Checker<'a> {
                         name: param.name,
                         ty: substitute_type(&param.ty, &subst),
                         variadic: param.variadic,
-                        lazy: param.lazy,
                         has_initializer: param.has_initializer,
                     })
                     .collect(),
@@ -13874,12 +13839,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn mark_current_local_unstable(&mut self, name: &str) {
-        if let Some(value) = self.scopes.last_mut().and_then(|scope| scope.get_mut(name)) {
-            value.stable = false;
-        }
-    }
-
     fn push_type_params_with_conditions<'b>(
         &mut self,
         params: impl Iterator<Item = &'b str>,
@@ -14805,7 +14764,6 @@ fn overload_inputs_are_equivalent(left: &FunctionSig, right: &FunctionSig) -> bo
         && left.params.iter().zip(&right.params).all(|(left, right)| {
             left.ty == right.ty
                 && left.variadic == right.variadic
-                && left.lazy == right.lazy
                 && left.has_initializer == right.has_initializer
         })
 }
@@ -15283,222 +15241,6 @@ fn loop_control_targeting_current_loop_in_if_stmt(stmt: &IfStmt) -> Option<LoopC
         })
 }
 
-fn lazy_arg_forbidden_control_flow_span(expr: &Expr) -> Option<crate::source::Span> {
-    match expr {
-        Expr::Try { span, .. } => Some(*span),
-        Expr::Return { span, .. } | Expr::Break { span } | Expr::Continue { span } => Some(*span),
-        Expr::Spread { value, .. } => lazy_arg_forbidden_control_flow_span(value),
-        Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
-            items.iter().find_map(lazy_arg_forbidden_control_flow_span)
-        }
-        Expr::Call { callee, args, .. } => {
-            lazy_arg_forbidden_control_flow_span(callee).or_else(|| {
-                args.iter()
-                    .find_map(|arg| lazy_arg_forbidden_control_flow_span(&arg.value))
-            })
-        }
-        Expr::ContextualNew { args, .. } => args
-            .iter()
-            .find_map(|arg| lazy_arg_forbidden_control_flow_span(&arg.value)),
-        Expr::Member { receiver, .. } => lazy_arg_forbidden_control_flow_span(receiver),
-        Expr::Index {
-            receiver, index, ..
-        } => lazy_arg_forbidden_control_flow_span(receiver)
-            .or_else(|| lazy_arg_forbidden_control_flow_span(index)),
-        Expr::RecordLiteral { fields, values, .. } => fields
-            .iter()
-            .find_map(|field| lazy_arg_forbidden_control_flow_span(&field.value))
-            .or_else(|| values.iter().find_map(lazy_arg_forbidden_control_flow_span)),
-        Expr::Unary { expr, .. } => lazy_arg_forbidden_control_flow_span(expr),
-        Expr::ExtractOr {
-            value, fallback, ..
-        } => lazy_arg_forbidden_control_flow_span(value)
-            .or_else(|| lazy_arg_forbidden_control_flow_span(fallback)),
-        Expr::Binary { left, right, .. } => lazy_arg_forbidden_control_flow_span(left)
-            .or_else(|| lazy_arg_forbidden_control_flow_span(right)),
-        Expr::Is { left, .. } => lazy_arg_forbidden_control_flow_span(left),
-        Expr::If {
-            condition_clauses,
-            then_block,
-            else_branch,
-            ..
-        } => condition_clauses
-            .iter()
-            .find_map(|clause| lazy_arg_forbidden_control_flow_span(condition_clause_expr(clause)))
-            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(then_block))
-            .or_else(|| match else_branch.as_ref() {
-                ElseExprBranch::If(expr) => lazy_arg_forbidden_control_flow_span(expr),
-                ElseExprBranch::Block(block) => {
-                    lazy_arg_forbidden_control_flow_span_in_block(block)
-                }
-            }),
-        Expr::Block { body, .. } => lazy_arg_forbidden_control_flow_span_in_block(body),
-        Expr::Match { value, cases, .. } => {
-            lazy_arg_forbidden_control_flow_span(value).or_else(|| {
-                cases.iter().find_map(|case| {
-                    case.guard
-                        .as_ref()
-                        .and_then(lazy_arg_forbidden_control_flow_span)
-                        .or_else(|| match &case.body {
-                            MatchCaseBody::Block(block) => {
-                                lazy_arg_forbidden_control_flow_span_in_block(block)
-                            }
-                            MatchCaseBody::Expr(expr) => lazy_arg_forbidden_control_flow_span(expr),
-                        })
-                })
-            })
-        }
-        Expr::ForYield {
-            bindings,
-            yield_body,
-            ..
-        } => bindings
-            .iter()
-            .find_map(|binding| {
-                binding
-                    .iterable
-                    .as_ref()
-                    .and_then(lazy_arg_forbidden_control_flow_span)
-                    .or_else(|| {
-                        binding
-                            .values
-                            .iter()
-                            .find_map(lazy_arg_forbidden_control_flow_span)
-                    })
-            })
-            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(yield_body)),
-        // Nested callables have their own control-flow boundary.
-        Expr::Lambda { .. } | Expr::AnonymousObject { .. } => None,
-        Expr::Group { inner, .. } => lazy_arg_forbidden_control_flow_span(inner),
-        Expr::Identifier { .. }
-        | Expr::Placeholder { .. }
-        | Expr::Integer { .. }
-        | Expr::Float { .. }
-        | Expr::Decimal { .. }
-        | Expr::String { .. }
-        | Expr::Bool { .. }
-        | Expr::Unit { .. }
-        | Expr::TypeOf { .. } => None,
-    }
-}
-
-fn lazy_arg_forbidden_control_flow_span_in_block(block: &Block) -> Option<crate::source::Span> {
-    block
-        .statements
-        .iter()
-        .find_map(lazy_arg_forbidden_control_flow_span_in_stmt)
-}
-
-fn lazy_arg_forbidden_control_flow_span_in_stmt(stmt: &Stmt) -> Option<crate::source::Span> {
-    match stmt {
-        Stmt::Return(stmt) => Some(stmt.span),
-        Stmt::Break(stmt) => Some(stmt.span),
-        Stmt::Continue(stmt) => Some(stmt.span),
-        Stmt::Binding(stmt) => stmt
-            .values
-            .iter()
-            .find_map(lazy_arg_forbidden_control_flow_span),
-        Stmt::PatternBinding(stmt) => stmt
-            .clauses
-            .iter()
-            .find_map(|clause| lazy_arg_forbidden_control_flow_span(&clause.value))
-            .or_else(|| lazy_arg_forbidden_control_flow_span(&stmt.value)),
-        Stmt::Assignment(stmt) => stmt
-            .targets
-            .iter()
-            .chain(stmt.values.iter())
-            .find_map(lazy_arg_forbidden_control_flow_span),
-        Stmt::Defer(stmt) => match &stmt.action {
-            crate::ast::DeferAction::Call(expr) => lazy_arg_forbidden_control_flow_span(expr),
-            crate::ast::DeferAction::Block(block) => {
-                lazy_arg_forbidden_control_flow_span_in_block(block)
-            }
-        },
-        Stmt::If(stmt) => lazy_arg_forbidden_control_flow_span_in_if_stmt(stmt),
-        Stmt::Match(stmt) => lazy_arg_forbidden_control_flow_span(&stmt.value).or_else(|| {
-            stmt.cases.iter().find_map(|case| {
-                case.guard
-                    .as_ref()
-                    .and_then(lazy_arg_forbidden_control_flow_span)
-                    .or_else(|| match &case.body {
-                        MatchCaseBody::Block(block) => {
-                            lazy_arg_forbidden_control_flow_span_in_block(block)
-                        }
-                        MatchCaseBody::Expr(expr) => lazy_arg_forbidden_control_flow_span(expr),
-                    })
-            })
-        }),
-        Stmt::While(stmt) => stmt
-            .condition_clauses
-            .iter()
-            .find_map(|condition| {
-                lazy_arg_forbidden_control_flow_span(condition_clause_expr(condition))
-            })
-            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.body)),
-        Stmt::For(stmt) => stmt
-            .bindings
-            .iter()
-            .find_map(|binding| {
-                binding
-                    .iterable
-                    .as_ref()
-                    .and_then(lazy_arg_forbidden_control_flow_span)
-                    .or_else(|| {
-                        binding
-                            .values
-                            .iter()
-                            .find_map(lazy_arg_forbidden_control_flow_span)
-                    })
-            })
-            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.body)),
-        Stmt::LetElse(stmt) => stmt
-            .clauses
-            .iter()
-            .find_map(|clause| lazy_arg_forbidden_control_flow_span(&clause.value))
-            .or_else(|| lazy_arg_forbidden_control_flow_span(&stmt.value))
-            .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.else_block)),
-        Stmt::Expr(stmt) => lazy_arg_forbidden_control_flow_span(&stmt.expr),
-        Stmt::LocalFunction(_) => None,
-    }
-}
-
-fn lazy_arg_forbidden_control_flow_span_in_if_stmt(stmt: &IfStmt) -> Option<crate::source::Span> {
-    stmt.condition
-        .as_ref()
-        .and_then(lazy_arg_forbidden_control_flow_span)
-        .or_else(|| {
-            stmt.condition_clauses
-                .iter()
-                .find_map(|clause| match clause {
-                    IfConditionClause::Let(clause) => {
-                        lazy_arg_forbidden_control_flow_span(&clause.value)
-                    }
-                    IfConditionClause::Expr(expr) => lazy_arg_forbidden_control_flow_span(expr),
-                })
-        })
-        .or_else(|| {
-            stmt.pattern_value
-                .as_ref()
-                .and_then(lazy_arg_forbidden_control_flow_span)
-        })
-        .or_else(|| {
-            stmt.pattern_clauses
-                .iter()
-                .find_map(|clause| lazy_arg_forbidden_control_flow_span(&clause.value))
-        })
-        .or_else(|| {
-            stmt.binding_value
-                .as_ref()
-                .and_then(lazy_arg_forbidden_control_flow_span)
-        })
-        .or_else(|| lazy_arg_forbidden_control_flow_span_in_block(&stmt.then_block))
-        .or_else(|| match &stmt.else_branch {
-            Some(ElseBranch::If(stmt)) => lazy_arg_forbidden_control_flow_span_in_if_stmt(stmt),
-            Some(ElseBranch::Block(block)) => lazy_arg_forbidden_control_flow_span_in_block(block),
-            None => None,
-        })
-}
-
 fn is_constructor_delegation_expr(expr: &Expr) -> bool {
     match expr {
         Expr::Call { callee, .. } => {
@@ -15625,7 +15367,6 @@ fn function_sig_from_function(
                     .map(|ty| convert_type_ref(ty, &type_params))
                     .unwrap_or(Ty::Unknown),
                 variadic: param.variadic,
-                lazy: param.lazy,
                 has_initializer: param.initializer.is_some(),
             })
             .collect(),
@@ -15702,7 +15443,6 @@ fn function_sig_from_method(method: &MethodDecl, owner_type_params: &[String]) -
                     .map(|ty| convert_type_ref(ty, &type_params))
                     .unwrap_or(Ty::Unknown),
                 variadic: param.variadic,
-                lazy: param.lazy,
                 has_initializer: param.initializer.is_some(),
             })
             .collect(),
@@ -16471,7 +16211,6 @@ fn instantiate_function_sig(method: FunctionSig, subst: &HashMap<String, Ty>) ->
                 name: param.name,
                 ty: substitute_type(&param.ty, subst),
                 variadic: param.variadic,
-                lazy: param.lazy,
                 has_initializer: param.has_initializer,
             })
             .collect(),
@@ -22039,16 +21778,16 @@ def main() Unit {
     }
 
     #[test]
-    fn accepts_by_name_function_parameters_and_forwarding() {
+    fn accepts_explicit_callback_parameters_and_forwarding() {
         let program = parse_inline(
             r#"
-def inner(value => Int) Int = value
+def inner(value fn() Int) Int = value()
 
-def outer(value => Int) Int =
+def outer(value fn() Int) Int =
     inner(value)
 
 def main() Unit {
-    result Int = outer(5)
+    result Int = outer { => 5 }
 }
 "#,
         );
@@ -22057,19 +21796,14 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_by_name_constructor_and_vararg_parameters() {
+    fn rejects_implicit_wrapping_of_callback_arguments() {
         let program = parse_inline(
             r#"
-class Box {
-    value Int
+def consume(value fn() Int) Int = value()
 
-    new(value => Int) {
-        this.value = value
-    }
+def main() {
+    consume(5)
 }
-
-
-def bad(values => [Int] vararg) Unit = ()
 "#,
         );
         let result = check_program(&program);
@@ -22077,48 +21811,43 @@ def bad(values => [Int] vararg) Unit = ()
             result
                 .diagnostics
                 .iter()
-                .any(|diag| diag.code == "invalid_by_name_param"
-                    && diag
-                        .message
-                        .contains("constructor parameters cannot be by-name")),
-            "{:#?}",
-            result.diagnostics
-        );
-        assert!(
-            result
-                .diagnostics
-                .iter()
-                .any(|diag| diag.code == "invalid_by_name_param"
-                    && diag.message.contains("by-name parameters cannot be vararg")),
+                .any(|diag| diag.code == "invalid_argument_type"),
             "{:#?}",
             result.diagnostics
         );
     }
 
     #[test]
-    fn rejects_try_inside_by_name_argument_expression() {
+    fn rejects_bare_values_in_all_callback_fallback_apis() {
+        let result =
+            check_path(workspace_root().join("examples/failures/fallback_requires_callback.lum"))
+                .unwrap();
+        let invalid_arguments = result
+            .diagnostics
+            .iter()
+            .filter(|diag| diag.diagnostic.code == "invalid_argument_type")
+            .count();
+        assert_eq!(invalid_arguments, 6, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn permits_try_within_callback_return_boundary() {
         let program = parse_inline(
             r#"
-def delayed(value => Int) Int = value
+def delayed(value fn() Int?) Int? = value()
 
 def load() Option[Int] = Some(1)
 
 def main() Unit {
-    result Int = delayed(try load())
+    result Int? = delayed { =>
+        value = try load()
+        Some(value)
+    }
 }
 "#,
         );
         let result = check_program(&program);
-        assert!(
-            result.diagnostics.iter().any(|diag| {
-                diag.code == "invalid_by_name_argument"
-                    && diag
-                        .message
-                        .contains("by-name argument expressions cannot contain return")
-            }),
-            "{:#?}",
-            result.diagnostics
-        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     }
 
     #[test]
