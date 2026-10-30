@@ -9,7 +9,7 @@ type JobState =
     object Ready {}
     | object Running {}
 
-def main() Unit {
+fn main() Unit {
     state ConnectionState = ConnectionState.Ready
     match state {
         case Ready => println("ready")

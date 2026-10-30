@@ -5,7 +5,7 @@ type MaybeInt =
     object NoneX {}
     | class SomeX { value Int }
 
-def main() Unit {
+fn main() Unit {
     value MaybeInt = MaybeInt.NoneX
     let SomeX { value as item } = value else ()
     println(item)

@@ -65,7 +65,7 @@
     active Bool
 }
 
-def loadUser(id Int) Result[UserView, DbError] = {
+fn loadUser(id Int) Result[UserView, DbError] = {
     row = try Db.queryRow(
         "select name, active from users where id = ?",
         id

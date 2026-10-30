@@ -1,0 +1,5 @@
+module storage
+
+fn prefix() Str = "audit:"
+
+public fn load(id Int) Str = prefix() + id.toStr()

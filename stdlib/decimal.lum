@@ -4,18 +4,18 @@
 
 public interface Decimal with Hashed[Decimal], Comparable[Decimal] {
     get scale Int
-    def compareTo(other Decimal) Int
-    def equals(other Decimal) Bool
-    def hash() Int
-    def abs() Decimal
-    def divide(other Decimal, scale Int, rounding Rounding) Decimal
-    def round(scale Int, rounding Rounding) Decimal
-    def toInt() Int?
-    def toFloat() Float
+    fn compareTo(other Decimal) Int
+    fn equals(other Decimal) Bool
+    fn hash() Int
+    fn abs() Decimal
+    fn divide(other Decimal, scale Int, rounding Rounding) Decimal
+    fn round(scale Int, rounding Rounding) Decimal
+    fn toInt() Int?
+    fn toFloat() Float
 }
 
 public object Decimal {
-    def parse(value Str) Decimal? =
+    fn parse(value Str) Decimal? =
         panic("Decimal.parse is provided by the active runtime")
 }
 

@@ -12,6 +12,6 @@ class Bad {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ Bad = Bad(1, 2, 3)
 }

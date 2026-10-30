@@ -12,7 +12,7 @@ class ListNode {
     var next ListNode? = None
 }
 
-def deleteDuplicates2(head ListNode?) ListNode? {
+fn deleteDuplicates2(head ListNode?) ListNode? {
 
     dummy = ListNode(0)
 
@@ -45,7 +45,7 @@ def deleteDuplicates2(head ListNode?) ListNode? {
     dummy.next
 }
 
-def linked(values [Int]) ListNode? {
+fn linked(values [Int]) ListNode? {
     dummy = ListNode(0)
     var tail = dummy
 
@@ -58,7 +58,7 @@ def linked(values [Int]) ListNode? {
     dummy.next
 }
 
-def render(head ListNode?) Str {
+fn render(head ListNode?) Str {
     var text = ""
     var first = true
     var next = head
@@ -75,7 +75,7 @@ def render(head ListNode?) Str {
     if text == "" { "empty" } else { text }
 }
 
-def main() Unit {
+fn main() Unit {
     println(render(deleteDuplicates2(linked([1, 2, 3, 3, 4, 4, 5]))))
     println(render(deleteDuplicates2(linked([1, 1, 1, 2, 3]))))
     println(render(deleteDuplicates2(linked([1, 1]))))

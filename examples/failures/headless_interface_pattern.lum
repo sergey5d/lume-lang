@@ -2,10 +2,10 @@
 # .*headless record pattern requires a concrete class, shape, anonymous shape, or declared-union value; got 'Named'.*
 
 interface Named {
-    def name() Str
+    fn name() Str
 }
 
-def read(value Named) Str = match value {
+fn read(value Named) Str = match value {
     case { name } => name
     case _ => "unknown"
 }

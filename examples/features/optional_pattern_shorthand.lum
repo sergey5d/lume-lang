@@ -6,7 +6,7 @@
 # match 5 5
 # nested 7
 
-def main() Unit {
+fn main() Unit {
     left Int? = ^5
 
     let {

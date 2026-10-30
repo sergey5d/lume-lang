@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # .*invalid_comparison_operands.*
 
-def main() { println(1d < 2) }
+fn main() { println(1d < 2) }

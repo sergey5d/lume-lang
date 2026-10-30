@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*shape argument spreads both supply 'second'; provide an explicit argument to choose its value.*
+
+fn consume(first Int, second Int) {}
+
+fn main() {
+    consume(...{ first: 1, second: 2 }, ...{ first: 3, second: 4 }, first = 5)
+}

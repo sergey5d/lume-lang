@@ -11,7 +11,7 @@ roughly three database round trips. With `fork`, those queries can overlap:
 
 ```lume
 @Get { path: "/reports/summary", contentType: "application/json" }
-def summary(ctx Context) Result[HttpResponse, HttpError] {
+fn summary(ctx Context) Result[HttpResponse, HttpError] {
     orgId OrgId = try this.orgId(ctx)
 
     scope {
@@ -55,10 +55,10 @@ avoid re-validating the same token on every request:
 keeper AuthCache {
     private var entries [Str: CachedAuth] = []
 
-    def lookup(token Str) CachedAuth? =
+    fn lookup(token Str) CachedAuth? =
         entries[token]
 
-    def store(token Str, auth CachedAuth) Unit {
+    fn store(token Str, auth CachedAuth) Unit {
         this.entries := this.entries.put(token, auth)
     }
 }

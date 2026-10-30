@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*decimal rounding necessary.*
 
-def main() {
+fn main() {
     println(1.001d.round(2, Unnecessary))
 }

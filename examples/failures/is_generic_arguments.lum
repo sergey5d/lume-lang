@@ -5,4 +5,4 @@ class Box[T] {
     value T
 }
 
-def main(value Any) Bool = value is Box[Int]
+fn main(value Any) Bool = value is Box[Int]

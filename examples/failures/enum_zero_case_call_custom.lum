@@ -5,6 +5,6 @@ type MaybeInt =
     object Missing {}
     | class Present { value Int }
 
-def main() Unit {
+fn main() Unit {
     value MaybeInt = Missing()
 }

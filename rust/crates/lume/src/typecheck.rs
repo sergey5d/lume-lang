@@ -10,8 +10,8 @@ use crate::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ExtensionBlock, FieldDecl, ForBinding, FunctionDecl,
         GenericCondition, IfConditionClause, IfStmt, Item, LambdaBody, MatchCase, MatchCaseBody,
-        MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt, TypeDecl,
-        TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt, TypeAliasDecl,
+        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
     decimal::Decimal,
     numeric::{parse_float_literal, parse_integer_literal},
@@ -616,7 +616,7 @@ struct TypeSig {
     enum_cases: HashMap<String, EnumCaseSig>,
 }
 
-fn expand_aliases_in_function_sig(sig: &mut FunctionSig, aliases: &HashMap<String, TypeRef>) {
+fn expand_aliases_in_function_sig(sig: &mut FunctionSig, aliases: &HashMap<String, TypeAliasDecl>) {
     for condition in &mut sig.generic_conditions {
         match condition {
             GenericConditionSig::Bound { subject, bound } => {
@@ -635,7 +635,7 @@ fn expand_aliases_in_function_sig(sig: &mut FunctionSig, aliases: &HashMap<Strin
     sig.ret = expand_aliases_in_ty(&sig.ret, aliases, &mut HashSet::new());
 }
 
-fn expand_aliases_in_type_sig(sig: &mut TypeSig, aliases: &HashMap<String, TypeRef>) {
+fn expand_aliases_in_type_sig(sig: &mut TypeSig, aliases: &HashMap<String, TypeAliasDecl>) {
     for condition in &mut sig.generic_conditions {
         match condition {
             GenericConditionSig::Bound { subject, bound } => {
@@ -869,48 +869,86 @@ fn canonicalize_qualified_ty(
     owner: &ModuleInfo,
     modules: &HashMap<PathBuf, ModuleInfo>,
 ) {
+    canonicalize_qualified_ty_inner(ty, owner, modules, &mut HashSet::new());
+}
+
+fn canonicalize_qualified_ty_inner(
+    ty: &mut Ty,
+    owner: &ModuleInfo,
+    modules: &HashMap<PathBuf, ModuleInfo>,
+    visiting: &mut HashSet<(PathBuf, String)>,
+) {
     match ty {
         Ty::Named(name, args) => {
             for arg in args.iter_mut() {
-                canonicalize_qualified_ty(arg, owner, modules);
+                canonicalize_qualified_ty_inner(arg, owner, modules, visiting);
             }
-            let Some((module_alias, member)) = name.split_once('.') else {
+            let (root, suffix) = name
+                .split_once('.')
+                .map_or((name.as_str(), None), |(root, suffix)| (root, Some(suffix)));
+            let resolved = suffix
+                .and_then(|member| {
+                    let target = owner.imports.get(root).and_then(|path| modules.get(path))?;
+                    Some((target, member.to_string()))
+                })
+                .or_else(|| {
+                    let imported = owner.symbol_imports.get(root)?;
+                    let target = modules.get(&imported.module_path)?;
+                    let member = suffix
+                        .map(|suffix| format!("{}.{suffix}", imported.original_name))
+                        .unwrap_or_else(|| imported.original_name.clone());
+                    target
+                        .aliases
+                        .contains_key(&member)
+                        .then_some((target, member))
+                });
+            let Some((target, member)) = resolved else {
                 return;
             };
-            let Some(target) = owner
-                .imports
-                .get(module_alias)
-                .and_then(|path| modules.get(path))
-            else {
-                return;
-            };
-            if args.is_empty()
-                && let Some(alias) = target.aliases.get(member)
+            if let Some(alias) = target.aliases.get(&member)
+                && args.len() == alias.type_params.len()
             {
-                let converted = convert_type_ref(alias, &HashSet::new());
+                let key = (target.path.clone(), member.clone());
+                if !visiting.insert(key.clone()) {
+                    *ty = Ty::Unknown;
+                    return;
+                }
+                let params = alias
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
+                let subst = alias
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .zip(args.iter().cloned())
+                    .collect();
+                let converted = substitute_type(&convert_type_ref(&alias.target, &params), &subst);
                 let mut expanded =
                     expand_aliases_in_ty(&converted, &target.aliases, &mut HashSet::new());
-                canonicalize_qualified_ty(&mut expanded, target, modules);
+                canonicalize_qualified_ty_inner(&mut expanded, target, modules, visiting);
+                visiting.remove(&key);
                 *ty = expanded;
             } else {
-                *name = member.to_string();
+                *name = member;
             }
         }
         Ty::Union(members) | Ty::Tuple(members) => {
             for member in members {
-                canonicalize_qualified_ty(member, owner, modules);
+                canonicalize_qualified_ty_inner(member, owner, modules, visiting);
             }
         }
         Ty::Record(fields) => {
             for (_, field) in fields {
-                canonicalize_qualified_ty(field, owner, modules);
+                canonicalize_qualified_ty_inner(field, owner, modules, visiting);
             }
         }
         Ty::Function(params, ret) => {
             for param in params {
-                canonicalize_qualified_ty(param, owner, modules);
+                canonicalize_qualified_ty_inner(param, owner, modules, visiting);
             }
-            canonicalize_qualified_ty(ret, owner, modules);
+            canonicalize_qualified_ty_inner(ret, owner, modules, visiting);
         }
         Ty::Unknown | Ty::Wildcard | Ty::Capture(_) | Ty::Never | Ty::TypeParam(_) => {}
     }
@@ -918,15 +956,34 @@ fn canonicalize_qualified_ty(
 
 fn expand_aliases_in_ty(
     ty: &Ty,
-    aliases: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, TypeAliasDecl>,
     visiting: &mut HashSet<String>,
 ) -> Ty {
     match ty {
-        Ty::Named(name, args) if args.is_empty() && aliases.contains_key(name) => {
+        Ty::Named(name, args) if aliases.contains_key(name) => {
+            let alias = &aliases[name];
+            if args.len() != alias.type_params.len() {
+                return Ty::Unknown;
+            }
+            let args = args
+                .iter()
+                .map(|arg| expand_aliases_in_ty(arg, aliases, visiting))
+                .collect::<Vec<_>>();
             if !visiting.insert(name.clone()) {
                 return ty.clone();
             }
-            let target = convert_type_ref(&aliases[name], &HashSet::new());
+            let params = alias
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect();
+            let subst = alias
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .zip(args)
+                .collect();
+            let target = substitute_type(&convert_type_ref(&alias.target, &params), &subst);
             let expanded = expand_aliases_in_ty(&target, aliases, visiting);
             visiting.remove(name);
             expanded
@@ -985,7 +1042,7 @@ struct ModuleInfo {
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
     objects: HashMap<String, TypeSig>,
-    aliases: HashMap<String, TypeRef>,
+    aliases: HashMap<String, TypeAliasDecl>,
     type_visibilities: HashMap<String, Visibility>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
     global_binding_stmts: Vec<crate::ast::BindingStmt>,
@@ -1042,8 +1099,7 @@ impl ModuleInfo {
         for item in &items {
             match item {
                 Item::TypeAlias(alias) => {
-                    self.aliases
-                        .insert(alias.name.clone(), alias.target.clone());
+                    self.aliases.insert(alias.name.clone(), alias.clone());
                     self.type_visibilities
                         .insert(alias.name.clone(), alias.visibility);
                 }
@@ -1106,9 +1162,30 @@ impl ModuleInfo {
             .chain(self.aliases.keys())
             .cloned()
             .collect::<HashSet<_>>();
-        for (name, target) in &mut self.aliases {
+        for (name, alias) in &mut self.aliases {
             if let Some((owner, _)) = name.rsplit_once('.') {
-                canonicalize_nested_type_ref(target, owner, &names);
+                let mut names = names.clone();
+                for param in &alias.type_params {
+                    names.retain(|name| name.rsplit('.').next() != Some(param.name.as_str()));
+                }
+                canonicalize_nested_type_ref(&mut alias.target, owner, &names);
+                for param in &mut alias.type_params {
+                    for bound in &mut param.bounds {
+                        canonicalize_nested_type_ref(bound, owner, &names);
+                    }
+                }
+                for condition in &mut alias.type_conditions {
+                    match condition {
+                        GenericCondition::Bound { subject, bound, .. } => {
+                            canonicalize_nested_type_ref(subject, owner, &names);
+                            canonicalize_nested_type_ref(bound, owner, &names);
+                        }
+                        GenericCondition::Equal { left, right, .. } => {
+                            canonicalize_nested_type_ref(left, owner, &names);
+                            canonicalize_nested_type_ref(right, owner, &names);
+                        }
+                    }
+                }
             }
         }
         for sig in self.types.values_mut().chain(self.objects.values_mut()) {
@@ -1190,7 +1267,7 @@ struct AmbientInfo {
     functions: HashMap<String, Vec<FunctionSig>>,
     types: HashMap<String, TypeSig>,
     objects: HashMap<String, TypeSig>,
-    aliases: HashMap<String, TypeRef>,
+    aliases: HashMap<String, TypeAliasDecl>,
     enum_cases: HashMap<String, Vec<EnumCaseSig>>,
     extensions: HashMap<String, HashMap<String, Vec<FunctionSig>>>,
 }
@@ -1542,7 +1619,7 @@ impl World {
         &self,
         module: &ModuleInfo,
         name: &str,
-    ) -> Option<(PathBuf, String, TypeRef)> {
+    ) -> Option<(PathBuf, String, TypeAliasDecl)> {
         let (import_name, suffix) = name
             .split_once('.')
             .map_or((name, None), |(root, suffix)| (root, Some(suffix)));
@@ -1791,13 +1868,22 @@ impl<'a> Checker<'a> {
                     let Some(exposure) = self.module.effective_type_visibility(&alias.name) else {
                         continue;
                     };
-                    self.check_api_type_ref(
-                        &alias.target,
+                    let names = alias
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .collect();
+                    let api = format!("type alias '{}'", alias.name);
+                    let owner = alias.name.rsplit_once('.').map(|(owner, _)| owner);
+                    self.check_api_generic_clause(
+                        &alias.type_params,
+                        &alias.type_conditions,
                         exposure,
-                        &format!("type alias '{}'", alias.name),
-                        &HashSet::new(),
-                        alias.name.rsplit_once('.').map(|(owner, _)| owner),
+                        &api,
+                        &names,
+                        owner,
                     );
+                    self.check_api_type_ref(&alias.target, exposure, &api, &names, owner);
                 }
                 Item::Type(decl) => self.check_type_api_visibility(decl),
                 Item::Statement(Stmt::Binding(binding)) => {
@@ -2130,8 +2216,20 @@ impl<'a> Checker<'a> {
         if let Some((owner, _)) = alias.name.rsplit_once('.') {
             self.current_type_paths.push(owner.to_string());
         }
+        self.push_ast_type_params(&alias.type_params, &alias.type_conditions);
+        for param in &alias.type_params {
+            if param.reified {
+                self.add_error("reified_alias_parameter", "transparent aliases cannot declare reified parameters; reification belongs to the expanded type or callable", param.span);
+            }
+        }
+        self.validate_generic_clause(&alias.type_params, &alias.type_conditions);
         let mut visiting = vec![(self.module.path.clone(), alias.name.clone())];
-        if self.type_ref_has_alias_cycle(&alias.target, self.module, &mut visiting) {
+        let params = alias
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        if self.type_ref_has_alias_cycle(&alias.target, self.module, &mut visiting, &params) {
             self.add_error(
                 "cyclic_type_alias",
                 format!("type alias '{}' contains a cycle", alias.name),
@@ -2139,6 +2237,7 @@ impl<'a> Checker<'a> {
             );
         }
         self.validate_type_ref_generic_applications(&alias.target);
+        self.pop_type_params();
         if alias.name.contains('.') {
             self.current_type_paths.pop();
         }
@@ -2291,6 +2390,7 @@ impl<'a> Checker<'a> {
         self.validate_generic_clause(&decl.type_params, &decl.type_conditions);
         self.check_mixin_composition(decl, &type_sig);
         for bound in &decl.with_bounds {
+            self.validate_type_ref_generic_applications(bound);
             let Ty::Named(name, args) = self.ty_from_type_ref(bound) else {
                 continue;
             };
@@ -5826,15 +5926,8 @@ impl<'a> Checker<'a> {
             Expr::ContextualNew {
                 args,
                 uses_brace_syntax,
-                default_initialize,
                 span,
-            } => {
-                if *default_initialize {
-                    self.check_default_initialization_expr(args, *span, expected)
-                } else {
-                    self.check_contextual_new_expr(args, *uses_brace_syntax, *span, expected)
-                }
-            }
+            } => self.check_contextual_new_expr(args, *uses_brace_syntax, *span, expected),
             Expr::Member {
                 receiver,
                 name,
@@ -6315,6 +6408,7 @@ impl<'a> Checker<'a> {
                 Ty::bool()
             }
             Expr::TypeOf { ty, .. } => {
+                self.validate_type_ref_generic_applications(ty);
                 let represented = self.ty_from_type_ref(ty);
                 self.check_typeof_type_ref(ty, &represented);
                 Ty::exact_runtime_type(represented)
@@ -6571,6 +6665,21 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         expected: &Ty,
     ) -> Ty {
+        if let Expr::Index {
+            receiver,
+            index,
+            explicit_type_args,
+            ..
+        } = callee
+            && self.is_explicit_generic_call_target(receiver)
+            && let Some(type_args) = explicit_type_args
+                .clone()
+                .or_else(|| type_arg_refs_from_expr(index))
+        {
+            for arg in &type_args {
+                self.validate_type_ref_generic_applications(arg);
+            }
+        }
         let member_callee = match callee {
             Expr::Index { receiver, .. } => receiver.as_ref(),
             other => other,
@@ -6827,18 +6936,21 @@ impl<'a> Checker<'a> {
             .collect::<Vec<_>>();
         let has_shape = shapes.iter().any(Option::is_some);
         let mut named = false;
-        let mut spread = false;
         for (arg, fields) in args.iter().zip(shapes) {
             if let Some(fields) = fields {
-                spread = true;
+                named = true;
                 if fields.is_empty()
                     && let Expr::Spread { value, .. } = &arg.value
                 {
                     self.check_expr(value);
                 }
             } else {
-                if has_shape && (spread || (named && arg.name.is_none())) {
-                    self.add_error("shape_spread_argument_order", "shape argument expansion requires positional arguments, then explicit named arguments, then shape spreads", arg.span);
+                if has_shape && named && arg.name.is_none() {
+                    self.add_error(
+                        "shape_spread_argument_order",
+                        "positional arguments must precede named arguments and shape spreads",
+                        arg.span,
+                    );
                 }
                 named |= arg.name.is_some();
                 if let Expr::Spread { value, .. } = &arg.value {
@@ -6857,7 +6969,6 @@ impl<'a> Checker<'a> {
             Expr::ContextualNew {
                 args,
                 uses_brace_syntax: true,
-                default_initialize: false,
                 ..
             } => args
                 .first()
@@ -6917,6 +7028,7 @@ impl<'a> Checker<'a> {
         let mut result_tys = Vec::new();
 
         for interface in interfaces {
+            self.validate_type_ref_generic_applications(interface);
             let interface_ty = self.ty_from_type_ref(interface);
             let Some(interface_sig) = self.interface_sig_from_type_ref(interface) else {
                 continue;
@@ -7259,308 +7371,6 @@ impl<'a> Checker<'a> {
             &[],
         );
         materialize_type(expected)
-    }
-
-    fn check_default_initialization_expr(
-        &mut self,
-        args: &[crate::ast::CallArg],
-        span: crate::source::Span,
-        expected: &Ty,
-    ) -> Ty {
-        let [
-            crate::ast::CallArg {
-                from_shape_spread: false,
-                value: record @ Expr::RecordLiteral { fields, values, .. },
-                ..
-            },
-        ] = args
-        else {
-            for arg in args {
-                self.check_expr(call_arg_value_expr(arg));
-            }
-            self.add_error(
-                "invalid_default_initialization",
-                "default initialization requires construction fields",
-                span,
-            );
-            return Ty::Unknown;
-        };
-
-        if !values.is_empty() {
-            for value in values {
-                self.check_expr(value);
-            }
-            self.add_error(
-                "invalid_default_initialization",
-                "default initialization uses named fields, not positional values",
-                span,
-            );
-            return materialize_type(expected);
-        }
-
-        let (target_name, target_kind, target_fields, explicit_constructors) = match expected {
-            Ty::Record(fields) => (
-                None,
-                TypeKind::Record,
-                fields
-                    .iter()
-                    .map(|(name, ty)| FieldSig {
-                        name: name.clone(),
-                        ty: ty.clone(),
-                        mutable: false,
-                        visibility: Visibility::Default,
-                        has_initializer: false,
-                        variadic: false,
-                    })
-                    .collect::<Vec<_>>(),
-                Vec::new(),
-            ),
-            Ty::Named(name, type_args) => {
-                let Some(mut sig) = self.lookup_any_type(name) else {
-                    self.check_expr(record);
-                    self.add_error(
-                        "invalid_default_initialization",
-                        format!(
-                            "default initialization target '{}' is not a declared type",
-                            name
-                        ),
-                        span,
-                    );
-                    return Ty::Unknown;
-                };
-                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
-                    self.check_expr(record);
-                    self.add_error(
-                        "invalid_default_initialization",
-                        format!(
-                            "default initialization requires a concrete class or shape target, got '{}'",
-                            expected.describe()
-                        ),
-                        span,
-                    );
-                    return Ty::Unknown;
-                }
-
-                let subst = sig
-                    .type_params
-                    .iter()
-                    .cloned()
-                    .zip(type_args.iter().cloned())
-                    .collect::<HashMap<_, _>>();
-                for field in &mut sig.fields {
-                    field.ty = substitute_type(&field.ty, &subst);
-                }
-                for methods in sig.methods.values_mut() {
-                    for method in methods {
-                        *method = instantiate_function_sig(method.clone(), &subst);
-                    }
-                }
-
-                if sig.kind == TypeKind::Class
-                    && sig.fields.iter().any(|field| {
-                        field.visibility != Visibility::Default && !field.has_initializer
-                    })
-                {
-                    self.check_expr(record);
-                    self.add_error(
-                        "invalid_default_initialization",
-                        format!(
-                            "class '{}' cannot be default-initialized because non-public fields without initializers are not construction inputs",
-                            sig.name
-                        ),
-                        span,
-                    );
-                    return materialize_type(expected);
-                }
-
-                let explicit_constructors = sig.methods.get("new").cloned().unwrap_or_default();
-                let target_fields = sig
-                    .fields
-                    .iter()
-                    .filter(|field| {
-                        if sig.kind == TypeKind::Class {
-                            field.visibility == Visibility::Default
-                        } else {
-                            self.can_access_field(&sig, field)
-                        }
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                (
-                    Some(sig.name),
-                    sig.kind,
-                    target_fields,
-                    explicit_constructors,
-                )
-            }
-            _ => {
-                self.check_expr(record);
-                self.add_error(
-                    "invalid_default_initialization",
-                    format!(
-                        "default initialization requires an expected class or shape type, got '{}'",
-                        expected.describe()
-                    ),
-                    span,
-                );
-                return Ty::Unknown;
-            }
-        };
-
-        if !explicit_constructors.is_empty() {
-            let accessible_zero_arg = explicit_constructors.iter().any(|constructor| {
-                self.can_access_constructor_sig(target_name.as_deref(), constructor)
-                    && arrange_param_args(&constructor.params, &[]).missing_required == 0
-            });
-            if !accessible_zero_arg {
-                self.check_expr(record);
-                self.add_error(
-                    "invalid_default_initialization",
-                    format!(
-                        "'{}' cannot be constructed with zero arguments",
-                        target_name.as_deref().unwrap_or("target")
-                    ),
-                    span,
-                );
-                return materialize_type(expected);
-            }
-            if !fields.is_empty() {
-                self.check_expr(record);
-                self.add_error(
-                    "invalid_default_initialization",
-                    "default initialization cannot override fields of a class with explicit constructors",
-                    span,
-                );
-                return materialize_type(expected);
-            }
-            return materialize_type(expected);
-        }
-
-        for field in fields.iter().filter(|field| field.name.is_some()) {
-            let name = field.name.as_deref().expect("filtered named field");
-            if !target_fields.iter().any(|target| target.name == name) {
-                self.add_error(
-                    "invalid_default_initialization",
-                    format!(
-                        "{} '{}' has no construction field '{}'",
-                        type_kind_label(target_kind),
-                        target_name.as_deref().unwrap_or("anonymous shape"),
-                        name
-                    ),
-                    field.span,
-                );
-            }
-        }
-
-        let expected_record = Ty::Record(
-            target_fields
-                .iter()
-                .map(|field| (field.name.clone(), field.ty.clone()))
-                .collect(),
-        );
-        let actual = self.check_expr_against(record, &expected_record);
-        let actual_fields = self.structural_fields_for_type(&actual).unwrap_or_default();
-
-        for field in &target_fields {
-            if let Some((_, actual_ty)) = actual_fields.iter().find(|(name, _)| name == &field.name)
-            {
-                self.require_assignable(
-                    actual_ty,
-                    &field.ty,
-                    span,
-                    "invalid_argument_type",
-                    format!(
-                        "field '{}' expects '{}' but got '{}'",
-                        field.name,
-                        field.ty.describe(),
-                        actual_ty.describe()
-                    ),
-                );
-                continue;
-            }
-            if field.has_initializer || self.type_supports_default_initialization(&field.ty) {
-                continue;
-            }
-            self.add_error(
-                "invalid_default_initialization",
-                format!(
-                    "field '{}' requires an explicit value: '{}' cannot be constructed with zero arguments",
-                    field.name,
-                    field.ty.describe()
-                ),
-                span,
-            );
-        }
-
-        materialize_type(expected)
-    }
-
-    fn can_access_constructor_sig(
-        &self,
-        owner_name: Option<&str>,
-        constructor: &FunctionSig,
-    ) -> bool {
-        let Some(owner_name) = owner_name else {
-            return false;
-        };
-        self.lookup_any_type(owner_name)
-            .is_some_and(|owner| self.can_access_constructor(&owner, constructor.visibility))
-    }
-
-    fn type_supports_default_initialization(&self, ty: &Ty) -> bool {
-        match ty {
-            Ty::Named(name, _)
-                if matches!(
-                    name.as_str(),
-                    "Bool" | "Int" | "Float" | "Decimal" | "Str" | "Rune" | "Unit"
-                ) =>
-            {
-                true
-            }
-            Ty::Named(name, _) if name == "Option" => true,
-            Ty::Record(fields) => fields.is_empty(),
-            Ty::Named(name, type_args) => {
-                let Some(mut sig) = self.lookup_any_type(name) else {
-                    return false;
-                };
-                if !matches!(sig.kind, TypeKind::Class | TypeKind::Record) {
-                    return false;
-                }
-                let subst = sig
-                    .type_params
-                    .iter()
-                    .cloned()
-                    .zip(type_args.iter().cloned())
-                    .collect::<HashMap<_, _>>();
-                for methods in sig.methods.values_mut() {
-                    for method in methods {
-                        *method = instantiate_function_sig(method.clone(), &subst);
-                    }
-                }
-                if let Some(constructors) = sig.methods.get("new")
-                    && !constructors.is_empty()
-                {
-                    return constructors.iter().any(|constructor| {
-                        self.can_access_constructor(&sig, constructor.visibility)
-                            && arrange_param_args(&constructor.params, &[]).missing_required == 0
-                    });
-                }
-                if sig.kind == TypeKind::Class
-                    && sig.fields.iter().any(|field| {
-                        field.visibility != Visibility::Default && !field.has_initializer
-                    })
-                {
-                    return false;
-                }
-                sig.fields
-                    .iter()
-                    .filter(|field| {
-                        sig.kind != TypeKind::Class || field.visibility == Visibility::Default
-                    })
-                    .all(|field| field.has_initializer)
-            }
-            _ => false,
-        }
     }
 
     fn interface_sig_from_type_ref(&mut self, interface: &TypeRef) -> Option<TypeSig> {
@@ -8305,7 +8115,7 @@ impl<'a> Checker<'a> {
         };
         for (name, spread, span) in &arrangement.conflicts {
             self.add_error(if *spread { "conflicting_shape_arguments" } else { "duplicate_argument" },
-                if *spread { format!("shape argument spreads both supply '{name}'; provide an explicit argument before the spreads to choose its value") }
+                if *spread { format!("shape argument spreads both supply '{name}'; provide an explicit argument to choose its value") }
                 else { format!("parameter '{name}' is supplied more than once explicitly") }, *span);
         }
         let argument_shape_valid = arrangement.overflow == 0 && arrangement.missing_required == 0;
@@ -13542,9 +13352,6 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_named_type(&self, name: &str, args: Vec<Ty>) -> Ty {
-        if self.is_type_param(name) {
-            return Ty::TypeParam(name.to_string());
-        }
         if name == "Never" && args.is_empty() {
             return Ty::Never;
         }
@@ -13558,7 +13365,7 @@ impl<'a> Checker<'a> {
         &self,
         module: Option<&ModuleInfo>,
         name: &str,
-    ) -> Option<(PathBuf, String, TypeRef)> {
+    ) -> Option<(PathBuf, String, TypeAliasDecl)> {
         if let Some(module) = module {
             if let Some(target) = module.aliases.get(name) {
                 return Some((module.path.clone(), name.to_string(), target.clone()));
@@ -13647,35 +13454,70 @@ impl<'a> Checker<'a> {
         module: Option<&ModuleInfo>,
         visiting: &mut Vec<(PathBuf, String)>,
     ) -> Ty {
+        let subst = if module.is_some_and(|module| module.path == self.module.path) {
+            self.type_params
+                .iter()
+                .flat_map(|scope| scope.names.iter())
+                .map(|name| (name.clone(), Ty::TypeParam(name.clone())))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        self.ty_from_type_ref_with_subst(reference, module, visiting, &subst)
+    }
+
+    fn ty_from_type_ref_with_subst(
+        &self,
+        reference: &TypeRef,
+        module: Option<&ModuleInfo>,
+        visiting: &mut Vec<(PathBuf, String)>,
+        subst: &HashMap<String, Ty>,
+    ) -> Ty {
         match reference {
             TypeRef::Wildcard { .. } => Ty::Wildcard,
             TypeRef::Named { name, args, .. } => {
                 let (type_module, type_name) = self.qualified_type_context(module, name);
                 if args.is_empty() {
-                    if let Some((path, alias_name, target)) =
-                        self.lookup_alias_target(type_module, type_name)
-                    {
-                        let key = (path.clone(), alias_name);
-                        if visiting.contains(&key) {
-                            return Ty::Unknown;
-                        }
-                        visiting.push(key);
-                        let owner = self.module_for_alias_path(&path);
-                        let expanded = self.ty_from_type_ref_in_module(&target, owner, visiting);
-                        visiting.pop();
-                        return expanded;
+                    if let Some(ty) = subst.get(name) {
+                        return ty.clone();
                     }
                 }
                 let args = args
                     .iter()
-                    .map(|arg| self.ty_from_type_ref_in_module(arg, module, visiting))
-                    .collect();
+                    .map(|arg| self.ty_from_type_ref_with_subst(arg, module, visiting, subst))
+                    .collect::<Vec<_>>();
+                if let Some((path, alias_name, alias)) =
+                    self.lookup_alias_target(type_module, type_name)
+                {
+                    let key = (path.clone(), alias_name);
+                    if visiting.contains(&key) || args.len() != alias.type_params.len() {
+                        return Ty::Unknown;
+                    }
+                    // Arguments belong to the caller's scope; the target belongs to the alias's module.
+                    let subst = alias
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .zip(args)
+                        .collect();
+                    visiting.push(key);
+                    let expanded = self.ty_from_type_ref_with_subst(
+                        &alias.target,
+                        self.module_for_alias_path(&path),
+                        visiting,
+                        &subst,
+                    );
+                    visiting.pop();
+                    return expanded;
+                }
                 self.resolve_named_type_in_module(type_module, type_name, args)
             }
             TypeRef::Tuple { fields, .. } => Ty::Tuple(
                 fields
                     .iter()
-                    .map(|field| self.ty_from_type_ref_in_module(&field.ty, module, visiting))
+                    .map(|field| {
+                        self.ty_from_type_ref_with_subst(&field.ty, module, visiting, subst)
+                    })
                     .collect(),
             ),
             TypeRef::Record { fields, .. } => Ty::Record(
@@ -13684,7 +13526,7 @@ impl<'a> Checker<'a> {
                     .map(|field| {
                         (
                             field.name.clone(),
-                            self.ty_from_type_ref_in_module(&field.ty, module, visiting),
+                            self.ty_from_type_ref_with_subst(&field.ty, module, visiting, subst),
                         )
                     })
                     .collect(),
@@ -13692,15 +13534,15 @@ impl<'a> Checker<'a> {
             TypeRef::Function { params, ret, .. } => Ty::Function(
                 params
                     .iter()
-                    .map(|param| self.ty_from_type_ref_in_module(param, module, visiting))
+                    .map(|param| self.ty_from_type_ref_with_subst(param, module, visiting, subst))
                     .collect(),
-                Box::new(self.ty_from_type_ref_in_module(ret, module, visiting)),
+                Box::new(self.ty_from_type_ref_with_subst(ret, module, visiting, subst)),
             ),
-            TypeRef::Union { members, .. } => Ty::union(
-                members
-                    .iter()
-                    .map(|member| self.ty_from_type_ref_in_module(member, module, visiting)),
-            ),
+            TypeRef::Union { members, .. } => {
+                Ty::union(members.iter().map(|member| {
+                    self.ty_from_type_ref_with_subst(member, module, visiting, subst)
+                }))
+            }
         }
     }
 
@@ -13709,17 +13551,21 @@ impl<'a> Checker<'a> {
         reference: &TypeRef,
         module: &ModuleInfo,
         visiting: &mut Vec<(PathBuf, String)>,
+        type_params: &HashSet<String>,
     ) -> bool {
         match reference {
             TypeRef::Named { name, args, .. } => {
+                if type_params.contains(name) {
+                    return false;
+                }
                 if args
                     .iter()
-                    .any(|arg| self.type_ref_has_alias_cycle(arg, module, visiting))
+                    .any(|arg| self.type_ref_has_alias_cycle(arg, module, visiting, type_params))
                 {
                     return true;
                 }
                 let (type_module, type_name) = self.qualified_type_context(Some(module), name);
-                let Some((path, alias_name, target)) =
+                let Some((path, alias_name, alias)) =
                     self.lookup_alias_target(type_module, type_name)
                 else {
                     return false;
@@ -13732,25 +13578,29 @@ impl<'a> Checker<'a> {
                     return false;
                 };
                 visiting.push(key);
-                let cyclic = self.type_ref_has_alias_cycle(&target, owner, visiting);
+                let params = alias
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .collect();
+                let cyclic = self.type_ref_has_alias_cycle(&alias.target, owner, visiting, &params);
                 visiting.pop();
                 cyclic
             }
-            TypeRef::Tuple { fields, .. } => fields
-                .iter()
-                .any(|field| self.type_ref_has_alias_cycle(&field.ty, module, visiting)),
-            TypeRef::Record { fields, .. } => fields
-                .iter()
-                .any(|field| self.type_ref_has_alias_cycle(&field.ty, module, visiting)),
+            TypeRef::Tuple { fields, .. } => fields.iter().any(|field| {
+                self.type_ref_has_alias_cycle(&field.ty, module, visiting, type_params)
+            }),
+            TypeRef::Record { fields, .. } => fields.iter().any(|field| {
+                self.type_ref_has_alias_cycle(&field.ty, module, visiting, type_params)
+            }),
             TypeRef::Function { params, ret, .. } => {
-                params
-                    .iter()
-                    .any(|param| self.type_ref_has_alias_cycle(param, module, visiting))
-                    || self.type_ref_has_alias_cycle(ret, module, visiting)
+                params.iter().any(|param| {
+                    self.type_ref_has_alias_cycle(param, module, visiting, type_params)
+                }) || self.type_ref_has_alias_cycle(ret, module, visiting, type_params)
             }
             TypeRef::Union { members, .. } => members
                 .iter()
-                .any(|member| self.type_ref_has_alias_cycle(member, module, visiting)),
+                .any(|member| self.type_ref_has_alias_cycle(member, module, visiting, type_params)),
             TypeRef::Wildcard { .. } => false,
         }
     }
@@ -13898,6 +13748,7 @@ impl<'a> Checker<'a> {
     }
 
     fn validate_interface_generic_bound(&mut self, bound: &TypeRef, span: crate::source::Span) {
+        self.validate_type_ref_generic_applications(bound);
         let Ty::Named(name, _) = self.ty_from_type_ref(bound) else {
             self.add_error(
                 "invalid_generic_bound",
@@ -13933,6 +13784,62 @@ impl<'a> Checker<'a> {
             TypeRef::Named { name, args, span } => {
                 for arg in args {
                     self.validate_type_ref_generic_applications(arg);
+                }
+                if self.is_type_param(name) {
+                    return;
+                }
+                let (module, alias_name) = self.qualified_type_context(Some(self.module), name);
+                if let Some((path, _, alias)) = self.lookup_alias_target(module, alias_name) {
+                    if alias.type_params.len() != args.len() {
+                        self.add_error(
+                            "invalid_type_arity",
+                            format!(
+                                "type alias '{name}' expects {} type arguments, got {}",
+                                alias.type_params.len(),
+                                args.len()
+                            ),
+                            *span,
+                        );
+                        return;
+                    }
+                    let subst = alias
+                        .type_params
+                        .iter()
+                        .map(|param| param.name.clone())
+                        .zip(args.iter().map(|arg| self.ty_from_type_ref(arg)))
+                        .collect();
+                    let owner = self.module_for_alias_path(&path);
+                    let convert = |reference: &TypeRef| {
+                        self.ty_from_type_ref_with_subst(reference, owner, &mut Vec::new(), &subst)
+                    };
+                    let mut conditions = Vec::new();
+                    for param in &alias.type_params {
+                        for bound in &param.bounds {
+                            conditions.push(GenericConditionSig::Bound {
+                                subject: subst[&param.name].clone(),
+                                bound: convert(bound),
+                            });
+                        }
+                    }
+                    for condition in &alias.type_conditions {
+                        conditions.push(match condition {
+                            GenericCondition::Bound { subject, bound, .. } => {
+                                GenericConditionSig::Bound {
+                                    subject: convert(subject),
+                                    bound: convert(bound),
+                                }
+                            }
+                            GenericCondition::Equal { left, right, .. } => {
+                                GenericConditionSig::Equal {
+                                    left: convert(left),
+                                    right: convert(right),
+                                }
+                            }
+                        });
+                    }
+                    conditions.retain(|condition| !generic_condition_contains_wildcard(condition));
+                    self.check_call_generic_conditions(&conditions, &HashMap::new(), *span);
+                    return;
                 }
                 let Some(sig) = self.lookup_any_type(name) else {
                     return;
@@ -15759,7 +15666,12 @@ fn arrange_param_args<'a>(
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
     let mut conflicts = Vec::new();
-    for arg in args {
+    // Resolve explicit winners first; evaluation still follows the source arguments.
+    for arg in args
+        .iter()
+        .filter(|arg| !arg.from_shape_spread)
+        .chain(args.iter().filter(|arg| arg.from_shape_spread))
+    {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
                 if slots[index].is_empty() {
@@ -15832,7 +15744,11 @@ fn arrange_constructor_args<'a>(
     let mut positional_index = 0usize;
     let mut overflow = 0usize;
     let mut conflicts = Vec::new();
-    for arg in args {
+    for arg in args
+        .iter()
+        .filter(|arg| !arg.from_shape_spread)
+        .chain(args.iter().filter(|arg| arg.from_shape_spread))
+    {
         if let Some(name) = &arg.name {
             if let Some(index) = params.iter().position(|param| param.name == *name) {
                 if slots[index].is_empty() {
@@ -16620,9 +16536,9 @@ mod tests {
     fn checks_simple_function_program() {
         let program = parse_inline(
             r#"
-def add(left Int, right Int) Int = left + right
+fn add(left Int, right Int) Int = left + right
 
-def main() Int {
+fn main() Int {
     value Int = add(1, 2)
     return value
 }
@@ -16651,7 +16567,7 @@ def main() Int {
             ),
             (
                 "mixin_member_kind_mismatch",
-                "mixin A { get value Int = 1 }\nclass C { use A\ndef value() Int = 2 }",
+                "mixin A { get value Int = 1 }\nclass C { use A\nfn value() Int = 2 }",
             ),
             (
                 "mixin_member_kind_mismatch",
@@ -16666,15 +16582,15 @@ def main() Int {
                 "duplicate_mixin_use",
                 "mixin A {}\nclass C { use A\nuse A }",
             ),
-            ("mixin_not_a_type", "mixin A {}\ndef f(value A) {}"),
+            ("mixin_not_a_type", "mixin A {}\nfn f(value A) {}"),
             ("mixin_not_a_type", "mixin A {}\ntype Alias = A"),
             (
                 "invalid_mixin_construction",
-                "mixin A {}\ndef main() { value = A() }",
+                "mixin A {}\nfn main() { value = A() }",
             ),
             (
                 "mixin_not_a_type",
-                "mixin A {}\ndef main() { value = typeOf[A] }",
+                "mixin A {}\nfn main() { value = typeOf[A] }",
             ),
             (
                 "invalid_type_argument_count",
@@ -16682,19 +16598,19 @@ def main() Int {
             ),
             (
                 "incompatible_mixin_requirement",
-                "interface Readable { def read() Str }\nmixin A with Readable { def text() Str = this.read() }\nclass C with Readable { use A\ndef read() Int = 1 }",
+                "interface Readable { fn read() Str }\nmixin A with Readable { fn text() Str = this.read() }\nclass C with Readable { use A\nfn read() Int = 1 }",
             ),
             (
                 "assign_immutable",
-                "interface Sized { get size Int }\nmixin A with Sized { def update() { this.size := 1 } }",
+                "interface Sized { get size Int }\nmixin A with Sized { fn update() { this.size := 1 } }",
             ),
             (
                 "mixin_not_a_type",
-                "mixin A {}\ndef main() { callback = (value A) => value }",
+                "mixin A {}\nfn main() { callback = (value A) => value }",
             ),
             (
                 "mixin_not_a_value",
-                "mixin A { def value() Int = 1 }\ndef main() { value = A.value() }",
+                "mixin A { fn value() Int = 1 }\nfn main() { value = A.value() }",
             ),
         ];
         for (code, source) in cases {
@@ -16717,7 +16633,7 @@ def main() Int {
 type ConnectionState = object Ready {} | object Closed {}
 type JobState = object Ready {} | object Running {}
 
-def main() Unit {
+fn main() Unit {
     value ConnectionState = ConnectionState.Ready
     other = Ready
     match value {
@@ -16740,7 +16656,7 @@ def main() Unit {
 type ConnectionState = object Ready {} | object Closed {}
 type JobState = object Ready {} | object Running {}
 
-def main() Unit {
+fn main() Unit {
     connection ConnectionState = ConnectionState.Ready
     job JobState = JobState.Ready
     match connection {
@@ -16758,7 +16674,7 @@ def main() Unit {
     fn rejects_invalid_known_addition_operands_without_cascading_unknowns() {
         let invalid = parse_inline(
             r#"
-def broken() Int = true + false
+fn broken() Int = true + false
 "#,
         );
         let invalid_result = check_program(&invalid);
@@ -16780,7 +16696,7 @@ def broken() Int = true + false
 
         let unknown = parse_inline(
             r#"
-def broken() Int = missing + false
+fn broken() Int = missing + false
 "#,
         );
         let unknown_result = check_program(&unknown);
@@ -16806,8 +16722,8 @@ def broken() Int = missing + false
     fn checks_complete_signed_integer_literal_boundary() {
         let valid = parse_inline(
             r#"
-def maximum() Int = 9223372036854775807
-def minimum() Int = -9223372036854775808
+fn maximum() Int = 9223372036854775807
+fn minimum() Int = -9223372036854775808
 "#,
         );
         let valid_result = check_program(&valid);
@@ -16819,8 +16735,8 @@ def minimum() Int = -9223372036854775808
 
         let invalid = parse_inline(
             r#"
-def tooHigh() Int = 9223372036854775808
-def tooLow() Int = -9223372036854775809
+fn tooHigh() Int = 9223372036854775808
+fn tooLow() Int = -9223372036854775809
 "#,
         );
         let invalid_result = check_program(&invalid);
@@ -16854,10 +16770,10 @@ class Pair {
     left Int
     right Int
 
-    def +(other Pair) Pair = Pair(left + other.left, right + other.right)
+    fn +(other Pair) Pair = Pair(left + other.left, right + other.right)
 }
 
-def combine(left Pair, right Pair) Pair = left + right
+fn combine(left Pair, right Pair) Pair = left + right
 "#,
         );
         let result = check_program(&program);
@@ -16868,9 +16784,9 @@ def combine(left Pair, right Pair) Pair = left + right
     fn function_parameters_are_contravariant_and_returns_are_covariant() {
         let program = parse_inline(
             r#"
-def ignore(value Any) Str = "ignored"
+fn ignore(value Any) Str = "ignored"
 
-def main() Unit {
+fn main() Unit {
     acceptsAny fn(Any) Str = ignore
     acceptsStr fn(Str) Any = acceptsAny
     result Any = acceptsStr("value")
@@ -16885,9 +16801,9 @@ def main() Unit {
     fn rejects_function_assignment_with_a_narrower_actual_parameter() {
         let program = parse_inline(
             r#"
-def textLength(value Str) Int = value.size
+fn textLength(value Str) Int = value.size
 
-def main() Unit {
+fn main() Unit {
     onlyText fn(Str) Int = textLength
     anyValue fn(Any) Int = onlyText
     println(anyValue(123))
@@ -16911,9 +16827,9 @@ def main() Unit {
     fn rejects_unsafe_function_parameter_variance_inside_a_collection() {
         let program = parse_inline(
             r#"
-def textLength(value Str) Int = value.size
+fn textLength(value Str) Int = value.size
 
-def main() Unit {
+fn main() Unit {
     onlyText [fn(Str) Int] = [textLength]
     anyValue [fn(Any) Int] = onlyText
 }
@@ -16940,7 +16856,7 @@ class Cell[T] {
     var value T
 }
 
-def main() Unit {
+fn main() Unit {
     integers [Int] = [1]
     arbitrary [Any] = integers
 
@@ -16979,7 +16895,7 @@ class Cell[T] {
     var value T
 }
 
-def main() Unit {
+fn main() Unit {
     arbitrary [Any] = [1]
     arbitrary.add("valid")
 
@@ -17007,9 +16923,9 @@ internal class ModuleDetails {
     value Int
 }
 
-public def inspect(value ModuleDetails) FileDetails = FileDetails(value.value)
-internal def share(value ModuleDetails) ModuleDetails = value
-internal def leak(value FileDetails) FileDetails = value
+public fn inspect(value ModuleDetails) FileDetails = FileDetails(value.value)
+internal fn share(value ModuleDetails) ModuleDetails = value
+internal fn leak(value FileDetails) FileDetails = value
 
 public type ExposedDetails = FileDetails
 
@@ -17017,12 +16933,12 @@ public class Api {
     details ModuleDetails
     private cached FileDetails = FileDetails(0)
 
-    def read(value ModuleDetails) ModuleDetails = value
-    private def helper(value FileDetails) FileDetails = value
+    fn read(value ModuleDetails) ModuleDetails = value
+    private fn helper(value FileDetails) FileDetails = value
 }
 
 class LocalApi {
-    def read(value FileDetails) FileDetails = value
+    fn read(value FileDetails) FileDetails = value
 }
 "#,
         );
@@ -17067,7 +16983,7 @@ shape Point {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     grouped [Str] = ([])
     groupedPoint Point = (new(1, 2))
     configuration ([Str], Bool) = ([], false)
@@ -17096,7 +17012,7 @@ shape Point {
     y Int
 }
 
-def points(source) [Point] =
+fn points(source) [Point] =
     for value <- source yield new(value, 0)
 "#,
         );
@@ -17117,28 +17033,28 @@ def points(source) [Point] =
     fn rejects_local_functions_inside_nested_executable_blocks() {
         let program = parse_inline(
             r#"
-def main(flag Bool) Unit {
-    def direct(value Int) Int = value
+fn main(flag Bool) Unit {
+    fn direct(value Int) Int = value
 
     if flag {
-        def inIf(value Int) Int = value
+        fn inIf(value Int) Int = value
         println(inIf(1))
     }
 
     while flag {
-        def inWhile(value Int) Int = value
+        fn inWhile(value Int) Int = value
         println(inWhile(1))
         break
     }
 
     for value <- [1] {
-        def inFor(input Int) Int = input
+        fn inFor(input Int) Int = input
         println(inFor(value))
     }
 
     match flag {
         case true => {
-            def inMatch(value Int) Int = value
+            fn inMatch(value Int) Int = value
             println(inMatch(1))
         }
         case false => ()
@@ -17168,35 +17084,35 @@ def main(flag Bool) Unit {
 class Box with Eq[Box] {
     value Int
 
-    def equals(other Box) Bool = this.value == other.value
+    fn equals(other Box) Bool = this.value == other.value
 }
 
 object Shared {
 }
 
 interface Identified with Eq[Identified] {
-    def code() Int
+    fn code() Int
 }
 
 class Entry with Identified {
     value Int
 
-    def code() Int = this.value
-    def equals(other Identified) Bool = this.value == other.code()
+    fn code() Int = this.value
+    fn equals(other Identified) Bool = this.value == other.code()
 }
 
 class AlternateEntry with Identified {
     value Int
 
-    def code() Int = this.value
-    def equals(other Identified) Bool = this.value == other.code()
+    fn code() Int = this.value
+    fn equals(other Identified) Bool = this.value == other.code()
 }
 
 shape Point {
     x Int
 }
 
-def main() Unit {
+fn main() Unit {
     first = Box(1)
     alias = first
     sameValue = first == Box(1)
@@ -17231,19 +17147,19 @@ class Box {
 }
 
 interface Named {
-    def name() Str
+    fn name() Str
 }
 
 class Person with Named {
     label Str
-    def name() Str = this.label
+    fn name() Str = this.label
 }
 
 shape Point {
     x Int
 }
 
-def main() Unit {
+fn main() Unit {
     missingClassContract = Box(1) == Box(1)
     left Named = Person("Ada")
     right Named = left
@@ -17289,14 +17205,14 @@ def main() Unit {
         let program = parse_inline(
             r#"
 class FirstBox with Eq[FirstBox] {
-    def equals(other FirstBox) Bool = true
+    fn equals(other FirstBox) Bool = true
 }
 
 class SecondBox with Eq[SecondBox] {
-    def equals(other SecondBox) Bool = true
+    fn equals(other SecondBox) Bool = true
 }
 
-def main() Unit {
+fn main() Unit {
     same = FirstBox {} == SecondBox {}
 }
 "#,
@@ -17326,7 +17242,7 @@ shape ReorderedPoint {
     x Int
 }
 
-def main() Unit {
+fn main() Unit {
     left = Point(1, "one")
     right = ReorderedPoint("one", 1)
     same = left == right
@@ -17356,7 +17272,7 @@ shape DifferentType {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     missing = Point(1, "one") == MissingField(1)
     wrongType = Point(1, "one") == DifferentType(1, 1)
     nonShape = Point(1, "one") == 1
@@ -17384,7 +17300,7 @@ class Account {
     id Int
 }
 
-def main() Unit {
+fn main() Unit {
     unknown Any = 1
     dynamic = unknown == 1
     classValue = Account(1) == Account(1)
@@ -17419,9 +17335,9 @@ shape Point {
     y Int
 }
 
-def consume(value Any) Unit = ()
+fn consume(value Any) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     number Any = Any(42)
     text Any = Any("hello")
     point Any = Any(Point(1, 2))
@@ -17440,7 +17356,7 @@ def main() Unit {
     fn rejects_invalid_explicit_any_widening_forms() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     missing = Any()
     multiple = Any(1, 2)
     braced = Any { value: 1 }
@@ -17481,28 +17397,28 @@ def main() Unit {
 class Account with Eq[Account] {
     id Int
 
-    def equals(other Account) Bool = this.id == other.id
+    fn equals(other Account) Bool = this.id == other.id
 }
 
 interface Identified with Eq[Identified] {
-    def code() Int
+    fn code() Int
 }
 
 class Entry with Identified {
     value Int
 
-    def code() Int = this.value
-    def equals(other Identified) Bool = this.value == other.code()
+    fn code() Int = this.value
+    fn equals(other Identified) Bool = this.value == other.code()
 }
 
 class AlternateEntry with Identified {
     value Int
 
-    def code() Int = this.value
-    def equals(other Identified) Bool = this.value == other.code()
+    fn code() Int = this.value
+    fn equals(other Identified) Bool = this.value == other.code()
 }
 
-def main() Unit {
+fn main() Unit {
     same = Account(1) == Account(1)
     different = Account(1) != Account(2)
     left Identified = Entry(1)
@@ -17529,8 +17445,8 @@ object Marker {
 class StableReference with Hashed[StableReference] {
     id Int
 
-    def equals(other StableReference) Bool = this.id == other.id
-    def hash() Int = this.id
+    fn equals(other StableReference) Bool = this.id == other.id
+    fn hash() Int = this.id
 }
 
 shape Coordinate {
@@ -17545,10 +17461,10 @@ shape CacheKey {
     reference StableReference
 }
 
-def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed[T]](value T) Unit = ()
+fn requireEq[T with Eq[T]](value T) Unit = ()
+fn requireHash[T with Hashed[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     key = CacheKey(Coordinate(1, 2), State.Ready, Marker, StableReference(3))
     requireEq(key)
     requireHash(key)
@@ -17589,9 +17505,9 @@ shape InternalEntry {
     internal marker Int = 0
 }
 
-def requireEq[T with Eq[T]](value T) Unit = ()
+fn requireEq[T with Eq[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     entry = Entry(Token(1))
     nested = Nested(entry)
     privateEntry = PrivateEntry(1)
@@ -17639,13 +17555,13 @@ shape Entry with Eq[Entry] {
     token Token
     private marker Int = 0
 
-    def equals(other Entry) Bool =
+    fn equals(other Entry) Bool =
         this.token.referenceId == other.token.referenceId
 }
 
-def requireEq[T with Eq[T]](value T) Unit = ()
+fn requireEq[T with Eq[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     token = Token(1)
     first = Entry(token)
     alias = Entry(token)
@@ -17678,20 +17594,20 @@ shape CustomEquality with Eq[CustomEquality] {
     id Int
     note Str
 
-    def equals(other CustomEquality) Bool = this.id == other.id
+    fn equals(other CustomEquality) Bool = this.id == other.id
 }
 
 shape ExplicitKey with Hashed[ExplicitKey] {
     id Int
     private marker Int = 0
 
-    def equals(other ExplicitKey) Bool = this.id == other.id
-    def hash() Int = this.id
+    fn equals(other ExplicitKey) Bool = this.id == other.id
+    fn hash() Int = this.id
 }
 
-def requireHash[T with Hashed[T]](value T) Unit = ()
+fn requireHash[T with Hashed[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     requireHash(PublicKey(1))
     requireHash(PrivateKey(1))
     requireHash(CustomEquality(1, "one"))
@@ -17720,10 +17636,10 @@ type LookupKey =
     class Number { value Int }
     | object Default {}
 
-def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed[T]](value T) Unit = ()
+fn requireEq[T with Eq[T]](value T) Unit = ()
+fn requireHash[T with Hashed[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     pair = (10, "ten")
     requireEq(pair)
     requireHash(pair)
@@ -17752,9 +17668,9 @@ type UnsafeKey =
     class Wrapped { value MutableReference }
     | object Missing {}
 
-def requireHash[T with Hashed[T]](value T) Unit = ()
+fn requireHash[T with Hashed[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     pair = (MutableReference(1), 2)
     _ = pair == (MutableReference(1), 2)
     requireHash(pair)
@@ -17793,10 +17709,10 @@ shape Snapshot {
     reference MutableReference
 }
 
-def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed[T]](value T) Unit = ()
+fn requireEq[T with Eq[T]](value T) Unit = ()
+fn requireHash[T with Hashed[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     snapshot = Snapshot(MutableReference(1))
     requireEq(snapshot)
     requireHash(snapshot)
@@ -17831,7 +17747,7 @@ class MutableKey {
     id Int
 }
 
-def main() Unit {
+fn main() Unit {
     values = [MutableKey(1): "one"]
 }
 "#,
@@ -17855,7 +17771,7 @@ class MutableKey {
     id Int
 }
 
-def main() Unit {
+fn main() Unit {
     values [MutableKey: Str] = []
 }
 "#,
@@ -17878,7 +17794,7 @@ def main() Unit {
 class IncompleteKey with Hashed[IncompleteKey] {
     id Int
 
-    def equals(other IncompleteKey) Bool = this.id == other.id
+    fn equals(other IncompleteKey) Bool = this.id == other.id
 }
 "#,
         );
@@ -17897,19 +17813,19 @@ class IncompleteKey with Hashed[IncompleteKey] {
         let program = parse_inline(
             r#"
 interface Reader {
-    def read() Str
+    fn read() Str
 }
 
 class PrivateReader with Reader {
-    private def read() Str = "private"
+    private fn read() Str = "private"
 }
 
 class InternalReader with Reader {
-    internal def read() Str = "internal"
+    internal fn read() Str = "internal"
 }
 
 class PublicReader with Reader {
-    def read() Str = "public"
+    fn read() Str = "public"
 }
 "#,
         );
@@ -17945,7 +17861,7 @@ shape UserSnapshot with Identified[Int] {
     id Int
 }
 
-def main() Unit {
+fn main() Unit {
     user Identified[Int] = User(7, "Ada")
     mutable Identified[Int] = MutableUser(8)
     snapshot Identified[Int] = UserSnapshot(9)
@@ -18000,9 +17916,9 @@ def main() Unit {
                     "internal get id Int = 1",
                     "missing_interface_member",
                 ),
-                ("get id Int", "def id() Int = 1", "missing_interface_member"),
-                ("def id() Int", "get id Int = 1", "missing_interface_member"),
-                ("def id() Int", "id Int = 1", "missing_interface_member"),
+                ("get id Int", "fn id() Int = 1", "missing_interface_member"),
+                ("fn id() Int", "get id Int = 1", "missing_interface_member"),
+                ("fn id() Int", "id Int = 1", "missing_interface_member"),
             ] {
                 let source = format!(
                     "interface Contract {{ {requirement} }}\n{owner} Implementation with Contract {{ {implementation} }}"
@@ -18037,7 +17953,7 @@ class WrongId with Identified {
 }
 
 class MethodId with Identified {
-    def id() Int = 1
+    fn id() Int = 1
 }
 "#,
         );
@@ -18066,7 +17982,7 @@ class MethodId with Identified {
             r#"
             interface Identified { get id Int }
             class User with Identified { var id Int }
-            def main() {
+            fn main() {
                 user Identified = User(1)
                 user.id := 2
             }
@@ -18087,11 +18003,15 @@ class MethodId with Identified {
     fn checks_shape_argument_spread_precedence() {
         let program = parse_inline(
             r#"
-def consume(first Int, second Str = "default") Int = first
-def main() {
+fn consume(first Int, second Str = "default") Int = first
+fn main() {
     options = { first: "ignored", second: "spread" }
     consume(1, ...options)
     consume(first = 1, ...options)
+    consume(...options, first = 1)
+    consume(...{ first: false }, first = 1, ...options)
+    consume(...options, ...{ first: false }, first = 1)
+    consume(...options, second = "explicit", first = 1)
     consume(1, "explicit", ...options, ...{ first: false })
     consume(...{ first: 1 })
 }
@@ -18104,17 +18024,25 @@ def main() {
     #[test]
     fn rejects_invalid_shape_argument_spreads() {
         for (body, code) in [
+            ("consume(...{ value: 1 }, 2)", "shape_spread_argument_order"),
             (
-                "consume(...{ value: 1 }, value = 2)",
+                "consume(value = 1, ...{}, 2)",
                 "shape_spread_argument_order",
             ),
-            ("consume(...{ value: 1 }, 2)", "shape_spread_argument_order"),
             (
                 "consume(...{ value: 1 }, ...{ value: 2 })",
                 "conflicting_shape_arguments",
             ),
             (
                 "consume(1, value = 2, ...{ value: 3 })",
+                "duplicate_argument",
+            ),
+            (
+                "consume(value = 1, ...{ value: 3 }, value = 2)",
+                "duplicate_argument",
+            ),
+            (
+                "consume(...{ value: 3 }, value = 1, value = 2)",
                 "duplicate_argument",
             ),
             ("consume(...{ value: 1, typo: 2 })", "unknown_argument_name"),
@@ -18127,7 +18055,7 @@ def main() {
             ("consume(...{ unrelated: 1 })", "unknown_argument_name"),
         ] {
             let program = parse_inline(&format!(
-                "class Options {{ value Int }}\ndef consume(value Int) {{}}\ndef main() {{ {body} }}"
+                "class Options {{ value Int }}\nfn consume(value Int) {{}}\nfn main() {{ {body} }}"
             ));
             let checked = check_program(&program);
             assert!(
@@ -18144,9 +18072,9 @@ def main() {
     #[test]
     fn shape_argument_spreads_require_static_fields_and_parameter_names() {
         for source in [
-            "def consume(value Int) {}\ndef bad(options Any) { consume(...options) }",
-            "def consume(value Int) {}\ndef bad(options { value Int } | { other Int }) { consume(...options) }",
-            "def bad(consume fn(Int) Int) Int = consume(...{ value: 1 })",
+            "fn consume(value Int) {}\nfn bad(options Any) { consume(...options) }",
+            "fn consume(value Int) {}\nfn bad(options { value Int } | { other Int }) { consume(...options) }",
+            "fn bad(consume fn(Int) Int) Int = consume(...{ value: 1 })",
         ] {
             let checked = check_program(&parse_inline(source));
             assert!(
@@ -18164,9 +18092,9 @@ def main() {
     fn reports_argument_mismatch() {
         let program = parse_inline(
             r#"
-def add(left Int, right Int) Int = left + right
+fn add(left Int, right Int) Int = left + right
 
-def main() Int {
+fn main() Int {
     return add(1)
 }
 "#,
@@ -18235,7 +18163,7 @@ class Box[T] {
     value T
 }
 
-def main() Unit {
+fn main() Unit {
     x = 1
     y = 2
     value = 3
@@ -18273,7 +18201,7 @@ public class Parser {
         class Parsed { text Text }
         | object Empty {}
 
-    def parse(text Text) Outcome = Outcome.Parsed(text)
+    fn parse(text Text) Outcome = Outcome.Parsed(text)
 }
 "#,
         )
@@ -18286,7 +18214,7 @@ module app
 
 use model/{Parser}
 
-def main() Str {
+fn main() Str {
     outcome Parser.Outcome = Parser().parse("ok")
     return match outcome {
         case Parser.Outcome.Parsed { text } => text
@@ -18325,12 +18253,12 @@ module app
 
 use states/{ConnectionState, ConnectionState.Ready as ConnectionReady}
 
-def isReady(value ConnectionState) Bool = match value {
+fn isReady(value ConnectionState) Bool = match value {
     case ConnectionReady => true
     case ConnectionState.Closed => false
 }
 
-def main() Bool {
+fn main() Bool {
     value ConnectionState = ConnectionReady
     isReady(value)
 }
@@ -18356,10 +18284,10 @@ module shared
 internal class Box {
     internal var value Int = 1
 
-    internal def increment() Unit = this.value += 1
+    internal fn increment() Unit = this.value += 1
 }
 
-internal def moduleValue() Int = 7
+internal fn moduleValue() Int = 7
 "#,
         )
         .expect("write support");
@@ -18371,7 +18299,7 @@ module shared
 
 use support/{Box, moduleValue}
 
-def main() Int {
+fn main() Int {
     box = Box {}
     box.increment()
     box.value := box.value + moduleValue()
@@ -18399,7 +18327,7 @@ module model
 public class Box {
     internal var value Int = 1
 
-    internal def increment() Unit = this.value += 1
+    internal fn increment() Unit = this.value += 1
 }
 "#,
         )
@@ -18412,7 +18340,7 @@ module app
 
 use model/{Box}
 
-def main() Unit {
+fn main() Unit {
     box = Box {}
     box.increment()
     box.value := 3
@@ -18448,7 +18376,7 @@ public class Account {
     private cache Int = 0
 }
 
-public def localAccount() Account = Account("local", 1)
+public fn localAccount() Account = Account("local", 1)
 "#,
         )
         .expect("write model");
@@ -18460,7 +18388,7 @@ module app
 
 use model/{Account, localAccount}
 
-def main() Unit {
+fn main() Unit {
     _ Account = localAccount()
     _ Account = Account("external", 2)
     _ Account = Account { owner: "named", balance: 3 }
@@ -18496,7 +18424,7 @@ object Tools {
 }
 
 ext Tools {
-    def label() Str = "tools"
+    fn label() Str = "tools"
 }
 "#,
         );
@@ -18520,7 +18448,7 @@ annotation Route {
 }
 
 ext Route {
-    def label() Str = this.path
+    fn label() Str = this.path
 }
 "#,
         );
@@ -18545,7 +18473,7 @@ class User {
 }
 
 ext User {
-    def reveal() Str = this.token
+    fn reveal() Str = this.token
 }
 "#,
         );
@@ -18567,11 +18495,11 @@ ext User {
 class User {
     name Str
 
-    private def secret() Str = this.name
+    private fn secret() Str = this.name
 }
 
 ext User {
-    def reveal() Str = this.secret()
+    fn reveal() Str = this.secret()
 }
 "#,
         );
@@ -18591,11 +18519,11 @@ ext User {
         let program = parse_inline(
             r#"
 class RecordAggregator {
-    private def get_rollup(key Str, range Int?) Int = 2
-    def get_rollup(key Str) Int = 1
+    private fn get_rollup(key Str, range Int?) Int = 2
+    fn get_rollup(key Str) Int = 1
 }
 
-def main() Int {
+fn main() Int {
     aggregator = RecordAggregator {}
     aggregator.get_rollup("alice")
 }
@@ -18613,7 +18541,7 @@ class User {
     name Str
 }
 
-def main() Unit {
+fn main() Unit {
     _ User = User("Ada")
 }
 "#,
@@ -18632,7 +18560,7 @@ class OrderManager {
     private queue [Str] = []
 }
 
-def main() Unit {
+fn main() Unit {
     _ OrderManager = OrderManager {}
 }
 "#,
@@ -18682,7 +18610,7 @@ class SecretUser {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ SecretUser = SecretUser { name: "Ada" }
 }
 "#,
@@ -18727,11 +18655,11 @@ class User {
     city Str = "NYC"
     private score Int = 5
 
-    def scoreValue() Int = this.score
+    fn scoreValue() Int = this.score
 }
 
 
-def main() Int {
+fn main() Int {
     user User = User("Ada", 10)
     return user.scoreValue()
 }
@@ -18772,7 +18700,7 @@ type Outcome =
     }
     | object Cancelled {}
 
-def main() Unit {
+fn main() Unit {
     _ Page = Page("custom body", "Intro")
     _ Page = Page { title: "Intro" }
     _ Article = Article("custom body", "Intro")
@@ -18803,7 +18731,7 @@ class X3 {
     c Str
 }
 
-def main() Unit {
+fn main() Unit {
     _ X1 = X1("b")
     _ X3 = X3("a", "c")
 }
@@ -18824,15 +18752,15 @@ def main() Unit {
     fn allows_named_callable_arguments_to_omit_intermingled_defaults() {
         let program = parse_inline(
             r#"
-def connect(protocol Str = "https", host Str, port Int = 443) Str =
+fn connect(protocol Str = "https", host Str, port Int = 443) Str =
     protocol + "://" + host + ":" + port.toStr()
 
 class Client {
-    def connect(protocol Str = "https", host Str, port Int = 443) Str =
+    fn connect(protocol Str = "https", host Str, port Int = 443) Str =
         protocol + "://" + host + ":" + port.toStr()
 }
 
-def main() Unit {
+fn main() Unit {
     _ Str = connect("http", "example.com")
     _ Str = connect(host = "example.com")
     client = Client {}
@@ -18849,13 +18777,13 @@ def main() Unit {
     fn rejects_positional_callable_prefix_that_leaves_required_parameter_unset() {
         let program = parse_inline(
             r#"
-def connect(protocol Str = "https", host Str, port Int = 443) Str = host
+fn connect(protocol Str = "https", host Str, port Int = 443) Str = host
 
 class Client {
-    def connect(protocol Str = "https", host Str, port Int = 443) Str = host
+    fn connect(protocol Str = "https", host Str, port Int = 443) Str = host
 }
 
-def main() Unit {
+fn main() Unit {
     _ Str = connect("example.com")
     client = Client {}
     _ Str = client.connect("example.com")
@@ -18885,7 +18813,7 @@ class Order {
     quantity Int
 }
 
-def main() Unit {
+fn main() Unit {
     _ Order = Order { quantity: "oops" }
 }
 "#,
@@ -18912,7 +18840,7 @@ class Order {
     quantity Int
 }
 
-def main() Option[Order] {
+fn main() Option[Order] {
     Some(
         Order {
             quantity: 7
@@ -18933,7 +18861,7 @@ class Order {
     quantity Int
 }
 
-def main() Option[Order] {
+fn main() Option[Order] {
     Some {
         value: Order {
             quantity: 7
@@ -18950,9 +18878,9 @@ def main() Option[Order] {
     fn rejects_trailing_brace_call_for_non_lambda_argument() {
         let program = parse_inline(
             r#"
-def wrap(value Int) Int = value
+fn wrap(value Int) Int = value
 
-def main() Int {
+fn main() Int {
     wrap { value: 7 }
 }
 "#,
@@ -18972,7 +18900,7 @@ def main() Int {
     fn allows_trailing_brace_call_for_lambda_argument() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     items = Vector(1, 2, 3)
     mapped = items.map { item => item + 1 }
     OS.println(mapped.size)
@@ -18987,10 +18915,10 @@ def main() Unit {
     fn allows_trailing_block_call_for_explicit_zero_arg_lambda_argument() {
         let program = parse_inline(
             r#"
-def process(f fn() Unit) Unit = f()
-def compute(f fn() Int) Int = f()
+fn process(f fn() Unit) Unit = f()
+fn compute(f fn() Int) Int = f()
 
-def main() Unit {
+fn main() Unit {
     process { () => println("hehe") }
 
     value Int = compute { () => 42 }
@@ -19005,9 +18933,9 @@ def main() Unit {
     fn infers_generic_result_type_from_trailing_lambda_body() {
         let program = parse_inline(
             r#"
-def transactionally[T](work fn() Result[T, Str]) Result[T, Str] = work()
+fn transactionally[T](work fn() Result[T, Str]) Result[T, Str] = work()
 
-def run() Result[Unit, Str] {
+fn run() Result[Unit, Str] {
     try transactionally { () => Ok(()) }
     Ok(())
 }
@@ -19024,12 +18952,12 @@ def run() Result[Unit, Str] {
 class Counter {
     value Int
 
-    def add(delta Int) Int = this.value + delta
-    def twice(delta Int) Int = add(delta) + add(delta)
+    fn add(delta Int) Int = this.value + delta
+    fn twice(delta Int) Int = add(delta) + add(delta)
 }
 
 
-def main() Int {
+fn main() Int {
     counter Counter = Counter(5)
     return counter.twice(2)
 }
@@ -19048,9 +18976,9 @@ class Cache {
 
     new() {}
 
-    def currentValue() Int = 7
+    fn currentValue() Int = 7
 
-    def store(key Str) Unit {
+    fn store(key Str) Unit {
         values[key] := currentValue()
         values[key] += 5
         values[key] -= 2
@@ -19059,12 +18987,12 @@ class Cache {
         values[key] %= 4
     }
 
-    def reset() Unit {
+    fn reset() Unit {
         this.values := []
     }
 }
 
-def main() Unit {
+fn main() Unit {
     cache = Cache()
     cache.store("answer")
     cache.reset()
@@ -19086,17 +19014,17 @@ class Counter {
         this.count = initial
     }
 
-    def value() Int = count
+    fn value() Int = count
 
-    def bump() Unit {
+    fn bump() Unit {
         count := count + 1
     }
 
-    def shadow(count Int) Int = this.count + count
+    fn shadow(count Int) Int = this.count + count
 }
 
 
-def main() Unit {
+fn main() Unit {
     counter = Counter(5)
     counter.bump()
 }
@@ -19110,9 +19038,9 @@ def main() Unit {
     fn allows_option_when_static_helper() {
         let program = parse_inline(
             r#"
-def consume(value [Int]?) Unit = ()
+fn consume(value [Int]?) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     number Option[Int] = Option.when(true, 7)
     optional [Int]? = Option.when(true, [])
     consume(Option.when(true, []))
@@ -19127,7 +19055,7 @@ def main() Unit {
     fn allows_int_and_float_parse_static_helpers() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     whole Option[Int] = Int.parse("7")
     decimal Option[Float] = Float.parse("1.2")
 }
@@ -19164,7 +19092,7 @@ def main() Unit {
     fn allows_intrinsic_numeric_limit_members() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     smallestInt Int = Int.MIN
     largestInt Int = Int.MAX
     mostNegativeFloat Float = Float.MIN
@@ -19180,9 +19108,9 @@ def main() Unit {
     fn allows_get_as_a_contextual_local_name() {
         let program = parse_inline(
             r#"
-def identity(get Int) Int = get
+fn identity(get Int) Int = get
 
-def main() Unit {
+fn main() Unit {
     get = identity(41)
     named Int = identity(get = 42)
     println(get)
@@ -19203,9 +19131,9 @@ interface FakeStr with Str {}
 object FakeBool with Bool {}
 annotation FakeRune with Rune {}
 
-def invalid[T with Int](value T) Unit = ()
+fn invalid[T with Int](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     fake = object with Str {}
 }
 "#,
@@ -19230,7 +19158,7 @@ def main() Unit {
     fn primitive_constructor_error_recommends_conversion_apis() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     converted = Int(3.7)
     contextual Int = new(3.7)
 }
@@ -19277,7 +19205,7 @@ def main() Unit {
     fn intrinsic_static_parse_is_not_an_instance_method() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     invalid = (1).parse("2")
 }
 "#,
@@ -19297,7 +19225,7 @@ def main() Unit {
     fn allows_array_fill_for_primitive_defaults() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     nul Rune = "\0".runeAt(0)!
     ints Array[Int] = Array.fill(3, 0)
     floats Array[Float] = Array.fill(3, 0.0)
@@ -19315,9 +19243,9 @@ def main() Unit {
     fn allows_array_fill_static_helper() {
         let program = parse_inline(
             r#"
-def consume(values Array[[Int]]) Unit = ()
+fn consume(values Array[[Int]]) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     values Array[Int] = Array.fill(3, 7)
     nested Array[[Int]] = Array.fill(2, [])
     consume(Array.fill(2, []))
@@ -19332,7 +19260,7 @@ def main() Unit {
     fn rejects_builtin_factory_payloads_incompatible_with_expected_types() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     array Array[[Int]] = Array.fill(2, ["wrong"])
     optional [Int]? = Option.when(true, ["wrong"])
 }
@@ -19355,7 +19283,7 @@ def main() Unit {
     fn allows_array_generate_static_helper() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values Array[Int] = Array.generate(3, idx => idx + 1)
 }
 "#,
@@ -19368,9 +19296,9 @@ def main() Unit {
     fn allows_vector_fill_and_generate_static_helpers() {
         let program = parse_inline(
             r#"
-def consume(values [[Int]]) Unit = ()
+fn consume(values [[Int]]) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     filled [Int] = Vector.fill(3, 7)
     generated [Int] = Vector.generate(3, idx => idx + 1)
     nestedFill [[Int]] = Vector.fill(2, [])
@@ -19388,7 +19316,7 @@ def main() Unit {
     fn allows_assert_runtime_calls() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     assert(1 + 2 == 3)
     assert(true, "still true")
     assert(condition = true)
@@ -19404,7 +19332,7 @@ def main() Unit {
     fn validates_assert_with_the_ordinary_callable_contract() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     assert(misspelled = true)
     assert(true, "first", "second")
 }
@@ -19440,7 +19368,7 @@ annotation Route {
 }
 
 @Route { path: "/health" }
-def health() Str = "ok"
+fn health() Str = "ok"
 "#,
         );
         let result = check_program(&program);
@@ -19482,7 +19410,7 @@ annotation Route {
     fn allows_single_statement_match_arms_without_braces() {
         let program = parse_inline(
             r#"
-def main(flag Bool) Unit {
+fn main(flag Bool) Unit {
     var total Int = 0
     match flag {
         case true => total += 1
@@ -19499,7 +19427,7 @@ def main(flag Bool) Unit {
     fn allows_list_remove_first_and_seeded_fold() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values = Vector(1, 2, 3)
     removed Option[Int] = values.removeFirst()
     total Int = values.fold(0, (acc, value) => acc + value)
@@ -19514,7 +19442,7 @@ def main() Unit {
     fn rejects_removed_collection_aliases() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values = Vector(1, 2, 3)
     values.append(4)
     println(values.head)
@@ -19551,7 +19479,7 @@ def main() Unit {
     fn rejects_non_bool_assert_condition() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     assert(1)
 }
 "#,
@@ -19573,7 +19501,7 @@ def main() Unit {
     fn allows_try_with_same_option_family_and_different_success_type() {
         let program = parse_inline(
             r#"
-def main(source Option[Int]) Option[Str] {
+fn main(source Option[Int]) Option[Str] {
     value = try source
     panic("done")
 }
@@ -19587,7 +19515,7 @@ def main(source Option[Int]) Option[Str] {
     fn allows_try_with_same_result_family_and_different_success_type() {
         let program = parse_inline(
             r#"
-def main(source Result[Int, Str]) Result[Str, Str] {
+fn main(source Result[Int, Str]) Result[Str, Str] {
     value = try source
     panic("done")
 }
@@ -19601,7 +19529,7 @@ def main(source Result[Int, Str]) Result[Str, Str] {
     fn rejects_try_with_mismatched_container_family() {
         let program = parse_inline(
             r#"
-def main(source Result[Int, Str]) Option[Int] {
+fn main(source Result[Int, Str]) Option[Int] {
     value = try source
     panic("done")
 }
@@ -19624,7 +19552,7 @@ def main(source Result[Int, Str]) Option[Int] {
     fn rejects_try_with_mismatched_result_error_type() {
         let program = parse_inline(
             r#"
-def main(source Result[Int, Int]) Result[Str, Str] {
+fn main(source Result[Int, Int]) Result[Str, Str] {
     value = try source
     panic("done")
 }
@@ -19647,7 +19575,7 @@ def main(source Result[Int, Int]) Result[Str, Str] {
     fn rejects_try_with_mismatched_either_left_type() {
         let program = parse_inline(
             r#"
-def main(source Either[Int, Int]) Either[Str, Str] {
+fn main(source Either[Int, Int]) Either[Str, Str] {
     value = try source
     panic("done")
 }
@@ -19679,7 +19607,7 @@ class User {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ User = User("Ada")
 }
 "#,
@@ -19703,7 +19631,7 @@ class User {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ User = User("Ada")
     _ User = User { age: 12, name: "Ben" }
     _ User = User { name: "Cara" }
@@ -19727,7 +19655,7 @@ class Path {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ Path = Path()
     _ Path = Path("usr", "local", "bin")
     _ Path = Path { segments: ["etc", "hosts"] }
@@ -19751,7 +19679,7 @@ class Path {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ Path = Path()
     _ Path = Path("usr")
     _ Path = Path { segments: ["etc"] }
@@ -19824,7 +19752,7 @@ class Bad {
     fn rejects_multiple_variadic_function_parameters() {
         let program = parse_inline(
             r#"
-def bad(left [Int] vararg, right [Int] vararg) Unit = ()
+fn bad(left [Int] vararg, right [Int] vararg) Unit = ()
 "#,
         );
         let result = check_program(&program);
@@ -19853,7 +19781,7 @@ class Bucket {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ Bucket = Bucket(1, 2, 3)
 }
 "#,
@@ -19902,7 +19830,7 @@ class Path {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ Path = Path { segments: ["usr"] }
 }
 "#,
@@ -19924,11 +19852,11 @@ class User {
 }
 
 object User {
-    def create(name Str) User = User { name: name }
+    fn create(name Str) User = User { name: name }
 }
 
 
-def main() Unit {
+fn main() Unit {
     user = User { name: "Ada" }
 }
 "#,
@@ -19966,7 +19894,7 @@ class Counter {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ Counter = Counter(1, "Ada")
 }
 "#,
@@ -20010,7 +19938,7 @@ class Holder {
     payload { x Int }
 }
 
-def main() Unit {
+fn main() Unit {
     payload = { x: 7 }
     fromValue Holder = Holder(payload)
     fromLiteral Holder = Holder({ x: 8 })
@@ -20026,7 +19954,7 @@ def main() Unit {
     fn allows_anonymous_shape_fields_typed_by_context() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     value = "Ada"
     user { name Str, age Int } = {
         name: value
@@ -20055,7 +19983,7 @@ class ClassPoint {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     x = 4
     y = 5
     named Point = Point { x, y }
@@ -20074,7 +20002,7 @@ def main() Unit {
     fn field_punning_matches_anonymous_shape_fields_by_name() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     x = 4
     y = 5
     point { x Int, z Int } = new { x, y }
@@ -20108,7 +20036,7 @@ shape Rollup {
     total Int
 }
 
-def main() Unit {
+fn main() Unit {
     source = StoredRollup { count: 2, total: 7, internalId: 99 }
     named Rollup = Rollup { count: source.count, total: source.total }
     explicit Rollup = { count: source.count, total: source.total }
@@ -20128,7 +20056,7 @@ def main() Unit {
     fn allows_anonymous_shape_spread_copy_and_extend() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     base = { name: "Ada", age: 10 }
     aged = { ...base, age: 42 }
     updated = { ...aged, city: "Tampa" }
@@ -20150,7 +20078,7 @@ shape Amount {
     value Int
 }
 
-def main() Unit {
+fn main() Unit {
     original = Amount(10)
     updated Amount = { ...original, value: 42 }
     value Int = updated.value
@@ -20175,7 +20103,7 @@ shape Batch {
     position Point
 }
 
-def main() Unit {
+fn main() Unit {
     original = Batch([1, 2], Point(3, 4))
     updated Batch = {
         ...original
@@ -20199,7 +20127,7 @@ shape Batch {
     items [Int]
 }
 
-def main() Unit {
+fn main() Unit {
     batch Batch = Batch([1])
     batch.items.add(42)
     batch.items := [3]
@@ -20224,7 +20152,7 @@ def main() Unit {
     fn explicit_shape_field_resolves_spread_overlap() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     point = { x: 1, y: 2 }
     dot = { x: 3, time: 4 }
     merged = {
@@ -20246,7 +20174,7 @@ def main() Unit {
     fn rejects_unresolved_shape_spread_overlap() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     point = { x: 1, y: 2 }
     dot = { x: 3, time: 4 }
     merged = { ...point, ...dot }
@@ -20271,7 +20199,7 @@ def main() Unit {
     fn rejects_non_shape_spread() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     value = { ...10, age: 42 }
 }
 "#,
@@ -20291,7 +20219,7 @@ def main() Unit {
     fn rejects_duplicate_explicit_shape_fields() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     value = { age: 10, age: 42 }
 }
 "#,
@@ -20318,7 +20246,7 @@ class Account {
     private score Int = 5
 }
 
-def main() Unit {
+fn main() Unit {
     _ Account = Account("Ada", 10)
     _ Account = Account { name: "Ada", age: 10 }
 }
@@ -20335,7 +20263,7 @@ def main() Unit {
 class AssetPrices {
     assets [Str] = this.makeAssets()
 
-    def makeAssets() [Str] = []
+    fn makeAssets() [Str] = []
 }
 
 "#,
@@ -20385,7 +20313,7 @@ class Box {
     label Str
 }
 
-def main() Unit {
+fn main() Unit {
     let (a, b) = Box(1, "x")
 }
 "#,
@@ -20413,7 +20341,7 @@ class User {
     age Int
 }
 
-def main() Str {
+fn main() Str {
     user User = User { name: "Sergey", location: "Tampa", age: 37 }
     let { location Str as loc, name } = user
     return name + " from " + loc
@@ -20433,7 +20361,7 @@ class User {
     location Str
 }
 
-def main() Str {
+fn main() Str {
     user User = User { name: "Sergey", location: "Tampa" }
     let { location, name } = user
     return name + " from " + location
@@ -20461,7 +20389,7 @@ class SecretUser {
 }
 
 
-def main() Str {
+fn main() Str {
     let { location, name } = SecretUser("Sergey", "secret", "Tampa")
     return name + " from " + location
 }
@@ -20480,7 +20408,7 @@ class User {
     location Str
 }
 
-def main() Unit {
+fn main() Unit {
     user User = User { name: "Sergey", location: "Tampa" }
     let { missing } = user
 }
@@ -20506,7 +20434,7 @@ class User {
     location Str
 }
 
-def main() Str {
+fn main() Str {
     user User = User { name: "Sergey", location: "Tampa" }
     let { location } = user
     return location
@@ -20526,7 +20454,7 @@ class Box {
     label Str
 }
 
-def main() Unit {
+fn main() Unit {
     pair (Int, Str) = Box(1, "x")
 }
 "#,
@@ -20548,7 +20476,7 @@ def main() Unit {
     fn allows_named_anonymous_shape_assignment() {
         let program = parse_inline(
             r#"
-def main() Int {
+fn main() Int {
     point { x Int, y Int } = { x: 4, y: 5 }
     point.x + point.y
 }
@@ -20567,7 +20495,7 @@ shape Point {
     y Int
 }
 
-def main() Int {
+fn main() Int {
     point Point = Point(4, 5)
     point.x + point.y
 }
@@ -20581,7 +20509,7 @@ def main() Int {
     fn rejects_tuple_to_anonymous_shape_assignment() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     point { x Int, y Int } = (4, 5)
 }
 "#,
@@ -20608,7 +20536,7 @@ shape Point {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     point Point = new(4, 5)
     anonymous { x Int, y Int } = new(4, 5)
     reversed { y Int, x Int } = new(4, 5)
@@ -20635,7 +20563,7 @@ shape Point {
 
 type Position = Point
 
-def main() Unit {
+fn main() Unit {
     worker Worker = new("Ada", 42)
     point Position = new { x: 4, y: 5 }
 }
@@ -20646,7 +20574,7 @@ def main() Unit {
     }
 
     #[test]
-    fn checks_nonrecursive_default_initialization() {
+    fn checks_explicit_construction_preserving_declared_defaults() {
         let program = parse_inline(
             r#"
 class RetrySettings {
@@ -20681,12 +20609,20 @@ shape Settings {
     counts [Str: Int]
 }
 
-def main() Unit {
-    settings Settings = default {}
-    overridden Settings = default { label: "changed" }
-    anonymous { enabled Bool, files [Str] } = default {}
-    empty {} = default {}
-    point Point = default { x: 1, y: 2 }
+fn main() Unit {
+    settings Settings = {
+        enabled: false
+        retries: RetrySettings()
+        explicit: ExplicitSettings()
+        nested: NestedDefaults()
+        note: None
+        files: []
+        counts: []
+    }
+    overridden Settings = { ...settings, label: "changed" }
+    anonymous { enabled Bool, files [Str] } = { enabled: false, files: [] }
+    empty {} = {}
+    point Point = { x: 1, y: 2 }
 }
 "#,
         );
@@ -20695,7 +20631,7 @@ def main() Unit {
     }
 
     #[test]
-    fn rejects_default_initialization_that_would_require_recursive_derivation() {
+    fn rejects_omitted_fields_without_declared_defaults() {
         let program = parse_inline(
             r#"
 shape Point {
@@ -20708,19 +20644,15 @@ shape State {
     files [Str]
 }
 
-def main() Unit {
-    state State = default {}
+fn main() Unit {
+    state State = {}
 }
 "#,
         );
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "invalid_default_initialization"
-                    && diagnostic
-                        .message
-                        .contains("field 'origin' requires an explicit value")
-                    && diagnostic.message.contains("Point")
+                diagnostic.message.contains("origin") && diagnostic.message.contains("missing")
             }),
             "{:#?}",
             result.diagnostics
@@ -20736,7 +20668,7 @@ class EmptyClass {}
 class DefaultedClass {
     value Int = 7
 
-    def noop() {}
+    fn noop() {}
 }
 
 class ExplicitEmpty {
@@ -20745,14 +20677,14 @@ class ExplicitEmpty {
 
 shape EmptyShape {}
 
-def noop() Unit {}
-def noop2() = ()
+fn noop() Unit {}
+fn noop2() = ()
 
-def makeEmpty() EmptyClass = new {}
+fn makeEmpty() EmptyClass = new {}
 
-def accept(value EmptyClass) Unit = ()
+fn accept(value EmptyClass) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     instance EmptyClass = new {}
     defaulted DefaultedClass = new {}
     explicit = ExplicitEmpty()
@@ -20763,7 +20695,6 @@ def main() Unit {
     nothing Unit = ()
     anonymous {} = new {}
     structural {} = {}
-    defaultedStructural {} = default {}
     widened Any = anonymous
     accept(new {})
     result Unit = noop2()
@@ -20785,13 +20716,13 @@ def main() Unit {
 class Legacy {
     new() = {}
 
-    def method() Unit = {}
+    fn method() Unit = {}
 }
 
-def inferred() = {}
-def explicit() Unit = {}
+fn inferred() = {}
+fn explicit() Unit = {}
 
-def main() Unit {
+fn main() Unit {
     nothing Unit = {}
     callback fn() Unit = () => {}
 }
@@ -20818,7 +20749,7 @@ def main() Unit {
             r#"
 interface Marker {}
 
-def main() Unit {
+fn main() Unit {
     untyped = {}
     forced = new {}
     widened Any = {}
@@ -20854,9 +20785,9 @@ class Required {
     value Int
 }
 
-def constructed() Required = new {}
+fn constructed() Required = new {}
 
-def body() Required {}
+fn body() Required {}
 "#,
         );
         let result = check_program(&program);
@@ -20904,14 +20835,14 @@ shape Rollup {
     total Int
 }
 
-def makePoint(x Int, y Int) Point = {
+fn makePoint(x Int, y Int) Point = {
     x: x
     y: y
 }
 
-def save(user User) Unit = ()
+fn save(user User) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     x = 4
     y = 5
     name = "Ada"
@@ -20948,7 +20879,7 @@ shape UserData {
     name Str
 }
 
-def main() Unit {
+fn main() Unit {
     fresh User = new { name: "Ada" }
     data = UserData { name: "Grace" }
     explicit User = User { ...data }
@@ -20982,7 +20913,7 @@ shape Point {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     larger = { x: 1, y: 2, yy: 3 }
     projected Point = { ...larger }
     forcedProjection Point = new { ...larger }
@@ -21011,7 +20942,7 @@ def main() Unit {
     fn anonymous_shape_targets_reject_extra_explicit_fields_but_allow_projection() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     wider = { x: 1, y: 2, z: 3 }
     assigned { x Int, y Int } = wider
     spread { x Int, y Int } = { ...wider }
@@ -21049,7 +20980,7 @@ shape Full {
     y Int = 42
 }
 
-def main() Unit {
+fn main() Unit {
     source = Small(1)
     invalid Full = source
     constructed Full = Full { ...source }
@@ -21087,7 +21018,7 @@ class User {
     name Str
 }
 
-def main() Unit {
+fn main() Unit {
     point Point = { x: 1, y: 2 }
     explicitPoint Point = new { x: 3, y: 4 }
     user User = User { name: "Ada" }
@@ -21115,11 +21046,11 @@ class Team {
     leader User
 }
 
-def makeInvalid() User = { name: "Return" }
+fn makeInvalid() User = { name: "Return" }
 
-def accept(user User) Unit = ()
+fn accept(user User) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     profile Profile = { name: "Ada" }
     contextual User = new { name: "Ada" }
     explicit User = User { name: "Ada" }
@@ -21152,15 +21083,15 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Reader {
-    def read() Str
+    fn read() Str
 }
 
 class Success {}
 class Failure {}
 
-def generic[T]() T = new()
+fn generic[T]() T = new()
 
-def main() Unit {
+fn main() Unit {
     reader Reader = new()
     anything Any = new()
     outcome Success | Failure = new()
@@ -21194,7 +21125,7 @@ interface Named {
 class Success { message Str }
 class Failure { message Str }
 
-def main() Unit {
+fn main() Unit {
     value Named = new { name: "Ada" }
     result Success | Failure = new { message: "no target" }
 }
@@ -21221,11 +21152,11 @@ class User { name Str }
 class Admin { name Str }
 
 class Saver {
-    def save(user User) Unit = ()
-    def save(admin Admin) Unit = ()
+    fn save(user User) Unit = ()
+    fn save(admin Admin) Unit = ()
 }
 
-def main(ready Bool) Unit {
+fn main(ready Bool) Unit {
     saver = Saver()
     saver.save(new { name: "Ada" })
     saver.save((new { name: "Grace" }))
@@ -21263,11 +21194,11 @@ class User { name Str }
 class Admin { name Str }
 
 class Saver {
-    def save(user User) Unit = ()
-    def save(admin Admin) Unit = ()
+    fn save(user User) Unit = ()
+    fn save(admin Admin) Unit = ()
 }
 
-def main(ready Bool) Unit {
+fn main(ready Bool) Unit {
     saver = Saver()
     saver.save(User { name: "Ada" })
     saver.save(User("Grace"))
@@ -21287,7 +21218,7 @@ def main(ready Bool) Unit {
     fn rejects_contextual_new_without_expected_type() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     point = new(4, 5)
 }
 "#,
@@ -21319,7 +21250,7 @@ shape HttpError {
     contentType Str = "application/json"
 }
 
-def route() Result[HttpResponse, HttpError] {
+fn route() Result[HttpResponse, HttpError] {
     Err({ status: 400, body: "bad request" })
 }
 "#,
@@ -21342,7 +21273,7 @@ shape Point {
     y Int
 }
 
-def main() Int {
+fn main() Int {
     pixel Pixel = Pixel(4, 5)
     implicit Point = pixel
     explicit Point = { ...pixel }
@@ -21373,14 +21304,14 @@ def main() Int {
         let program = parse_inline(
             r#"
 interface Named {
-    def label() Str
+    fn label() Str
 }
 
 shape PointView with Named {
     x Int
     y Int
 
-    def label() Str = this.x + "," + this.y
+    fn label() Str = this.x + "," + this.y
 }
 
 
@@ -21389,7 +21320,7 @@ class Pixel {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     pixel Pixel = Pixel(4, 5)
     view PointView = { ...pixel }
     named Named = view
@@ -21406,14 +21337,14 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Named {
-    def label() Str
+    fn label() Str
 }
 
 shape PointView with Named {
     x Int
     y Int
 
-    def label() Str = this.x + "," + this.y
+    fn label() Str = this.x + "," + this.y
 }
 
 
@@ -21422,7 +21353,7 @@ class Pixel {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     pixel Pixel = Pixel(4, 5)
     named Named = pixel
 }
@@ -21448,7 +21379,7 @@ class User {
     age Int
 }
 
-def main() Unit {
+fn main() Unit {
     user User = ("Ada", 42)
 }
 "#,
@@ -21475,7 +21406,7 @@ shape Point {
     y Str
 }
 
-def main() Unit {
+fn main() Unit {
     point Point = new { x: 4, y: 5 }
 }
 "#,
@@ -21500,7 +21431,7 @@ class Box {
     label Str
 }
 
-def main() Unit {
+fn main() Unit {
     box Box = Box(1, "x")
     match box {
         case (a, b) => OS.println(a, b)
@@ -21525,7 +21456,7 @@ def main() Unit {
     fn rejects_irrefutable_if_let_tuple_pattern() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     pair (Int, Str) = (1, "x")
     if let (left, right) = pair {
         OS.println(left, right)
@@ -21553,7 +21484,7 @@ def main() Unit {
 class Worker {
 }
 
-def main() Unit {
+fn main() Unit {
     worker Worker = Worker {}
     if let item Worker = worker {
         OS.println(item)
@@ -21578,7 +21509,7 @@ def main() Unit {
     fn rejects_incompatible_let_else_fallback() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     value Option[Int] = Some(1)
     let Some { value as item } = value else {
         ()
@@ -21609,7 +21540,7 @@ class User {
     value Int
 }
 
-def main() Unit {
+fn main() Unit {
     maybePair Option[(Int, Int)] = None
     let Some { value as pair } = maybePair else (1, 2)
 
@@ -21637,7 +21568,7 @@ class User {
     value Int
 }
 
-def main() Unit {
+fn main() Unit {
     candidate Any = 0
     let User { name, value } = candidate else ("fallback", 22)
     OS.println(name, value)
@@ -21665,7 +21596,7 @@ class User {
     name Str
 }
 
-def main() Unit {
+fn main() Unit {
     candidate Any = 0
     let User { name } as user = candidate else {
         name: "Unknown"
@@ -21696,12 +21627,12 @@ class User {
     name Str
 }
 
-def read(candidate Any) Str {
+fn read(candidate Any) Str {
     let User { name } as user = candidate else return "missing"
     name + user.name
 }
 
-def main() Unit {
+fn main() Unit {
     candidate Option[User] = None
     let Some { value: User { name } } = candidate else "Unknown"
     OS.println(name)
@@ -21716,7 +21647,7 @@ def main() Unit {
     fn rejects_placeholder_lambda_shorthand() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     items = Vector(1, 2, 3)
     mapped = items.map(_ + 1)
 }
@@ -21737,11 +21668,11 @@ def main() Unit {
     fn allows_ignored_lambda_parameter_slots() {
         let program = parse_inline(
             r#"
-def consumeOne(f fn(Int) Int) Int = f(10)
+fn consumeOne(f fn(Int) Int) Int = f(10)
 
-def consumeTwo(f fn(Int, Int) Int) Int = f(20, 3)
+fn consumeTwo(f fn(Int, Int) Int) Int = f(20, 3)
 
-def main() Unit {
+fn main() Unit {
     one = consumeOne((_) => 1)
     bare = consumeOne(_ => 1)
     left = consumeTwo((x, _) => x)
@@ -21759,9 +21690,9 @@ def main() Unit {
     fn rejects_reading_ignored_lambda_parameter_slot() {
         let program = parse_inline(
             r#"
-def consumeTwo(f fn(Int, Int) Int) Int = f(20, 3)
+fn consumeTwo(f fn(Int, Int) Int) Int = f(20, 3)
 
-def main() Unit {
+fn main() Unit {
     value = consumeTwo((_, item) => _ + item)
 }
 "#,
@@ -21781,12 +21712,12 @@ def main() Unit {
     fn accepts_explicit_callback_parameters_and_forwarding() {
         let program = parse_inline(
             r#"
-def inner(value fn() Int) Int = value()
+fn inner(value fn() Int) Int = value()
 
-def outer(value fn() Int) Int =
+fn outer(value fn() Int) Int =
     inner(value)
 
-def main() Unit {
+fn main() Unit {
     result Int = outer { => 5 }
 }
 "#,
@@ -21799,9 +21730,9 @@ def main() Unit {
     fn rejects_implicit_wrapping_of_callback_arguments() {
         let program = parse_inline(
             r#"
-def consume(value fn() Int) Int = value()
+fn consume(value fn() Int) Int = value()
 
-def main() {
+fn main() {
     consume(5)
 }
 "#,
@@ -21834,11 +21765,11 @@ def main() {
     fn permits_try_within_callback_return_boundary() {
         let program = parse_inline(
             r#"
-def delayed(value fn() Int?) Int? = value()
+fn delayed(value fn() Int?) Int? = value()
 
-def load() Option[Int] = Some(1)
+fn load() Option[Int] = Some(1)
 
-def main() Unit {
+fn main() Unit {
     result Int? = delayed { =>
         value = try load()
         Some(value)
@@ -21858,7 +21789,7 @@ type MaybeInt =
     object NoneX {}
     | class SomeX { value Int }
 
-def main() Unit {
+fn main() Unit {
     values Vector[MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX]
     for value <- values {
         let SomeX { value as item } = value else continue
@@ -21879,9 +21810,9 @@ type MaybeInt =
     object NoneX {}
     | class SomeX { value Int }
 
-def fail() Never = panic("boom")
+fn fail() Never = panic("boom")
 
-def main(value MaybeInt) Unit {
+fn main(value MaybeInt) Unit {
     let SomeX { value as item } = value else fail()
     OS.println(item)
 }
@@ -21900,8 +21831,8 @@ class IntRange {
     end Int
 }
 
-def contains(range Option[IntRange], value Int) Bool {
-    def outside(candidate Int) Bool {
+fn contains(range Option[IntRange], value Int) Bool {
+    fn outside(candidate Int) Bool {
         let bounds <- range else return false
         candidate < bounds.start || candidate > bounds.end
     }
@@ -21918,8 +21849,8 @@ def contains(range Option[IntRange], value Int) Bool {
     fn rejects_value_return_inside_implicit_unit_local_function() {
         let program = parse_inline(
             r#"
-def contains(range Option[Int], value Int) Bool {
-    def present() {
+fn contains(range Option[Int], value Int) Bool {
+    fn present() {
         let item <- range else return false
         item == value
     }
@@ -21945,8 +21876,8 @@ def contains(range Option[Int], value Int) Bool {
     fn unannotated_equals_block_local_function_returns_unit() {
         let program = parse_inline(
             r#"
-def contains(range Option[Int], value Int) Bool {
-    def report() = {
+fn contains(range Option[Int], value Int) Bool {
+    fn report() = {
         let item <- range else return
         println(item == value)
     }
@@ -21964,7 +21895,7 @@ def contains(range Option[Int], value Int) Bool {
     fn rejects_value_body_when_return_type_is_omitted() {
         let program = parse_inline(
             r#"
-def isMissing(value Option[Int]) = {
+fn isMissing(value Option[Int]) = {
     value is None
 }
 "#,
@@ -21984,7 +21915,7 @@ def isMissing(value Option[Int]) = {
     fn allows_extract_shorthand_forms() {
         let program = parse_inline(
             r#"
-def main(
+fn main(
     optionValue Option[Int],
     resultValue Result[Int, Str],
     eitherValue Either[Str, Int]
@@ -22012,7 +21943,7 @@ def main(
     fn allows_refutable_while_let_conditions() {
         let program = parse_inline(
             r#"
-def sum(start Option[Int]) Int {
+fn sum(start Option[Int]) Int {
     var current = start
     var total = 0
     while let value <- current && value > 0 {
@@ -22031,7 +21962,7 @@ def sum(start Option[Int]) Int {
     fn rejects_irrefutable_while_let_conditions() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     while let value = 1 {
         println(value)
     }
@@ -22057,7 +21988,7 @@ type MaybeInt =
     object Missing {}
     | class Present { value Int }
 
-def main() Unit {
+fn main() Unit {
     first MaybeInt = Missing
     second MaybeInt = MaybeInt.Missing
     third MaybeInt = Present(1)
@@ -22072,7 +22003,7 @@ def main() Unit {
     fn materializes_bare_zero_payload_variant_patterns() {
         let program = parse_inline(
             r#"
-def mapOption[X](value Option[Int], f fn(Int) X) Option[X] {
+fn mapOption[X](value Option[Int], f fn(Int) X) Option[X] {
     match value {
         case Some { value as item } => Some(f(item))
         case None => None
@@ -22088,7 +22019,7 @@ def mapOption[X](value Option[Int], f fn(Int) X) Option[X] {
     fn rejects_bare_union_variants_with_payloads() {
         let program = parse_inline(
             r#"
-def main(value Option[Int]) Int {
+fn main(value Option[Int]) Int {
     match value {
         case Some => 1
         case None => 0
@@ -22127,7 +22058,7 @@ type Payload =
 
 object Ready {}
 
-def main(value Any, status Status, maybe Option[Int], payload Payload) Unit {
+fn main(value Any, status Status, maybe Option[Int], payload Payload) Unit {
     match status {
         case Pending => ()
         case Complete => ()
@@ -22165,7 +22096,7 @@ type Outcome =
     }
     | object Empty {}
 
-def main() Unit {
+fn main() Unit {
     omitted Outcome = Outcome.Left("bad")
     explicit Outcome = Outcome.Left("bad", "custom")
     namedOmitted Outcome = Outcome.Left { value: "named" }
@@ -22185,7 +22116,7 @@ class Node {
     value Int
 }
 
-def missing() { node Option[Node] } {
+fn missing() { node Option[Node] } {
     return { node: None }
 }
 "#,
@@ -22198,7 +22129,7 @@ def missing() { node Option[Node] } {
     fn rejects_zero_payload_union_variant_call_syntax() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     value Option[Int] = None()
 }
 "#,
@@ -22220,7 +22151,7 @@ def main() Unit {
     fn allows_plain_let_only_for_irrefutable_patterns() {
         let program = parse_inline(
             r#"
-def main() Int {
+fn main() Int {
     pair (Int, Int) = (4, 5)
     let (left, right) = pair
     return left + right
@@ -22235,7 +22166,7 @@ def main() Int {
     fn rejects_refutable_plain_let_patterns_without_else() {
         let program = parse_inline(
             r#"
-def main(optionValue Option[Int]) Int {
+fn main(optionValue Option[Int]) Int {
     knownOption = Some(4)
     let Some { value as optionItem } = optionValue
     let {
@@ -22261,7 +22192,7 @@ def main(optionValue Option[Int]) Int {
     fn rejects_extract_shorthand_for_unknown_source_type() {
         let program = parse_inline(
             r#"
-def main(value) Int {
+fn main(value) Int {
     let item <- value else return 0
     return 0
 }
@@ -22282,7 +22213,7 @@ def main(value) Int {
     fn rejects_refutable_for_pattern() {
         let program = parse_inline(
             r#"
-	def main() Unit {
+	fn main() Unit {
 	    values Vector[Option[Int]] = [Some(1), None]
 	    mapped = for {
 	        maybe <- values
@@ -22309,7 +22240,7 @@ def main(value) Int {
     fn rejects_refutable_pattern_in_short_for_yield_generator() {
         let program = parse_inline(
             r#"
-def values(options [Int?]) [Int] =
+fn values(options [Int?]) [Int] =
     for let Some { value } <- options yield value
 "#,
         );
@@ -22332,7 +22263,7 @@ def values(options [Int?]) [Int] =
             (
                 "Option",
                 r#"
-def main() Option[Int] =
+fn main() Option[Int] =
     for item <- Some(1) yield {
         if item > 0 {
             continue
@@ -22344,7 +22275,7 @@ def main() Option[Int] =
             (
                 "Result",
                 r#"
-def main() Result[Int, Str] =
+fn main() Result[Int, Str] =
     for item <- Ok(1) yield {
         if item > 0 {
             continue
@@ -22356,7 +22287,7 @@ def main() Result[Int, Str] =
             (
                 "Either",
                 r#"
-def main() Either[Str, Int] =
+fn main() Either[Str, Int] =
     for item <- Right(1) yield {
         if item > 0 {
             continue
@@ -22388,7 +22319,7 @@ def main() Either[Str, Int] =
             (
                 "Option",
                 r#"
-def main() Option[Int] =
+fn main() Option[Int] =
     for item <- Some(1) yield {
         if item > 0 {
             break
@@ -22400,7 +22331,7 @@ def main() Option[Int] =
             (
                 "Result",
                 r#"
-def main() Result[Int, Str] =
+fn main() Result[Int, Str] =
     for item <- Ok(1) yield {
         if item > 0 {
             break
@@ -22412,7 +22343,7 @@ def main() Result[Int, Str] =
             (
                 "Either",
                 r#"
-def main() Either[Str, Int] =
+fn main() Either[Str, Int] =
     for item <- Right(1) yield {
         if item > 0 {
             break
@@ -22442,7 +22373,7 @@ def main() Either[Str, Int] =
     fn rejects_discarded_pure_trailing_expression_in_unit_callable() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     value Int = 10
     value + 5
 }
@@ -22463,7 +22394,7 @@ def main() Unit {
     fn rejects_discarded_identifier_statement() {
         let program = parse_inline(
             r#"
-def main() Int {
+fn main() Int {
     value Int = 10
     value
     return 0
@@ -22485,9 +22416,9 @@ def main() Int {
     fn allows_discarded_call_expression_in_unit_callable() {
         let program = parse_inline(
             r#"
-def sideEffect() Int = 5
+fn sideEffect() Int = 5
 
-def main() Unit {
+fn main() Unit {
     sideEffect()
 }
 "#,
@@ -22500,7 +22431,7 @@ def main() Unit {
     fn rejects_discarded_pure_expression_in_if_branch() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     if true {
         1 + 2
     } else {
@@ -22524,9 +22455,9 @@ def main() Unit {
     fn allows_defer_call_and_block() {
         let program = parse_inline(
             r#"
-def cleanup() Unit {}
+fn cleanup() Unit {}
 
-def main() Unit {
+fn main() Unit {
     defer cleanup()
     defer {
         OS.println("later")
@@ -22542,7 +22473,7 @@ def main() Unit {
     fn rejects_control_flow_inside_defer_block() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     defer {
         return ()
     }
@@ -22572,7 +22503,7 @@ type Status =
     object Pending {}
     | object Complete {}
 
-def main() Unit {
+fn main() Unit {
     user User = User("Ada")
     declared Type[User] = typeOf[User]
     actual Type[User] = user.runtimeType
@@ -22594,14 +22525,14 @@ def main() Unit {
     fn allows_existential_type_erasure_and_capture_reads() {
         let program = parse_inline(
             r#"
-def speak(values Vector[_]) Unit {
+fn speak(values Vector[_]) Unit {
     OS.println(values.size)
 }
 
-def intStrMap() Map[Int, Str] = Map()
-def strIntMap() Map[Str, Int] = Map()
+fn intStrMap() Map[Int, Str] = Map()
+fn strIntMap() Map[Str, Int] = Map()
 
-def main() Unit {
+fn main() Unit {
     a Vector[_] = Vector(1, 2, 3)
     b Map[_, Str] = intStrMap()
     c Map[_, _] = strIntMap()
@@ -22623,7 +22554,7 @@ def main() Unit {
     fn rejects_writes_through_existential_list_capture() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values Vector[_] = Vector(1, 2, 3)
     values.add(7)
 }
@@ -22644,10 +22575,10 @@ def main() Unit {
     fn rejects_writes_through_existential_map_captures() {
         let program = parse_inline(
             r#"
-def intStrMap() Map[Int, Str] = Map()
-def strIntMap() Map[Str, Int] = Map()
+fn intStrMap() Map[Int, Str] = Map()
+fn strIntMap() Map[Str, Int] = Map()
 
-def main() Unit {
+fn main() Unit {
     keyErased Map[_, Str] = intStrMap()
     valueErased Map[Str, _] = strIntMap()
 
@@ -22673,7 +22604,7 @@ class SomeType {
     value Int
 }
 
-def main() Unit {
+fn main() Unit {
     values Vector[_] = Vector(1, 2, 3)
     concrete SomeType = values[0]
 }
@@ -22696,9 +22627,9 @@ def main() Unit {
     fn keeps_existential_captures_equal_only_within_same_source() {
         let accepted = parse_inline(
             r#"
-def same[T](left T, right T) Unit {}
+fn same[T](left T, right T) Unit {}
 
-def main() Unit {
+fn main() Unit {
     values Vector[_] = Vector(1, 2, 3)
     same(values[0], values[1])
 }
@@ -22713,9 +22644,9 @@ def main() Unit {
 
         let rejected = parse_inline(
             r#"
-def same[T](left T, right T) Unit {}
+fn same[T](left T, right T) Unit {}
 
-def main() Unit {
+fn main() Unit {
     left Vector[_] = Vector(1)
     right Vector[_] = Vector(2)
     same(left[0], right[0])
@@ -22741,7 +22672,7 @@ class User {
     name Str
 }
 
-def main() Unit {
+fn main() Unit {
     metadata Type[Any] = typeOf[User]
 }
 "#,
@@ -22766,7 +22697,7 @@ def main() Unit {
     fn treats_runtime_type_of_any_as_unknown_metadata() {
         let program = parse_inline(
             r#"
-def inspect(value Any) Unit {
+fn inspect(value Any) Unit {
     metadata Type[_] = value.runtimeType
     exactAny Type[Any] = value.runtimeType
 }
@@ -22796,7 +22727,7 @@ class User {
     name Str
 }
 
-def main() Unit {
+fn main() Unit {
     declared Type = typeOf[User]
 }
 "#,
@@ -22818,13 +22749,13 @@ def main() Unit {
     fn checks_empty_collection_literal_from_expected_type() {
         let program = parse_inline(
             r#"
-def countMap(values [Str: Int]) Int = values.size
-def countArray(values [Str]) Int = values.size
-def consume(rows Iterable[[Int]]) Unit = ()
-def emptyMap() [Str: Int] = []
-def emptyArray() [Str] = []
+fn countMap(values [Str: Int]) Int = values.size
+fn countArray(values [Str]) Int = values.size
+fn consume(rows Iterable[[Int]]) Unit = ()
+fn emptyMap() [Str: Int] = []
+fn emptyArray() [Str] = []
 
-def main() Int {
+fn main() Int {
     directMap [Str: Int] = []
     directArray [Str] = []
     emptyIterable Iterable[[Int]] = []
@@ -22843,7 +22774,7 @@ def main() Int {
     fn rejects_nested_vector_elements_incompatible_with_iterable_context() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     rows Iterable[[Int]] = [["wrong"]]
 }
 "#,
@@ -22868,13 +22799,13 @@ type Maybe[T] with Iterable[T] =
     | object Missing {}
 
 ext Maybe[T] {
-    def iterator() Iterator[T] = match this {
+    fn iterator() Iterator[T] = match this {
         case Present { value } => [value].iterator()
         case Missing => Vector[T]().iterator()
     }
 }
 
-def count(values Iterable[Int]) Int = {
+fn count(values Iterable[Int]) Int = {
     var result = 0
     for _ <- values {
         result += 1
@@ -22882,7 +22813,7 @@ def count(values Iterable[Int]) Int = {
     result
 }
 
-def main() Int {
+fn main() Int {
     present Maybe[Int] = Present(1)
     missing Maybe[Int] = Missing
     count(present) + count(missing)
@@ -22897,9 +22828,9 @@ def main() Int {
     fn allows_vector_flat_map_callback_to_return_option() {
         let program = parse_inline(
             r#"
-def keepOdd(value Int) Int? = if value % 2 == 1 { Some(value) } else { None }
+fn keepOdd(value Int) Int? = if value % 2 == 1 { Some(value) } else { None }
 
-def main() [Int] =
+fn main() [Int] =
     [1, 2, 3].flatMap(value => keepOdd(value))
 "#,
         );
@@ -22911,7 +22842,7 @@ def main() [Int] =
     fn checks_list_and_map_spread_literals() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     first = [1, 2]
     second = [3, 4]
     values [Int] = [0, ...first, ...second, 5]
@@ -22934,7 +22865,7 @@ def main() Unit {
     fn rejects_cross_family_collection_spreads() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values = [1, 2]
     entries [Str: Int] = ["one": 1]
     mixed = [...values, ...entries]
@@ -22974,7 +22905,7 @@ def main() Unit {
     fn rejects_empty_collection_literal_without_expected_type() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values = []
 }
 "#,
@@ -22996,7 +22927,7 @@ def main() Unit {
     fn rejects_empty_collection_literal_for_non_bracket_collection_types() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values Set[Int] = []
     array Array[Int] = []
 }
@@ -23026,7 +22957,7 @@ class Consumer {
 }
 
 
-def main() Unit {
+fn main() Unit {
     consumer = Consumer([])
 }
 "#,
@@ -23050,14 +22981,14 @@ shape User {
     name Str
 }
 
-def fromOption(value Option[User]) Str = value!.name
-def fromResult(value Result[Int, Str]) Int = value !
-def fromEither(value Either[Str, Int]) Int = value !
-def invoke(value Option[fn() Str]) Str = value!()
-def indexed(value Option[[Str: Int]]) Int = value!["first"]!
-def nested(value Option[Option[Int]]) Int = value!!
+fn fromOption(value Option[User]) Str = value!.name
+fn fromResult(value Result[Int, Str]) Int = value !
+fn fromEither(value Either[Str, Int]) Int = value !
+fn invoke(value Option[fn() Str]) Str = value!()
+fn indexed(value Option[[Str: Int]]) Int = value!["first"]!
+fn nested(value Option[Option[Int]]) Int = value!!
 
-def main() Unit {
+fn main() Unit {
     values LinkedList[Int] = LinkedList()
     values.add(5)
     first Int = values.at(0) !
@@ -23078,14 +23009,14 @@ shape Point {
     y Int
 }
 
-def optionValue() Option[Int] = ^5
-def nestedValue() Option[Option[Int]] = ^^9
-def nestedNone() Option[Option[Int]] = ^None
-def choose(flag Bool) Option[Int] = if flag { ^1 } else { ^2 }
-def consume(value Option[Int]) Int = value ?? 0
-def inferred(values [Int]) Int = values.flatMap(value => [value]).at(0) ?? 0
+fn optionValue() Option[Int] = ^5
+fn nestedValue() Option[Option[Int]] = ^^9
+fn nestedNone() Option[Option[Int]] = ^None
+fn choose(flag Bool) Option[Int] = if flag { ^1 } else { ^2 }
+fn consume(value Option[Int]) Int = value ?? 0
+fn inferred(values [Int]) Int = values.flatMap(value => [value]).at(0) ?? 0
 
-def main() Unit {
+fn main() Unit {
     inferred = ^1
     println(inferred! + 1)
     option Option[Int] = ^1
@@ -23105,10 +23036,10 @@ def main() Unit {
     fn rejects_option_wrap_outside_option_contexts_and_wrong_payloads() {
         let program = parse_inline(
             r#"
-def plainContext() Int = ^5
-def resultContext() Result[Int, Str] = ^5
-def eitherContext() Either[Str, Int] = ^5
-def wrongValue() Option[Int] = ^"five"
+fn plainContext() Int = ^5
+fn resultContext() Result[Int, Str] = ^5
+fn eitherContext() Either[Str, Int] = ^5
+fn wrongValue() Option[Int] = ^"five"
 "#,
         );
         let result = check_program(&program);
@@ -23140,7 +23071,7 @@ type Other =
     class Some { value Int }
     | object Missing {}
 
-def read(value Other) Int = match value {
+fn read(value Other) Int = match value {
     case ^item => item
     case _ => 0
 }
@@ -23161,7 +23092,7 @@ def read(value Other) Int = match value {
     fn narrows_stable_identifier_inside_successful_is_branch() {
         let program = parse_inline(
             r#"
-def textSize(value Any) Int {
+fn textSize(value Any) Int {
     if value is Str {
         return value.size
     }
@@ -23177,16 +23108,16 @@ def textSize(value Any) Int {
     fn narrows_logical_right_operands_and_successful_and_branches() {
         let program = parse_inline(
             r#"
-def hasTextSize(value Any) Bool = value is Str && value.size == 4
+fn hasTextSize(value Any) Bool = value is Str && value.size == 4
 
-def textSize(value Any, enabled Bool) Int {
+fn textSize(value Any, enabled Bool) Int {
     if enabled && value is Str && value.size == 4 {
         return value.size
     }
     0
 }
 
-def combinedSize(left Any, right Any) Int {
+fn combinedSize(left Any, right Any) Int {
     if left is Str && right is Str && left.size > 0 && right.size > 0 {
         return left.size + right.size
     }
@@ -23202,21 +23133,21 @@ def combinedSize(left Any, right Any) Int {
     fn preserves_positive_is_narrowing_after_early_exit() {
         let program = parse_inline(
             r#"
-def textSize(value Any) Int {
+fn textSize(value Any) Int {
     if !(value is Str) {
         return 0
     }
     value.size
 }
 
-def textSizeIsNot(value Any) Int {
+fn textSizeIsNot(value Any) Int {
     if value is not Str {
         return 0
     }
     value.size
 }
 
-def textSizeInElse(value Any) Int {
+fn textSizeInElse(value Any) Int {
     if value is not Str {
         return 0
     } else {
@@ -23224,7 +23155,7 @@ def textSizeInElse(value Any) Int {
     }
 }
 
-def textSizeWithElse(value Any) Int {
+fn textSizeWithElse(value Any) Int {
     if value is Str {
     } else {
         return 0
@@ -23241,7 +23172,7 @@ def textSizeWithElse(value Any) Int {
     fn does_not_narrow_mutable_identifiers() {
         let program = parse_inline(
             r#"
-def textSize(source Any) Int {
+fn textSize(source Any) Int {
     var value Any = source
     if value is Str {
         return value.size
@@ -23281,7 +23212,7 @@ def textSize(source Any) Int {
     fn constructs_runtime_collection_classes_with_normal_class_syntax() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     vector Vector[Int] = Vector {}
     map Map[Str, Int] = Map {}
     array Array[Int] = Array(1, 2)
@@ -23306,7 +23237,7 @@ class Box[T] {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     explicitSet Set[Str] = Set[Str]()
     contextualSet Set[Str] = Set()
     contextualNewSet Set[Str] = new()
@@ -23349,7 +23280,7 @@ def main() Unit {
     fn rejects_contextual_collection_braces_with_named_fields() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     values Set[Str] = new { item: "Ada" }
 }
 "#,
@@ -23369,7 +23300,7 @@ def main() Unit {
     fn rejects_uninferable_partial_and_wildcard_generic_construction() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     missing = Set()
     partial = Map[Str]()
     wildcard = Set[_]()
@@ -23404,18 +23335,18 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Callable {
-    def call() Unit
+    fn call() Unit
 }
 
 class Action with Callable {
-    def call() Unit = ()
+    fn call() Unit = ()
 }
 
-def invoke[T with Callable](value T) Unit = value.call()
+fn invoke[T with Callable](value T) Unit = value.call()
 
-def same[L, R when L = R](left L, right R) L = right
+fn same[L, R when L = R](left L, right R) L = right
 
-def main() Unit {
+fn main() Unit {
     invoke(Action {})
     value Int = same(1, 2)
     println(value)
@@ -23431,11 +23362,11 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Callable {
-    def call() Unit
+    fn call() Unit
 }
 
 class Action with Callable {
-    def call() Unit = ()
+    fn call() Unit = ()
 }
 
 class Plain {}
@@ -23449,10 +23380,10 @@ class Pair[L, R when L = R] {
     right R
 }
 
-def valid(value Box[Action]) Unit = value.value.call()
-def invalid(value Box[Plain]) Unit = ()
-def validPair(value Pair[Int, Int]) Unit = ()
-def invalidPair(value Pair[Int, Str]) Unit = ()
+fn valid(value Box[Action]) Unit = value.value.call()
+fn invalid(value Box[Plain]) Unit = ()
+fn validPair(value Pair[Int, Int]) Unit = ()
+fn invalidPair(value Pair[Int, Str]) Unit = ()
 "#,
         );
         let result = check_program(&program);
@@ -23483,15 +23414,15 @@ def invalidPair(value Pair[Int, Str]) Unit = ()
         let program = parse_inline(
             r#"
 interface Callable {
-    def call() Unit
+    fn call() Unit
 }
 
 class Plain {}
 
-def invoke[T with Callable](value T) Unit = value.call()
-def same[L, R when L = R](left L, right R) L = right
+fn invoke[T with Callable](value T) Unit = value.call()
+fn same[L, R when L = R](left L, right R) L = right
 
-def main() Unit {
+fn main() Unit {
     invoke(Plain {})
     _ = same(1, "two")
 }
@@ -23521,19 +23452,19 @@ def main() Unit {
         let program = parse_inline(
             r#"
 interface Callable {
-    def call() Unit
+    fn call() Unit
 }
 
 class Action with Callable {
-    def call() Unit = ()
+    fn call() Unit = ()
 }
 
 class Context[L, R] {
-    def invoke[when L with Callable](value L) Unit = value.call()
-    def merge[when L = R](value R) L = value
+    fn invoke[when L with Callable](value L) Unit = value.call()
+    fn merge[when L = R](value R) L = value
 }
 
-def useContext(context Context[Action, Action], action Action) Action {
+fn useContext(context Context[Action, Action], action Action) Action {
     context.invoke(action)
     return context.merge(action)
 }
@@ -23548,17 +23479,17 @@ def useContext(context Context[Action, Action], action Action) Action {
         let program = parse_inline(
             r#"
 interface Callable {
-    def call() Unit
+    fn call() Unit
 }
 
 class Plain {}
 
 class Context[L, R] {
-    def invoke[when L with Callable](value L) Unit = value.call()
-    def merge[when L = R](value R) L = value
+    fn invoke[when L with Callable](value L) Unit = value.call()
+    fn merge[when L = R](value R) L = value
 }
 
-def invalid(context Context[Plain, Str], plain Plain) Unit {
+fn invalid(context Context[Plain, Str], plain Plain) Unit {
     context.invoke(plain)
     _ = context.merge("value")
 }
@@ -23587,7 +23518,7 @@ def invalid(context Context[Plain, Str], plain Plain) Unit {
     fn rejects_unsafe_extract_from_plain_values() {
         let program = parse_inline(
             r#"
-def invalid(value Int) Int = value !
+fn invalid(value Int) Int = value !
 "#,
         );
         let result = check_program(&program);
@@ -23611,10 +23542,10 @@ class Bird {}
 
 type Pet = Cat | Dog
 
-def fromAlias(value Pet) Dog | Cat = value
-def widen(value Cat | Dog) Cat | Dog | Bird = value
-def reorderAndWiden(value Cat | Dog) Bird | Dog | Cat = value
-def flatten(value Cat | Dog) Cat | (Dog | Cat) = value
+fn fromAlias(value Pet) Dog | Cat = value
+fn widen(value Cat | Dog) Cat | Dog | Bird = value
+fn reorderAndWiden(value Cat | Dog) Bird | Dog | Cat = value
+fn flatten(value Cat | Dog) Cat | (Dog | Cat) = value
 "#,
         );
         let result = check_program(&program);
@@ -23639,10 +23570,10 @@ type Scores = [Str: Int]
 type Companion = Pet
 type Pet = Cat | Dog
 
-def apply(handler Handler, id UserId) Str = handler(id)
-def companion(value Companion) Pet = value
+fn apply(handler Handler, id UserId) Str = handler(id)
+fn companion(value Companion) Pet = value
 
-def main() Unit {
+fn main() Unit {
     id UserId = 7
     handler Handler = (value Int) => value.toStr()
     users Users = [User("Ada")]
@@ -23661,6 +23592,65 @@ def main() Unit {
     }
 
     #[test]
+    fn checks_generic_transparent_aliases() {
+        let result =
+            check_path(workspace_root().join("examples/features/generic_type_aliases.lum"))
+                .unwrap();
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_invalid_generic_alias_applications() {
+        for (source, code) in [
+            (
+                "type Id[T] = T\nfn invalid(value Id) {}",
+                "invalid_type_arity",
+            ),
+            (
+                "type Id[T] = T\nfn invalid(value Id[Int, Str]) {}",
+                "invalid_type_arity",
+            ),
+            (
+                "class Token {}\ntype Key[T with Hashed[T]] = T\nfn invalid(value Key[Token]) {}",
+                "generic_bound_not_satisfied",
+            ),
+            ("type Loop[T] = Loop[[T]]", "cyclic_type_alias"),
+            (
+                "type Left[T] = Right[T]\ntype Right[T] = Left[[T]]",
+                "cyclic_type_alias",
+            ),
+            ("type Id[T] = T\ntype Loop = Id[Loop]", "cyclic_type_alias"),
+            ("type Alias[reified T] = [T]", "reified_alias_parameter"),
+            (
+                "class Token {}\ninterface Marker[T] {}\ntype Checked[T with Hashed[T]] = Marker[T]\nclass Invalid with Checked[Token] {}",
+                "generic_bound_not_satisfied",
+            ),
+            (
+                "class Token {}\ntype Key[T with Hashed[T]] = T\nfn main() { println(typeOf[Key[Token]]) }",
+                "generic_bound_not_satisfied",
+            ),
+            (
+                "class Token {}\ntype Key[T with Hashed[T]] = T\nfn keep[T](value T) T = value\nfn main() { _ = keep[Key[Token]](Token()) }",
+                "generic_bound_not_satisfied",
+            ),
+            (
+                "type Same[A, B when A = B] = (A, B)\nfn invalid(value Same[Int, Str]) {}",
+                "generic_equality_not_satisfied",
+            ),
+        ] {
+            let result = check_program(&parse_inline(source));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
+                "{source}: {:?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
     fn allows_anonymous_shape_types_in_inline_positions() {
         let program = parse_inline(
             r#"
@@ -23669,15 +23659,15 @@ shape Session {
     start Int
     end Int
 
-    def duration() Int = this.end - this.start
+    fn duration() Int = this.end - this.start
 }
 
-def project(value { position Str, start Int }) { position Str } =
+fn project(value { position Str, start Int }) { position Str } =
     { position: value.position }
 
-def copy(value { position Str }) { position Str } = value
+fn copy(value { position Str }) { position Str } = value
 
-def main() Unit {
+fn main() Unit {
     session Session = Session("engineer", 10, 30)
     view { position Str } = project(session)
     copied { position Str } = copy(view)
@@ -23697,7 +23687,7 @@ class Cat {}
 class Dog {}
 class Bird {}
 
-def narrow(value Cat | Dog) Dog | Bird = value
+fn narrow(value Cat | Dog) Dog | Bird = value
 "#,
         );
         let result = check_program(&program);
@@ -23731,7 +23721,7 @@ shape XYZ {
     z Int
 }
 
-def main() Unit {
+fn main() Unit {
     original = XYZ(1, 2, 3)
     selected XY | XZ = original
     reordered XZ | XY = original
@@ -23798,9 +23788,9 @@ shape Label {
     label Str
 }
 
-def project(value XYZ | Label) XY | Label = value
+fn project(value XYZ | Label) XY | Label = value
 
-def main() Unit {
+fn main() Unit {
     original = XYZ(1, 2, 3)
     unique XY | Label = original
     exact XY | X = Position(2, 1)
@@ -23836,9 +23826,9 @@ type Second = First
     fn rejects_removed_or_panic_methods_on_lifted_values() {
         let program = parse_inline(
             r#"
-def fromOption(value Option[Int]) Int = value.orPanic()
-def fromResult(value Result[Int, Str]) Int = value.orPanic()
-def fromEither(value Either[Str, Int]) Int = value.orPanic()
+fn fromOption(value Option[Int]) Int = value.orPanic()
+fn fromResult(value Result[Int, Str]) Int = value.orPanic()
+fn fromEither(value Either[Str, Int]) Int = value.orPanic()
 "#,
         );
         let result = check_program(&program);
@@ -23858,9 +23848,9 @@ def fromEither(value Either[Str, Int]) Int = value.orPanic()
     fn rejects_removed_get_or_methods_on_lifted_values() {
         let program = parse_inline(
             r#"
-def fromOption(value Option[Int]) Int = value.getOr(0)
-def fromResult(value Result[Int, Str]) Int = value.getOr(0)
-def fromEither(value Either[Str, Int]) Int = value.getOr(0)
+fn fromOption(value Option[Int]) Int = value.getOr(0)
+fn fromResult(value Result[Int, Str]) Int = value.getOr(0)
+fn fromEither(value Either[Str, Int]) Int = value.getOr(0)
 "#,
         );
         let result = check_program(&program);
@@ -23880,8 +23870,8 @@ def fromEither(value Either[Str, Int]) Int = value.getOr(0)
     fn rejects_removed_panic_only_helpers() {
         let program = parse_inline(
             r#"
-def rune(text Str) Rune = text.expectRuneAt(0)
-def reflection(method Method, receiver Any) Any = method.invoke(receiver)
+fn rune(text Str) Rune = text.expectRuneAt(0)
+fn reflection(method Method, receiver Any) Any = method.invoke(receiver)
 "#,
         );
         let result = check_program(&program);
@@ -23918,7 +23908,7 @@ shape Point {
     get total Int = this.x + this.y
 }
 
-def main() Unit {
+fn main() Unit {
     item Item = Item("Ada")
     point Point = Point(2, 3)
     label Str = item.label
@@ -23956,7 +23946,7 @@ class Values with Accessors {
     get position { x Int, y Int } = { x: 1, y: 2 }
 }
 
-def read(values Accessors) Unit {
+fn read(values Accessors) Unit {
     counts [Str: Int] = values.counts
     rows [[Int]] = values.rows
     optionalValues [Int?] = values.optionalValues
@@ -24005,18 +23995,18 @@ shape Marker {
         let program = parse_inline(
             r#"
 interface Positioned {
-    def position() { x Int, y Int }
+    fn position() { x Int, y Int }
     get label Str
 }
 
 class Located with Positioned {
-    def position() { x Int, y Int } = { x: 3, y: 4 }
+    fn position() { x Int, y Int } = { x: 3, y: 4 }
     get label Str = "point"
 }
 
-def coordinate(value Positioned) Int = value.position().x
+fn coordinate(value Positioned) Int = value.position().x
 
-def main() Unit {
+fn main() Unit {
     value Positioned = Located()
     println(value.label, coordinate(value))
 }
@@ -24032,7 +24022,7 @@ def main() Unit {
             r#"
 class FieldAndMethod {
     label Str
-    def label() Str = this.label
+    fn label() Str = this.label
 }
 
 class FieldAndGetter {
@@ -24042,7 +24032,7 @@ class FieldAndGetter {
 
 class GetterAndMethod {
     get status Str = "ready"
-    def status(verbose Bool) Str = if verbose { "ready" } else { "" }
+    fn status(verbose Bool) Str = if verbose { "ready" } else { "" }
 }
 
 class RepeatedGetter {
@@ -24065,11 +24055,11 @@ class RepeatedGetter {
         let program = parse_inline(
             r#"
 class Formatter {
-    def format(value Int) Str = value.toStr()
-    def format(value Str) Str = value
+    fn format(value Int) Str = value.toStr()
+    fn format(value Str) Str = value
 }
 
-def main(formatter Formatter) Unit {
+fn main(formatter Formatter) Unit {
     println(formatter.format(1), formatter.format("one"))
 }
 "#,
@@ -24083,17 +24073,17 @@ def main(formatter Formatter) Unit {
         let program = parse_inline(
             r#"
 class Formatter {
-    def render(value Int) Str = value.toStr()
-    def render(value Str) Str = value
+    fn render(value Int) Str = value.toStr()
+    fn render(value Str) Str = value
 
-    def classify(value Str) Str = "text"
-    def classify(value Any) Int = 1
+    fn classify(value Str) Str = "text"
+    fn classify(value Any) Int = 1
 }
 
-def render(value Int) Str = value.toStr()
-def render(value Str) Str = value
+fn render(value Int) Str = value.toStr()
+fn render(value Str) Str = value
 
-def main(formatter Formatter) Unit {
+fn main(formatter Formatter) Unit {
     numbers = [1]
     literal Str = formatter.render(3)
     arithmetic Str = formatter.render(1 + 2)
@@ -24141,8 +24131,8 @@ class Admin {
 }
 
 class Saver {
-    def save(tag Int, value User) Str = "user"
-    def save(tag Str, value Admin) Str = "admin"
+    fn save(tag Int, value User) Str = "user"
+    fn save(tag Str, value Admin) Str = "admin"
 }
 
 class Wrapper {
@@ -24150,7 +24140,7 @@ class Wrapper {
     new(tag Str, value Admin) {}
 }
 
-def main() Unit {
+fn main() Unit {
     saver = Saver()
     result Str = saver.save(1, new { name: "Ada" })
     wrapped = Wrapper(1, new { name: "Grace" })
@@ -24166,22 +24156,22 @@ def main() Unit {
     fn selects_overloaded_callable_references_from_expected_function_types() {
         let program = parse_inline(
             r#"
-def render(value Int) Str = value.toStr()
-def render(value Str) Str = value
+fn render(value Int) Str = value.toStr()
+fn render(value Str) Str = value
 
 class Formatter {
-    def render(value Int) Str = value.toStr()
-    def render(value Str) Str = value
+    fn render(value Int) Str = value.toStr()
+    fn render(value Str) Str = value
 
-    def selected() fn(Str) Str = render
+    fn selected() fn(Str) Str = render
 }
 
 object SharedFormatter {
-    def render(value Int) Str = value.toStr()
-    def render(value Str) Str = value
+    fn render(value Int) Str = value.toStr()
+    fn render(value Str) Str = value
 }
 
-def main(formatter Formatter) Unit {
+fn main(formatter Formatter) Unit {
     topLevel fn(Str) Str = render
     instance fn(Str) Str = formatter.render
     shared fn(Str) Str = SharedFormatter.render
@@ -24200,10 +24190,10 @@ def main(formatter Formatter) Unit {
 class User {
     name Str
 
-    def toDto(user User) Str = user.name
+    fn toDto(user User) Str = user.name
 }
 
-def main() Unit {
+fn main() Unit {
     convert fn(User) Str = User.toDto
 }
 "#,
@@ -24224,11 +24214,11 @@ def main() Unit {
         let program = parse_inline(
             r#"
 class Formatter {
-    def render(value Any) Str = "any"
-    def render(value Str) Str = value
+    fn render(value Any) Str = "any"
+    fn render(value Str) Str = value
 }
 
-def main(formatter Formatter) Unit {
+fn main(formatter Formatter) Unit {
     untyped = formatter.render
     compatible fn(Str) Any = formatter.render
 }
@@ -24257,8 +24247,8 @@ class Item {
 }
 
 ext Item {
-    def label() Str = this.label
-    def status(verbose Bool) Str = if verbose { this.status } else { "" }
+    fn label() Str = this.label
+    fn status(verbose Bool) Str = if verbose { this.status } else { "" }
 }
 "#,
         );
@@ -24280,7 +24270,7 @@ class Item {
     get label Str = this.name
 }
 
-def read(item Item) Str = item.label()
+fn read(item Item) Str = item.label()
 "#,
         );
         let result = check_program(&program);
@@ -24303,7 +24293,7 @@ class Factory {
     get implicitCall Int = creator(4)
 }
 
-def read(factory Factory) Int = factory.creator(5)
+fn read(factory Factory) Int = factory.creator(5)
 "#,
         );
         let result = check_program(&program);
@@ -24314,7 +24304,7 @@ def read(factory Factory) Int = factory.creator(5)
     fn warns_when_a_mutable_local_is_never_reassigned() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     var count = 1
     println(count)
 }
@@ -24337,7 +24327,7 @@ def main() Unit {
     fn mutable_local_warning_tracks_binding_reassignment_only() {
         let program = parse_inline(
             r#"
-def main() Unit {
+fn main() Unit {
     var count = 0
     if true {
         count += 1

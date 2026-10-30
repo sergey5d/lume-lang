@@ -115,7 +115,7 @@ label = match access {
 
         <h2 id="failure">Option, Result, Either, and try</h2>
         <p>Lume represents optional values and recoverable failure explicitly. <code>try</code> unwraps the success side and propagates the container's failure. Use <code>mapError</code> or <code>mapLeft</code> before <code>try</code> when the enclosing function uses a different error type.</p>
-        <pre><code>def load(id Int) Result[User, AppError] = {
+        <pre><code>fn load(id Int) Result[User, AppError] = {
     row = try Db.queryRow("select ...", id)
         .mapError(error => AppError.Db(error))
 
@@ -138,7 +138,7 @@ labels = names.map(name => {
 })</code></pre>
 
         <p>Deferred work uses ordinary zero-argument function parameters. <code>{ =&gt; expression }</code> is a short zero-argument lambda; its body runs only when the function is invoked.</p>
-        <pre><code>def repeat(work fn() Int) Int = work() + work()
+        <pre><code>fn repeat(work fn() Int) Int = work() + work()
 
 fallback fn() Str = { => "unavailable" }
 result = repeat { => calculate() }

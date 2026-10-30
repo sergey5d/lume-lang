@@ -15,7 +15,7 @@ type Color =
     }
 
 ext Color {
-    def isReddish() Bool = match this {
+    fn isReddish() Bool = match this {
         case Black { temperature } => temperature % 5 == 0
         case Red { temperature } => temperature % 5 == 0
     }
@@ -27,7 +27,7 @@ type OptionX[T] =
     | class SomeX { value T }
 
 ext OptionX[T] {
-    def isDefined() Bool = match this {
+    fn isDefined() Bool = match this {
         case SomeX { value: _ } => true
         case NoneX => false
     }
@@ -41,7 +41,7 @@ noneInt = OptionX.NoneX
 
 someDefined = someInt.isDefined
 
-def main() Unit {
+fn main() Unit {
     println("reddish:", reddish)
     println("some defined:", someDefined)
     println("none:", noneInt == OptionX.NoneX)

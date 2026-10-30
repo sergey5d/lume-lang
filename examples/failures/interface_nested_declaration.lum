@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*interface bodies contain only 'get' and 'def' signatures, not nested declarations.*
+# .*interface bodies contain only 'get' and 'fn' signatures, not nested declarations.*
 
 interface Reader {
     shape Position {
@@ -7,5 +7,5 @@ interface Reader {
     }
 
     get position Int
-    def read() Str
+    fn read() Str
 }

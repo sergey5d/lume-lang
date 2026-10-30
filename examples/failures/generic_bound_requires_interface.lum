@@ -3,4 +3,4 @@
 
 class Plain {}
 
-def invalid[T with Plain](value T) T = value
+fn invalid[T with Plain](value T) T = value

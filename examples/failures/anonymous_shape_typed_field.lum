@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*construction field 'name' cannot declare a type; use 'name: value'.*
 
-def main() Unit {
+fn main() Unit {
     user = {
         name Str: "Ada"
     }

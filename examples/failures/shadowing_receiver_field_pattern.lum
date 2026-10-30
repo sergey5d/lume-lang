@@ -4,11 +4,11 @@
 class Counter {
     count Int
 
-    def bad() Int {
+    fn bad() Int {
         let Some { value as count } = Some(1) else return this.count
         this.count
     }
 }
 
 
-def main() Unit {}
+fn main() Unit {}

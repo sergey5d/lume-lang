@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*type 'Str' has no field or method 'moduleAliasLabel'.*
+
+use features/module_alias_support/customers/storage as customerStore
+
+fn main() {
+    println("Ada".moduleAliasLabel())
+}

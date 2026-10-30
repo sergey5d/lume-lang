@@ -101,7 +101,7 @@ struct Lowerer<'a> {
     program: ir::Program,
     core_bodies: HashMap<ir::FunctionId, core::CallableBody>,
     type_ids: HashMap<(String, ast::TypeKind), ir::TypeId>,
-    type_aliases: HashMap<String, TypeRef>,
+    type_aliases: HashMap<String, ast::TypeAliasDecl>,
     case_fields: HashMap<String, Vec<String>>,
     function_ids: HashMap<String, ir::FunctionId>,
     global_ids: HashMap<String, ir::GlobalId>,
@@ -117,7 +117,7 @@ impl<'a> Lowerer<'a> {
             .items
             .iter()
             .filter_map(|item| match item {
-                Item::TypeAlias(alias) => Some((alias.name.clone(), alias.target.clone())),
+                Item::TypeAlias(alias) => Some((alias.name.clone(), alias.clone())),
                 _ => None,
             })
             .collect();
@@ -1007,7 +1007,7 @@ struct FunctionLowerer<'a> {
     globals: &'a HashMap<String, ir::GlobalId>,
     functions: &'a HashMap<String, ir::FunctionId>,
     case_fields: &'a HashMap<String, Vec<String>>,
-    type_aliases: &'a HashMap<String, TypeRef>,
+    type_aliases: &'a HashMap<String, ast::TypeAliasDecl>,
     scopes: Vec<HashMap<String, ir::LocalId>>,
     capture_sources: HashMap<String, CaptureSource>,
     capture_locals: HashMap<String, ir::LocalId>,
@@ -1111,7 +1111,7 @@ impl<'a> FunctionLowerer<'a> {
         globals: &'a HashMap<String, ir::GlobalId>,
         functions: &'a HashMap<String, ir::FunctionId>,
         case_fields: &'a HashMap<String, Vec<String>>,
-        type_aliases: &'a HashMap<String, TypeRef>,
+        type_aliases: &'a HashMap<String, ast::TypeAliasDecl>,
         diagnostics: &'a mut Vec<Diagnostic>,
     ) -> Self {
         let entry = program
@@ -5285,12 +5285,7 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|item| self.infer_expr_type_with_overrides(item, overrides))
                     .collect(),
             ),
-            Expr::ContextualNew {
-                args,
-                style,
-                default_initialize: false,
-                ..
-            } if *style == core::CallStyle::Brace => args
+            Expr::ContextualNew { args, style, .. } if *style == core::CallStyle::Brace => args
                 .first()
                 .map(|arg| self.infer_expr_type_with_overrides(&arg.value, overrides))
                 .unwrap_or(ir::Type::Unknown),
@@ -5510,17 +5505,17 @@ impl<'a> FunctionLowerer<'a> {
         }
         let normalized_args = self.normalize_trailing_brace_call_args(callee, args, style);
         let normalized_args = self.expand_shape_call_arguments(&normalized_args);
-        if normalized_args.iter().any(|arg| arg.from_shape_spread) {
-            let (target, explicit) = self.split_generic_call_callee(callee);
-            if let Some((id, mut subst)) = self.reified_call_target(target, &normalized_args)
-                && let Some(function) = self.program.function(id)
-            {
-                for (name, ty) in function.type_params.iter().zip(explicit) {
-                    subst.insert(name.clone(), ty);
-                }
-                self.infer_function_call_subst(id, &normalized_args, &mut subst);
-                return substitute_ir_type(&function.return_ty, &subst);
+        let (target, explicit) = self.split_generic_call_callee(callee);
+        if let Some((id, mut subst)) = self.reified_call_target(target, &normalized_args)
+            && let Some(function) = self.program.function(id)
+            && (!function.type_params.is_empty()
+                || normalized_args.iter().any(|arg| arg.from_shape_spread))
+        {
+            for (name, ty) in function.type_params.iter().zip(explicit) {
+                subst.insert(name.clone(), ty);
             }
+            self.infer_function_call_subst(id, &normalized_args, &mut subst);
+            return substitute_ir_type(&function.return_ty, &subst);
         }
         if let Some(ty) = self.infer_builtin_case_call_type(callee, &normalized_args, overrides) {
             return ty;
@@ -7442,22 +7437,7 @@ impl<'a> FunctionLowerer<'a> {
                     structural,
                 })
             }
-            Expr::ContextualNew {
-                args,
-                style,
-                default_initialize,
-                span,
-            } => {
-                if *default_initialize {
-                    let Some(expected) = expected else {
-                        self.invariant(
-                            "'default { ... }' should have an expected class or shape type before lowering",
-                            *span,
-                        );
-                        return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
-                    };
-                    return Some(self.lower_default_initialization(args, expected, *span));
-                }
+            Expr::ContextualNew { args, style, span } => {
                 if *style == core::CallStyle::Brace
                     && expected.is_none_or(|ty| {
                         self.named_construct_fields(ty).is_none()
@@ -8420,61 +8400,7 @@ impl<'a> FunctionLowerer<'a> {
         if !values.is_empty() {
             return None;
         }
-        self.named_construct_fields(expected)?;
-        self.lower_record_literal_as_construct(fields, values, expected, false)
-    }
-
-    fn lower_default_initialization(
-        &mut self,
-        args: &[core::CallArg],
-        expected: &ir::Type,
-        span: Span,
-    ) -> ir::RValue {
-        let [
-            core::CallArg {
-                from_shape_spread: false,
-                value: Expr::RecordLiteral { fields, values, .. },
-                ..
-            },
-        ] = args
-        else {
-            self.invariant(
-                "'default { ... }' should contain one record literal before lowering",
-                span,
-            );
-            return ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit));
-        };
-
-        if let ir::Type::Named { name, .. } = expected
-            && self.named_type_has_explicit_constructors(name)
-        {
-            return ir::RValue::Call {
-                callee: ir::Callee::Named {
-                    path: vec![name.clone()],
-                },
-                args: Vec::new(),
-                structural: false,
-            };
-        }
-
-        self.lower_record_literal_as_construct(fields, values, expected, true)
-            .unwrap_or_else(|| {
-                self.invariant(
-                    "default initialization should resolve all fields before lowering",
-                    span,
-                );
-                ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit))
-            })
-    }
-
-    fn lower_record_literal_as_construct(
-        &mut self,
-        fields: &[core::CallArg],
-        _values: &[Expr],
-        expected: &ir::Type,
-        initialize_omitted: bool,
-    ) -> Option<ir::RValue> {
-        let expected_fields = self.construct_fields(expected)?;
+        let expected_fields = self.named_construct_fields(expected)?;
         if fields
             .iter()
             .filter(|field| field.name.is_some())
@@ -8513,7 +8439,7 @@ impl<'a> FunctionLowerer<'a> {
         }
 
         let mut lowered_fields = Vec::new();
-        for (name, ty, has_initializer, _initializer) in expected_fields {
+        for (name, _ty, has_initializer, _initializer) in expected_fields {
             let value = if let Some((_, _, value)) = explicit_fields
                 .iter()
                 .find(|(_, field_name, _)| field_name == &name)
@@ -8532,8 +8458,6 @@ impl<'a> FunctionLowerer<'a> {
                 // The target's normal initializer runs during allocation. Omitting
                 // the field here preserves arbitrary initializer expressions.
                 continue;
-            } else if initialize_omitted {
-                self.lower_default_initialized_value(&ty, fields.first().map(|field| field.span))
             } else {
                 return None;
             };
@@ -8544,68 +8468,6 @@ impl<'a> FunctionLowerer<'a> {
             ty: expected.clone(),
             fields: lowered_fields,
         })
-    }
-
-    fn construct_fields(
-        &self,
-        expected: &ir::Type,
-    ) -> Option<Vec<(String, ir::Type, bool, Option<ir::Constant>)>> {
-        if let ir::Type::Record(fields) = expected {
-            return Some(
-                fields
-                    .iter()
-                    .map(|field| (field.name.clone(), field.ty.clone(), false, None))
-                    .collect(),
-            );
-        }
-        self.named_construct_fields(expected)
-    }
-
-    fn lower_default_initialized_value(
-        &mut self,
-        ty: &ir::Type,
-        span: Option<Span>,
-    ) -> ir::Operand {
-        let constant = match ty {
-            ir::Type::Unit => Some(ir::Constant::Unit),
-            ir::Type::Bool => Some(ir::Constant::Bool(false)),
-            ir::Type::Int => Some(ir::Constant::Int(0)),
-            ir::Type::Float => Some(ir::Constant::Float(0.0)),
-            ir::Type::Str => Some(ir::Constant::String(String::new())),
-            ir::Type::Named { name, .. } if name == "Option" => Some(ir::Constant::OptionNone),
-            ir::Type::Named { name, .. } if name == "Bool" => Some(ir::Constant::Bool(false)),
-            ir::Type::Named { name, .. } if matches!(name.as_str(), "Int" | "Rune") => {
-                Some(ir::Constant::Int(0))
-            }
-            ir::Type::Named { name, .. } if name == "Float" => Some(ir::Constant::Float(0.0)),
-            ir::Type::Named { name, .. } if name == "Decimal" => {
-                Some(ir::Constant::Decimal("0".to_string()))
-            }
-            ir::Type::Named { name, .. } if name == "Str" => {
-                Some(ir::Constant::String(String::new()))
-            }
-            _ => None,
-        };
-        if let Some(constant) = constant {
-            return ir::Operand::Const(constant);
-        }
-        if matches!(ty, ir::Type::Record(fields) if fields.is_empty()) {
-            return self.emit_temp_from_rvalue(ir::RValue::Record(Vec::new()), ty.clone(), span);
-        }
-        let ir::Type::Named { name, .. } = ty else {
-            return ir::Operand::Const(default_constant_for_type(ty));
-        };
-        self.emit_temp_from_rvalue(
-            ir::RValue::Call {
-                callee: ir::Callee::Named {
-                    path: vec![name.clone()],
-                },
-                args: Vec::new(),
-                structural: false,
-            },
-            ty.clone(),
-            span,
-        )
     }
 
     fn named_type_has_explicit_constructors(&self, name: &str) -> bool {
@@ -9703,7 +9565,7 @@ fn map_binary_op(op: AstBinaryOp) -> Option<ir::BinaryOp> {
 
 fn lower_type_ref_with_aliases(
     reference: &TypeRef,
-    type_aliases: &HashMap<String, TypeRef>,
+    type_aliases: &HashMap<String, ast::TypeAliasDecl>,
 ) -> ir::Type {
     lower_type_ref_inner(reference, type_aliases, &mut HashSet::new())
 }
@@ -9712,7 +9574,7 @@ fn canonicalize_nested_ir_type(
     ty: &mut ir::Type,
     owner: &str,
     names: &HashSet<String>,
-    aliases: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, ast::TypeAliasDecl>,
 ) {
     let alias_names = aliases.keys().cloned().collect::<HashSet<_>>();
     canonicalize_nested_ir_type_with_aliases(
@@ -9729,7 +9591,7 @@ fn canonicalize_nested_ir_type_with_aliases(
     ty: &mut ir::Type,
     owner: &str,
     names: &HashSet<String>,
-    aliases: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, ast::TypeAliasDecl>,
     alias_names: &HashSet<String>,
     visiting: &mut HashSet<String>,
 ) {
@@ -9745,12 +9607,12 @@ fn canonicalize_nested_ir_type_with_aliases(
                     visiting,
                 );
             }
-            if args.is_empty()
-                && let Some(alias_name) = lexical_nested_ir_name(owner, name, alias_names)
+            if let Some(alias_name) = lexical_nested_ir_name(owner, name, alias_names)
                 && visiting.insert(alias_name.clone())
             {
-                let target = aliases.get(&alias_name).expect("known nested type alias");
-                let mut lowered = lower_type_ref_with_aliases(target, aliases);
+                let alias = aliases.get(&alias_name).expect("known nested type alias");
+                let mut lowered =
+                    lower_alias_application(alias, args.clone(), aliases, &mut HashSet::new());
                 let alias_owner = alias_name
                     .rsplit_once('.')
                     .map(|(parent, _)| parent)
@@ -9845,23 +9707,18 @@ fn lexical_nested_ir_name(owner: &str, name: &str, names: &HashSet<String>) -> O
 
 fn lower_type_ref_inner(
     reference: &TypeRef,
-    type_aliases: &HashMap<String, TypeRef>,
+    type_aliases: &HashMap<String, ast::TypeAliasDecl>,
     visiting: &mut HashSet<String>,
 ) -> ir::Type {
     match reference {
         TypeRef::Wildcard { .. } => ir::Type::Unknown,
         TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => ir::Type::Never,
-        TypeRef::Named { name, args, .. } if args.is_empty() && type_aliases.contains_key(name) => {
-            if !visiting.insert(name.clone()) {
-                return ir::Type::Unknown;
-            }
-            let lowered = lower_type_ref_inner(
-                type_aliases.get(name).expect("known type alias"),
-                type_aliases,
-                visiting,
-            );
-            visiting.remove(name);
-            lowered
+        TypeRef::Named { name, args, .. } if type_aliases.contains_key(name) => {
+            let args = args
+                .iter()
+                .map(|arg| lower_type_ref_inner(arg, type_aliases, visiting))
+                .collect();
+            lower_alias_application(&type_aliases[name], args, type_aliases, visiting)
         }
         TypeRef::Named { name, args, .. } => ir::Type::Named {
             name: name.clone(),
@@ -9943,7 +9800,7 @@ fn builtin_extension_receiver_name(ty: &ir::Type) -> Option<&'static str> {
 fn lower_type_ref_with_type_params(
     reference: &TypeRef,
     type_params: &[String],
-    type_aliases: &HashMap<String, TypeRef>,
+    type_aliases: &HashMap<String, ast::TypeAliasDecl>,
 ) -> ir::Type {
     lower_type_ref_with_type_params_inner(reference, type_params, type_aliases, &mut HashSet::new())
 }
@@ -9951,7 +9808,7 @@ fn lower_type_ref_with_type_params(
 fn lower_type_ref_with_type_params_inner(
     reference: &TypeRef,
     type_params: &[String],
-    type_aliases: &HashMap<String, TypeRef>,
+    type_aliases: &HashMap<String, ast::TypeAliasDecl>,
     visiting: &mut HashSet<String>,
 ) -> ir::Type {
     match reference {
@@ -9961,18 +9818,14 @@ fn lower_type_ref_with_type_params_inner(
             ir::Type::TypeParam(name.clone())
         }
         TypeRef::Named { name, args, .. } if name == "Never" && args.is_empty() => ir::Type::Never,
-        TypeRef::Named { name, args, .. } if args.is_empty() && type_aliases.contains_key(name) => {
-            if !visiting.insert(name.clone()) {
-                return ir::Type::Unknown;
-            }
-            let lowered = lower_type_ref_with_type_params_inner(
-                type_aliases.get(name).expect("known type alias"),
-                type_params,
-                type_aliases,
-                visiting,
-            );
-            visiting.remove(name);
-            lowered
+        TypeRef::Named { name, args, .. } if type_aliases.contains_key(name) => {
+            let args = args
+                .iter()
+                .map(|arg| {
+                    lower_type_ref_with_type_params_inner(arg, type_params, type_aliases, visiting)
+                })
+                .collect();
+            lower_alias_application(&type_aliases[name], args, type_aliases, visiting)
         }
         TypeRef::Named { name, args, .. } => ir::Type::Named {
             name: name.clone(),
@@ -10046,11 +9899,30 @@ fn lower_type_ref_with_type_params_inner(
     }
 }
 
+fn lower_alias_application(
+    alias: &ast::TypeAliasDecl,
+    args: Vec<ir::Type>,
+    aliases: &HashMap<String, ast::TypeAliasDecl>,
+    visiting: &mut HashSet<String>,
+) -> ir::Type {
+    if args.len() != alias.type_params.len() || !visiting.insert(alias.name.clone()) {
+        return ir::Type::Unknown;
+    }
+    let params = alias
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
+    let target = lower_type_ref_with_type_params_inner(&alias.target, &params, aliases, visiting);
+    visiting.remove(&alias.name);
+    substitute_ir_type(&target, &params.into_iter().zip(args).collect())
+}
+
 fn lower_generic_conditions(
     params: &[ast::TypeParam],
     conditions: &[ast::GenericCondition],
     type_params: &[String],
-    type_aliases: &HashMap<String, TypeRef>,
+    type_aliases: &HashMap<String, ast::TypeAliasDecl>,
 ) -> Vec<ir::GenericCondition> {
     let mut lowered = Vec::new();
     for param in params {
@@ -10222,7 +10094,7 @@ fn annotation_string_value(raw: &str) -> String {
 fn lower_lambda_param_type(
     param: &core::LambdaParam,
     expected: Option<&ir::Type>,
-    type_aliases: &HashMap<String, TypeRef>,
+    type_aliases: &HashMap<String, ast::TypeAliasDecl>,
 ) -> ir::Type {
     if let Some(ty) = &param.ty {
         return lower_type_ref_with_aliases(ty, type_aliases);
@@ -11310,7 +11182,11 @@ fn method_call_arity_score(function: &ir::Function, args: &[core::CallArg]) -> O
     let mut positional_index = 0usize;
     let mut used_variadic_positionally = false;
 
-    for arg in args {
+    for arg in args
+        .iter()
+        .filter(|arg| !arg.from_shape_spread)
+        .chain(args.iter().filter(|arg| arg.from_shape_spread))
+    {
         if let Some(name) = &arg.name {
             let index = param_indices.iter().position(|param_index| {
                 function.params.get(*param_index).is_some_and(|param| {
@@ -12017,24 +11893,6 @@ fn intrinsic_numeric_limit(receiver: &Expr, name: &str) -> Option<ir::Constant> 
     }
 }
 
-fn default_constant_for_type(ty: &ir::Type) -> ir::Constant {
-    match ty {
-        ir::Type::Unit => ir::Constant::Unit,
-        ir::Type::Bool => ir::Constant::Bool(false),
-        ir::Type::Int => ir::Constant::Int(0),
-        ir::Type::Float => ir::Constant::Float(0.0),
-        ir::Type::Str => ir::Constant::String(String::new()),
-        ir::Type::Named { name, .. } if name == "Bool" => ir::Constant::Bool(false),
-        ir::Type::Named { name, .. } if matches!(name.as_str(), "Int" | "Rune") => {
-            ir::Constant::Int(0)
-        }
-        ir::Type::Named { name, .. } if name == "Float" => ir::Constant::Float(0.0),
-        ir::Type::Named { name, .. } if name == "Decimal" => ir::Constant::Decimal("0".to_string()),
-        ir::Type::Named { name, .. } if name == "Str" => ir::Constant::String(String::new()),
-        _ => ir::Constant::Unit,
-    }
-}
-
 fn named_type_name(reference: &TypeRef) -> Option<&str> {
     match reference {
         TypeRef::Named { name, .. } => Some(name.as_str()),
@@ -12348,7 +12206,11 @@ fn arrange_named_call_args<'a>(
 ) -> Option<Vec<&'a core::CallArg>> {
     let mut slots: Vec<Option<&core::CallArg>> = vec![None; params.len()];
     let mut positional_index = 0usize;
-    for arg in args {
+    for arg in args
+        .iter()
+        .filter(|arg| !arg.from_shape_spread)
+        .chain(args.iter().filter(|arg| arg.from_shape_spread))
+    {
         if let Some(name) = &arg.name {
             let index = params.iter().position(|param| param == name)?;
             if let Some(previous) = slots[index] {
@@ -12458,9 +12320,9 @@ mod tests {
     fn lowers_top_level_functions_and_entry() {
         let program = parse_inline(
             r#"
-            def add(a Int, b Int) Int = a + b
+            fn add(a Int, b Int) Int = a + b
 
-            def main() Int {
+            fn main() Int {
                 value Int = add(1, 2)
                 return value
             }
@@ -12481,7 +12343,7 @@ mod tests {
     fn reports_out_of_range_integer_if_lowering_receives_unchecked_source() {
         let program = parse_inline(
             r#"
-            def main() Int = 9223372036854775808
+            fn main() Int = 9223372036854775808
             "#,
         );
 
@@ -12501,7 +12363,7 @@ mod tests {
         let mut program = parse_inline(
             r#"
             mixin Contract {
-                def answer() Int = 42
+                fn answer() Int = 42
                 get ready Bool = true
             }
             class Consumer with Contract {}
@@ -12580,14 +12442,14 @@ mod tests {
     fn interface_extensions_remain_separate_from_contract_bodies() {
         let program = parse_inline(
             r#"
-            interface Contract { def answer() Int }
+            interface Contract { fn answer() Int }
             ext Contract {
                 get ready Bool = this.answer() > 0
             }
             class Consumer with Contract {
-                def answer() Int = 42
+                fn answer() Int = 42
             }
-            def main() Bool {
+            fn main() Bool {
                 consumer Contract = Consumer()
                 consumer.ready
             }
@@ -12630,7 +12492,7 @@ mod tests {
     fn lowers_anonymous_shape_literal_as_record() {
         let program = parse_inline(
             r#"
-            def main() Int {
+            fn main() Int {
                 session { start Int, end Int } = { start: 10, end: 30 }
                 return session.end - session.start
             }
@@ -12658,6 +12520,58 @@ mod tests {
     }
 
     #[test]
+    fn expands_generic_transparent_aliases_throughout_lowered_ir() {
+        let program = parse_inline(
+            r#"
+            type Identity[T] = T
+            type Values[T] = [T]
+            type Transform[A, B] = fn(A) B
+            shape Box[T] { values Values[T] }
+            fn echo[X](value Identity[X]) Identity[X] = value
+            fn main() {
+                values Values[Int] = [1]
+                transform Transform[Int, Str] = value => value.toStr()
+                println(transform(values[0]))
+            }
+        "#,
+        );
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:?}", lowered.diagnostics);
+        let ir = lowered.program.unwrap();
+        assert_eq!(ir.types.len(), 1);
+        assert_eq!(
+            ir.types[0].fields[0].ty,
+            ir::Type::Named {
+                name: "Vector".into(),
+                args: vec![ir::Type::TypeParam("T".into())]
+            }
+        );
+        let echo = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "echo")
+            .unwrap();
+        assert_eq!(echo.return_ty, ir::Type::TypeParam("X".into()));
+        let main = ir
+            .functions
+            .iter()
+            .find(|function| function.name == "main")
+            .unwrap();
+        let transform = main
+            .locals
+            .iter()
+            .find(|local| local.name == "transform")
+            .unwrap();
+        assert_eq!(
+            transform.ty,
+            ir::Type::Function {
+                params: vec![ir::Type::named("Int")],
+                ret: Box::new(ir::Type::named("Str"))
+            }
+        );
+    }
+
+    #[test]
     fn expands_transparent_aliases_throughout_lowered_ir() {
         let program = parse_inline(
             r#"
@@ -12672,7 +12586,7 @@ mod tests {
 
             current UserId = 1
 
-            def main() Unit {
+            fn main() Unit {
                 id UserId = current
                 names Names = ["Ada"]
                 label Labeler = value => value.toStr()
@@ -12728,7 +12642,7 @@ mod tests {
                 class Item { value Int }
                 | object Empty {}
 
-            def read(payload Payload) Int = match payload {
+            fn read(payload Payload) Int = match payload {
                 case Payload.Item { value as item } as whole => whole.value + item
             }
             "#,
@@ -12760,7 +12674,7 @@ mod tests {
     fn lowers_if_and_while_into_cfg_blocks() {
         let program = parse_inline(
             r#"
-            def main() Int {
+            fn main() Int {
                 var total Int = 0
                 if total < 1 {
                     total += 2
@@ -12795,7 +12709,7 @@ mod tests {
             class Row {
             }
 
-            def unwrap(maybe Option[Row]) Int {
+            fn unwrap(maybe Option[Row]) Int {
                 let row <- maybe else return 0
                 1
             }
@@ -12827,7 +12741,7 @@ mod tests {
                 value Int
 
 
-                def bump(delta Int) Int = this.value + delta
+                fn bump(delta Int) Int = this.value + delta
 }
 
             "#,
@@ -12851,8 +12765,8 @@ mod tests {
                 value Int
 
 
-                def add(delta Int) Int = this.value + delta
-                def twice(delta Int) Int = add(delta) + add(delta)
+                fn add(delta Int) Int = this.value + delta
+                fn twice(delta Int) Int = add(delta) + add(delta)
 }
 
             "#,
@@ -12899,7 +12813,7 @@ mod tests {
                 values [T]
             }
 
-            def main() {
+            fn main() {
                 user = User(1)
                 user.id := 2
                 id = user.id
@@ -12947,12 +12861,12 @@ mod tests {
 
             class Runner {
 
-                def exec(sql Str) Exec = Exec()
-                def exec(sql Str, first Any, rest [Any] vararg) Result[Int, Str] = Ok(1)
+                fn exec(sql Str) Exec = Exec()
+                fn exec(sql Str, first Any, rest [Any] vararg) Result[Int, Str] = Ok(1)
 }
 
 
-            def main(r Runner) Unit {
+            fn main(r Runner) Unit {
                 staged = r.exec("update users")
                 direct = r.exec("update users", true, 1)
             }
@@ -12989,10 +12903,10 @@ mod tests {
         let program = parse_inline(
             r#"
             interface Runner {
-                def perform[T](work fn(Int) Result[T, Str]) Result[T, Str]
+                fn perform[T](work fn(Int) Result[T, Str]) Result[T, Str]
             }
 
-            def run(runner Runner) Result[Unit, Str] {
+            fn run(runner Runner) Result[Unit, Str] {
                 try runner.perform { (value Int) => Ok(()) }
                 Ok(())
             }
@@ -13024,7 +12938,7 @@ mod tests {
                 value Int
             }
 
-            def main(entries Vector[Entry]) Unit {
+            fn main(entries Vector[Entry]) Unit {
                 selected = entries.filter { entry => entry.value > 0 }
                 total = selected.fold(0, (sum, entry) => sum + entry.value)
                 labels = selected.map { entry => entry.value.toStr() }
@@ -13059,7 +12973,7 @@ mod tests {
     fn lowers_match_try_and_for_forms() {
         let program = parse_inline(
             r#"
-            def main() Int {
+            fn main() Int {
                 total Int = 0
                 item = try Some(3)
                 total = match item {
@@ -13122,12 +13036,12 @@ mod tests {
                 description Str
             }
 
-            def main() Int {
+            fn main() Int {
                 base = 10
                 inc fn(Int) Int = value => value + 1
                 plus = (value Int) => value + base
 
-                def add(value Int) Int = plus(value)
+                fn add(value Int) Int = plus(value)
 
                 current = Amount(1, "a")
                 updated Amount = { ...current, amount: add(inc(1)) }
@@ -13172,7 +13086,7 @@ mod tests {
                 position Point
             }
 
-            def main() Int {
+            fn main() Int {
                 original = Batch([1, 2], Point(3, 4))
                 updated Batch = {
                     ...original
@@ -13193,12 +13107,12 @@ mod tests {
         let program = parse_inline(
             r#"
             class Tracker {
-                def min(left Int, right Int) Int = if left <= right { left } else { right }
+                fn min(left Int, right Int) Int = if left <= right { left } else { right }
 
-                def matching(position Int, groups [[Int]]) [[Int]] =
+                fn matching(position Int, groups [[Int]]) [[Int]] =
                     groups.map(group => group.filter(value => value == position))
 
-                def cappedTotal(values [Int], limit Int) Int =
+                fn cappedTotal(values [Int], limit Int) Int =
                     values.fold(0, (acc, value) => acc + min(value, limit))
             }
             "#,
@@ -13220,7 +13134,7 @@ mod tests {
     fn lowers_map_literal_without_binary_operator_errors() {
         let program = parse_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 entries = ["a": 1, "bbb": 2]
                 OS.println(entries)
             }
@@ -13248,7 +13162,7 @@ mod tests {
     fn retains_core_bodies_by_stable_function_id() {
         let program = parse_inline(
             r#"
-            def choose(flag Bool) Int = if flag {
+            fn choose(flag Bool) Int = if flag {
                 1
             } else {
                 2
@@ -13274,8 +13188,8 @@ mod tests {
     fn retains_resolved_call_metadata_for_source_backends() {
         let program = parse_inline(
             r#"
-            def add(left Int, right Int) Int = left + right
-            def main() Int = add(1, 2)
+            fn add(left Int, right Int) Int = left + right
+            fn main() Int = add(1, 2)
             "#,
         );
 

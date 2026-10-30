@@ -6,12 +6,12 @@ shape User {
     scores [Int]
 }
 
-def describe(
+fn describe(
     user User,
 ) Str =
     user.name + " " + user.scores.size
 
-def main() Unit {
+fn main() Unit {
     user = User {
         name: "Ada",
         scores: [

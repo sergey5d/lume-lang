@@ -4,20 +4,20 @@
 # 31
 # 0
 
-def main() Int {
+fn main() Int {
     base = 10
 
-    def add(left Int, right Int) Int {
+    fn add(left Int, right Int) Int {
         left + right + base
     }
 
-    def double(value Int) Int = value * 2
+    fn double(value Int) Int = value * 2
 
     println(add(2, 3))
     println(double(8))
 
-    def combine(value Int) Int {
-        def bump(amount Int) Int = amount + 1
+    fn combine(value Int) Int {
+        fn bump(amount Int) Int = amount + 1
         add(bump(value), double(5))
     }
 

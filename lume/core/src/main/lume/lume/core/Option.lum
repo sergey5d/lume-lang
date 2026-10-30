@@ -25,32 +25,32 @@ ext Option[T] {
         case None => true
     }
 
-    def map[X](f fn(T) X) Option[X] = match this {
+    fn map[X](f fn(T) X) Option[X] = match this {
         case Some { value } => Some(f(value))
         case None => None
     }
 
-    def flatMap[X](f fn(T) Option[X]) Option[X] = match this {
+    fn flatMap[X](f fn(T) Option[X]) Option[X] = match this {
         case Some { value } => f(value)
         case None => None
     }
 
-    def orElse(fallback fn() Option[T]) Option[T] = match this {
+    fn orElse(fallback fn() Option[T]) Option[T] = match this {
         case Some { value } => Some(value)
         case None => fallback()
     }
 
-    def toResult[E](error fn() E) Result[T, E] = match this {
+    fn toResult[E](error fn() E) Result[T, E] = match this {
         case Some { value } => Ok(value)
         case None => Err(error())
     }
 
-    def toEither[L](left fn() L) Either[L, T] = match this {
+    fn toEither[L](left fn() L) Either[L, T] = match this {
         case Some { value } => Right(value)
         case None => Left(left())
     }
 
-    def iterator() Iterator[T] = match this {
+    fn iterator() Iterator[T] = match this {
         case Some { value } => [value].iterator()
         case None => Vector[T]().iterator()
     }

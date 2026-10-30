@@ -7,34 +7,34 @@
 class Counter {
     private var value Int = 0
 
-    def next() Int {
+    fn next() Int {
         this.value := this.value + 1
         this.value
     }
 
-    def reset() =
+    fn reset() =
         this.value := 0
 
-    def current() Int =
+    fn current() Int =
         this.value
 }
 
 
-def twice(value fn() Int) Int =
+fn twice(value fn() Int) Int =
     value() + value()
 
-def inner(value fn() Int) Int =
+fn inner(value fn() Int) Int =
     value()
 
-def outer(value fn() Int) Int =
+fn outer(value fn() Int) Int =
     inner(value) + inner(value)
 
-def cachedOnce(value fn() Int) Int {
+fn cachedOnce(value fn() Int) Int {
     cached Int = value()
     cached + cached
 }
 
-def main() {
+fn main() {
     counter Counter = Counter()
 
     println(twice { => counter.next() })

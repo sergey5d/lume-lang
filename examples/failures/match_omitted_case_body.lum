@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*expected expression after '=>'; use '\(\)' for a Unit-valued match case.*
 
-def main() Int =
+fn main() Int =
     match Some(1) {
         case Some { value as x } =>
         case None => 0

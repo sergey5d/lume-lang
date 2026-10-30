@@ -6,7 +6,7 @@ class Box {
     label Str
 }
 
-def main() Unit {
+fn main() Unit {
     box = Box(1, "one")
     match box {
         case Box(value) => println(value)

@@ -54,7 +54,7 @@ impl<'a> Parser<'a> {
             return None;
         }
         match self.current_kind() {
-            TokenKind::Keyword(Keyword::Def) => {
+            TokenKind::Keyword(Keyword::Fn) => {
                 let function = self.parse_function_decl(Vec::new(), Visibility::Default)?;
                 Some(Stmt::LocalFunction(function))
             }

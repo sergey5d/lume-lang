@@ -2,7 +2,7 @@
 # .*type 'Plain' does not satisfy generic bound 'Callable'.*
 
 interface Callable {
-    def call() Unit
+    fn call() Unit
 }
 
 class Plain {}
@@ -11,4 +11,4 @@ class Box[T with Callable] {
     value T
 }
 
-def invalid(value Box[Plain]) Unit = ()
+fn invalid(value Box[Plain]) Unit = ()

@@ -6,6 +6,6 @@ shape Point {
     y Str
 }
 
-def main() Unit {
+fn main() Unit {
     point Point = new { x: 4, y: 5 }
 }

@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # .*by-name parameters are not supported; use 'name fn\(\) T'.*
 
-def delayed(value => Int) Int = value
+fn delayed(value => Int) Int = value

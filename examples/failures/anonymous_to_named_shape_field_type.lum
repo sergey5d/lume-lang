@@ -6,7 +6,7 @@ shape Profile {
     age Int
 }
 
-def main() Unit {
+fn main() Unit {
     anonymous = {
         name: "Ada"
         age: "thirty-seven"

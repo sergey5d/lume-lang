@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*type 'Token' does not satisfy generic bound 'Hashed\[Token\]'.*
+
+class Token {
+    value Int
+}
+
+type Lookup[K with Hashed[K], V] = Map[K, V]
+
+fn invalid(value Lookup[Token, Str]) {}

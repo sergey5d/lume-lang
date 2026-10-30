@@ -7,10 +7,10 @@
 class Score with Comparable[Score] {
     value Int
 
-    def compareTo(other Score) Int = value.compareTo(other.value)
+    fn compareTo(other Score) Int = value.compareTo(other.value)
 }
 
-def main() Unit {
+fn main() Unit {
     low = Score(1)
     high = Score(2)
     println(low < high, low <= high, high > low, high >= low)

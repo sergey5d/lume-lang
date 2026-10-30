@@ -10,10 +10,10 @@ class TreeNode {
     right TreeNode?
 }
 
-def chooseNode(left TreeNode?, right TreeNode?) TreeNode? =
+fn chooseNode(left TreeNode?, right TreeNode?) TreeNode? =
     if !left.isEmpty { left } else { right }
 
-def find(
+fn find(
     node TreeNode?,
     valP Int,
     valQ Int,
@@ -65,10 +65,10 @@ def find(
     }
 }
 
-def lowestCommonAncestor(root TreeNode, valP Int, valQ Int) TreeNode? =
+fn lowestCommonAncestor(root TreeNode, valP Int, valQ Int) TreeNode? =
     find(Some(root), valP, valQ, None, None).ancestor
 
-def main() Unit {
+fn main() Unit {
     root = TreeNode(
         3,
         Some(TreeNode(

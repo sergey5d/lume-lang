@@ -5,10 +5,10 @@
 class Worker {
     name Str
 
-    def label() Str = this.name
+    fn label() Str = this.name
 }
 
-def workerLabel(value Any) Str {
+fn workerLabel(value Any) Str {
     if value is not Worker {
         return "not a worker"
     }
@@ -17,7 +17,7 @@ def workerLabel(value Any) Str {
     value.label()
 }
 
-def main() Unit {
+fn main() Unit {
     value Any = Worker("Ada")
 
     if value is not Worker {

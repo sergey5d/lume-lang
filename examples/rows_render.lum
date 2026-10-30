@@ -12,7 +12,7 @@
 # 246
 # 1
 
-def compareRows(left (Int, Int, Str), right (Int, Int, Str)) Int {
+fn compareRows(left (Int, Int, Str), right (Int, Int, Str)) Int {
     let (leftX Int, leftY Int, _) = left
     let (rightX Int, rightY Int, _) = right
 
@@ -32,7 +32,7 @@ def compareRows(left (Int, Int, Str), right (Int, Int, Str)) Int {
 }
 
 
-def syntax1(rows [(Int, Int, Str)]) Unit {
+fn syntax1(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some { value as firstRow } = rows.at(0) {
         let (_, initialY Int, _) = firstRow
@@ -55,7 +55,7 @@ def syntax1(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax2(rows [(Int, Int, Str)]) Unit {
+fn syntax2(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some { value as firstRow } = rows.at(0) {
         let (_, initialY Int, _) = firstRow
@@ -78,7 +78,7 @@ def syntax2(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax3(rows [(Int, Int, Str)]) Unit {
+fn syntax3(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
 
     if let Some { value as first } = rows.at(0) {
@@ -102,7 +102,7 @@ def syntax3(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def syntax4(rows [(Int, Int, Str)]) Unit {
+fn syntax4(rows [(Int, Int, Str)]) Unit {
     var lastX = 0
     if let Some { value as first } = rows.at(0) {
         let (_, initialY Int, _) = first
@@ -127,7 +127,7 @@ def syntax4(rows [(Int, Int, Str)]) Unit {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     rows [(Int, Int, Str)] = [
         (0, 0, "1"),
         (0, 1, "2"),

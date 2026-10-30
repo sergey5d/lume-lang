@@ -2,11 +2,11 @@
 # JAVA_SKIP
 
 public interface Spec {
-    def it()
+    fn it()
 }
 
 ext Bool {
-    def shouldBe(expected Bool) Unit {
+    fn shouldBe(expected Bool) Unit {
         if this != expected {
             panic("expected " + expected.toStr() + ", got " + this.toStr())
         }
@@ -14,7 +14,7 @@ ext Bool {
 }
 
 ext Int {
-    def shouldBe(expected Int) Unit {
+    fn shouldBe(expected Int) Unit {
         if this != expected {
             panic("expected " + expected.toStr() + ", got " + this.toStr())
         }
@@ -22,7 +22,7 @@ ext Int {
 }
 
 ext Float {
-    def shouldBe(expected Float) Unit {
+    fn shouldBe(expected Float) Unit {
         if this != expected {
             panic("expected " + expected.toStr() + ", got " + this.toStr())
         }
@@ -30,7 +30,7 @@ ext Float {
 }
 
 ext Rune {
-    def shouldBe(expected Rune) Unit {
+    fn shouldBe(expected Rune) Unit {
         if this != expected {
             panic("expected " + expected.toStr() + ", got " + this.toStr())
         }
@@ -38,7 +38,7 @@ ext Rune {
 }
 
 ext Str {
-    def shouldBe(expected Str) Unit {
+    fn shouldBe(expected Str) Unit {
         if this != expected {
             panic("expected " + expected + ", got " + this)
         }

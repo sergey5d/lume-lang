@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*argument has type 'Int' but parameter expects 'Str'.*
 
-def main() Unit {
+fn main() Unit {
     assert(false, 5)
 }

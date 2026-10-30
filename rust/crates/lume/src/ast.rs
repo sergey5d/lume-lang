@@ -26,6 +26,8 @@ pub struct ModuleDecl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
     pub path: String,
+    /// The local qualifier for a whole-module import, not a renamed symbol.
+    pub alias: Option<String>,
     pub object_name: Option<String>,
     pub wildcard: bool,
     pub symbols: Vec<ImportSymbol>,
@@ -57,11 +59,13 @@ pub enum Item {
     Statement(Stmt),
 }
 
-/// A transparent `type Name = Target` alias.
+/// A transparent `type Name[Parameters] = Target` alias.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAliasDecl {
     pub visibility: Visibility,
     pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub type_conditions: Vec<GenericCondition>,
     pub target: TypeRef,
     pub span: Span,
 }
@@ -334,7 +338,7 @@ impl Stmt {
     }
 }
 
-/// A `var`/`def`-style binding statement that introduces one or more names.
+/// A `var`/`fn`-style binding statement that introduces one or more names.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BindingStmt {
     pub visibility: Visibility,
@@ -729,7 +733,6 @@ pub enum Expr {
     ContextualNew {
         args: Vec<CallArg>,
         uses_brace_syntax: bool,
-        default_initialize: bool,
         span: Span,
     },
     Member {

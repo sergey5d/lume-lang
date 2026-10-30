@@ -1,8 +1,8 @@
 # FAIL_REGEX:
 # .*generic equality condition 'Int = Str' is not satisfied.*
 
-def same[L, R when L = R](left L, right R) L = right
+fn same[L, R when L = R](left L, right R) L = right
 
-def main() Unit {
+fn main() Unit {
     _ = same(1, "two")
 }

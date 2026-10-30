@@ -1,7 +1,7 @@
 # EXPECT:
 # true true true true true
 
-def main() Unit {
+fn main() Unit {
     maximumEntries = 1_000_000
     timeoutNanos = 5_000_000_000
     tolerance = 1e-9

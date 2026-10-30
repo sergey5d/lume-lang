@@ -28,7 +28,7 @@ class Box[T] {
     value T
 }
 
-def main() Unit {
+fn main() Unit {
     x = 10
     y = 20
     value = 30

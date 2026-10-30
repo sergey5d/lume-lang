@@ -3,11 +3,11 @@
 
 class Runner {
 
-    def zero(f fn() Int) Int = f()
+    fn zero(f fn() Int) Int = f()
 }
 
 
-def main() Unit {
+fn main() Unit {
     runner = Runner {}
     println(runner.zero {
         26

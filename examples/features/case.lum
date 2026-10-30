@@ -5,7 +5,7 @@ type Size =
     object Small {}
     | object Large {}
 
-def main() Unit {
+fn main() Unit {
     size Size = Size.Large
     label = match size {
         case Size.Small => "small"

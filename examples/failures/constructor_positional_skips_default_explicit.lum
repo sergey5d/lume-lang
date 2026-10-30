@@ -11,6 +11,6 @@ class Article {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     _ Article = Article("Intro")
 }

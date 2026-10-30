@@ -5,7 +5,7 @@ shape Rollup {
     total Int
 }
 
-def main() Unit {
+fn main() Unit {
     source = Rollup { total: 7 }
     copy = Rollup { source.total }
     println(copy.total)

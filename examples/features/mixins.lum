@@ -11,16 +11,16 @@ interface Sized {
 }
 
 interface Described {
-    def describe() Str
+    fn describe() Str
 }
 
 mixin CollectionParts with Sized {
     get nonEmpty Bool = this.size > 0
 
-    def describe() Str =
+    fn describe() Str =
         if this.nonEmpty { "has elements" } else { "empty" }
 
-    def describeLater() fn() Str = () => this.describe()
+    fn describeLater() fn() Str = () => this.describe()
 }
 
 class Bag with Sized, Described {
@@ -29,7 +29,7 @@ class Bag with Sized, Described {
     items [Int]
     get size Int = items.size
 
-    def viaMember() Str = describe()
+    fn viaMember() Str = describe()
 }
 
 class AlwaysNonEmpty with Sized, Described {
@@ -65,15 +65,15 @@ class ImportedCounter with Counted {
     use ImportedParts
     count Int
 
-    def report() Str = summary()
+    fn report() Str = summary()
 }
 
 mixin IntRendering {
-    def render(value Int) Str = "int " + value
+    fn render(value Int) Str = "int " + value
 }
 
 mixin StrRendering {
-    def render(value Str) Str = "str " + value
+    fn render(value Str) Str = "str " + value
 }
 
 class Renderer {
@@ -86,12 +86,12 @@ interface Values[T] {
 }
 
 mixin ValueParts[T] with Values[T] {
-    def copyFirst() T {
+    fn copyFirst() T {
         value T = this.first
         value
     }
 
-    def identity[V](value V) V = value
+    fn identity[V](value V) V = value
 }
 
 class IntValue with Values[Int] {
@@ -104,9 +104,9 @@ class GenericValue[T] with Values[T] {
     first T
 }
 
-def described[T with Described](value T) Str = value.describe()
+fn described[T with Described](value T) Str = value.describe()
 
-def main() {
+fn main() {
     empty = Bag([])
     full = Bag([1, 2])
     assert(!empty.nonEmpty && empty.describe() == "empty")

@@ -3,15 +3,15 @@
 module models
 
 public interface NamedModel {
-    def label() Str
+    fn label() Str
 }
 
 public class User with NamedModel {
-    def label() Str = "User"
+    fn label() Str = "User"
 }
 
 public class Guest with NamedModel {
-    def label() Str = "Guest"
+    fn label() Str = "Guest"
 }
 
 public type ModelUser = User

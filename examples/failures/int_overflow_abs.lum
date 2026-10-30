@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # runtime_error at .*: integer overflow: \(-9223372036854775808\)\.abs\(\)
 
-def main() { println(Int.MIN.abs()) }
+fn main() { println(Int.MIN.abs()) }

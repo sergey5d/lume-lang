@@ -4,7 +4,7 @@
 # 1
 # -1
 
-def main() Unit {
+fn main() Unit {
     println("alice".compareTo("bob"))
     println("alice".compareTo("alice"))
     println("bob".compareTo("alice"))

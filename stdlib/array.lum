@@ -3,29 +3,29 @@
 # INTERPRETER
 
 private interface ArrayApi[T] with Iterable[T] {
-    def at(index Int) Option[T]
-    def setAt(index Int, value T) Result[T, InvalidIndex]
+    fn at(index Int) Option[T]
+    fn setAt(index Int, value T) Result[T, InvalidIndex]
 
     get first Option[T]
     get last Option[T]
 
-    def clone() Array[T]
+    fn clone() Array[T]
 
-    def map[X](f fn(T) X) Array[X]
-    def forEach(f fn(T) Unit)
+    fn map[X](f fn(T) X) Array[X]
+    fn forEach(f fn(T) Unit)
 
-    def count(f fn(T) Bool) Int
+    fn count(f fn(T) Bool) Int
 
-    def exists(f fn(T) Bool) Bool
-    def forAll(f fn(T) Bool) Bool
+    fn exists(f fn(T) Bool) Bool
+    fn forAll(f fn(T) Bool) Bool
 
-    def contains(e T) Bool
-    def find(e T) Option[T]
+    fn contains(e T) Bool
+    fn find(e T) Option[T]
 
-    def indexOf(value T) Option[Int]
+    fn indexOf(value T) Option[Int]
 
-    def zip[X](other Array[X]) Array[(T, X)]
-    def zipWithIndex() Array[(T, Int)]
+    fn zip[X](other Array[X]) Array[(T, X)]
+    fn zipWithIndex() Array[(T, Int)]
 
     get size Int
 }

@@ -2,17 +2,17 @@
 # first
 # second
 
-private def addLine(lines [Str], value Str?) {
+private fn addLine(lines [Str], value Str?) {
     if let text <- value {
         lines.add(text)
     }
 }
 
-private def printLines(lines [Str]) = {
+private fn printLines(lines [Str]) = {
     lines.forEach(line => println(line))
 }
 
-def main() Unit {
+fn main() Unit {
     lines [Str] = []
     addLine(lines, ^"first")
     addLine(lines, None)

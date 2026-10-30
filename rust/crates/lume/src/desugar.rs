@@ -200,7 +200,6 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
         ast::Expr::ContextualNew {
             args,
             uses_brace_syntax,
-            default_initialize,
             span,
         } => {
             let style = if *uses_brace_syntax {
@@ -211,7 +210,6 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
             core::Expr::ContextualNew {
                 args: args.iter().map(desugar_call_arg).collect(),
                 style,
-                default_initialize: *default_initialize,
                 span: *span,
             }
         }
@@ -478,7 +476,7 @@ mod tests {
     fn desugars_trailing_block_lambda_arg_to_plain_lambda() {
         let function = parse_function(
             r#"
-def make() Unit = values.map { value => value + 5 }
+fn make() Unit = values.map { value => value + 5 }
 "#,
         );
         let core = desugar_function_decl(&function);
@@ -497,7 +495,7 @@ def make() Unit = values.map { value => value + 5 }
 
     #[test]
     fn removes_group_expr_nodes() {
-        let function = parse_function(r#"def make() Int = (1 + 2)"#);
+        let function = parse_function(r#"fn make() Int = (1 + 2)"#);
         let core = desugar_function_decl(&function);
         match core.body {
             core::CallableBody::Expr(core::Expr::Binary { .. }) => {}

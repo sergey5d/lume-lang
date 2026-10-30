@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*type alias 'Recursive' contains a cycle.*
+
+type Recursive[T] = [Recursive[T]]
+
+fn main() {}

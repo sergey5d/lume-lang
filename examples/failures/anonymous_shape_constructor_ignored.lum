@@ -12,7 +12,7 @@ class SecretBadge {
 }
 
 
-def main() Unit {
+fn main() Unit {
     _ SecretBadge = SecretBadge({
         name: "Mia"
     })

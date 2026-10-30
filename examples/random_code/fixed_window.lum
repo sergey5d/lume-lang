@@ -17,7 +17,7 @@ class FixedWindowRateLimiter {
         this.limit = limit
     }
 
-    def allow(now Int, id Str) Bool = {
+    fn allow(now Int, id Str) Bool = {
 
         windowStart = now / windowSize
 
@@ -32,12 +32,12 @@ class FixedWindowRateLimiter {
         true
     }
 
-    def reset() = {
+    fn reset() = {
         map.clear()
     }
 }
 
-def main() = {
+fn main() = {
 
     limiter = FixedWindowRateLimiter { windowSize: 5, limit: 5 }
 

@@ -12,18 +12,18 @@ type Outcome =
     | object Empty {}
 
 ext Outcome {
-    def value() Str = match this {
+    fn value() Str = match this {
         case Left { value } => value
         case Empty => ""
     }
 
-    def tag() Str = match this {
+    fn tag() Str = match this {
         case Left { tag } => tag
         case Empty => ""
     }
 }
 
-def main() Unit {
+fn main() Unit {
     omitted = Outcome.Left("bad")
     explicit = Outcome.Left("bad", "custom")
     namedOmitted = Outcome.Left { value: "named" }

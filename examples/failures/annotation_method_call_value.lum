@@ -7,9 +7,9 @@ annotation Route {
 
 object Routes {
 
-    def health() Str = "/health"
+    fn health() Str = "/health"
 }
 
 
 @Route { path: Routes.health() }
-def main() Unit {}
+fn main() Unit {}

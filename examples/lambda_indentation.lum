@@ -1,13 +1,13 @@
 # EXPECT:
 # 3
 
-def calculate() Int {
+fn calculate() Int {
     mapper fn(Int) Int = value =>
         value + 1
         next = 2
     mapper(next)
 }
 
-def main() Unit {
+fn main() Unit {
     println(calculate())
 }

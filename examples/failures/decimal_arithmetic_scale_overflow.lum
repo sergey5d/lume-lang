@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # .*decimal scale out of range.*
 
-def main() { println(1e2147483647d * 1e2d) }
+fn main() { println(1e2147483647d * 1e2d) }

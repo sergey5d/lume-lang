@@ -7,13 +7,13 @@ class Counter {
     var value Int
     var reads Int = 0
 
-    def receiver() Counter {
+    fn receiver() Counter {
         reads += 1
         this
     }
 }
 
-def main() {
+fn main() {
     assert(Int.MAX.wrappingAdd(1) == Int.MIN)
     assert(Int.MIN.wrappingSub(1) == Int.MAX)
     assert(Int.MAX.wrappingMul(2) == -2)

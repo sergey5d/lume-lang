@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# .*undefined name 'default'.*
+
+shape Person {
+    name Str = "Alex"
+}
+
+fn main() {
+    person Person = default { name: "Ada" }
+}

@@ -11,7 +11,7 @@ class User with Named {
     get name Str = this.value
 }
 
-def main() Unit {
+fn main() Unit {
     value Named = User("Ada")
     id = value.referenceId
 }

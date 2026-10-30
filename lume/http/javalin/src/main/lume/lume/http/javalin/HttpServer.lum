@@ -48,10 +48,10 @@ public shape HttpError {
     contentType Str = "application/json"
 }
 
-private def dispatchController(method Method, controller Any, args [Any] vararg) Any =
+private fn dispatchController(method Method, controller Any, args [Any] vararg) Any =
     method.call(controller, ...args)!
 
-private def dispatchGet(
+private fn dispatchGet(
     ctx JavalinRawContext,
     method Method,
     controller Any,
@@ -64,7 +64,7 @@ private def dispatchGet(
     }
 }
 
-private def dispatchBody(
+private fn dispatchBody(
     ctx JavalinRawContext,
     method Method,
     controller Any,
@@ -97,14 +97,14 @@ private class JavalinBackend {
         this.port = port
     }
 
-    def virtualThreads() JavalinBackend {
+    fn virtualThreads() JavalinBackend {
         JavalinRuntime.enableVirtualThreads(this.app)
         this
     }
 
-    def get(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+    fn get(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.get(path, object with Handler {
-            def handle(ctx JavalinRawContext) Unit {
+            fn handle(ctx JavalinRawContext) Unit {
                 dispatchGet(ctx, method, controller, contentType)
             }
         })
@@ -112,9 +112,9 @@ private class JavalinBackend {
         this
     }
 
-    def post(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+    fn post(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.post(path, object with Handler {
-            def handle(ctx JavalinRawContext) Unit {
+            fn handle(ctx JavalinRawContext) Unit {
                 dispatchBody(ctx, method, controller, contentType)
             }
         })
@@ -122,9 +122,9 @@ private class JavalinBackend {
         this
     }
 
-    def put(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+    fn put(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.put(path, object with Handler {
-            def handle(ctx JavalinRawContext) Unit {
+            fn handle(ctx JavalinRawContext) Unit {
                 dispatchBody(ctx, method, controller, contentType)
             }
         })
@@ -132,9 +132,9 @@ private class JavalinBackend {
         this
     }
 
-    def patch(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+    fn patch(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.patch(path, object with Handler {
-            def handle(ctx JavalinRawContext) Unit {
+            fn handle(ctx JavalinRawContext) Unit {
                 dispatchBody(ctx, method, controller, contentType)
             }
         })
@@ -142,9 +142,9 @@ private class JavalinBackend {
         this
     }
 
-    def delete(path Str, contentType Str, controller Any, method Method) JavalinBackend {
+    fn delete(path Str, contentType Str, controller Any, method Method) JavalinBackend {
         this.app.delete(path, object with Handler {
-            def handle(ctx JavalinRawContext) Unit {
+            fn handle(ctx JavalinRawContext) Unit {
                 dispatchBody(ctx, method, controller, contentType)
             }
         })
@@ -152,7 +152,7 @@ private class JavalinBackend {
         this
     }
 
-    def run() JavalinBackend {
+    fn run() JavalinBackend {
         this.app.start(this.port)
         this
     }
@@ -165,13 +165,13 @@ private class JavalinHttpContext with HttpContext {
         this.raw = raw
     }
 
-    def queryParam(name Str) Option[Str] =
+    fn queryParam(name Str) Option[Str] =
         JavalinRuntimeContext.queryParam(this.raw, name)
 
-    def pathParam(name Str) Option[Str] =
+    fn pathParam(name Str) Option[Str] =
         JavalinRuntimeContext.pathParam(this.raw, name)
 
-    def header(name Str) Option[Str] =
+    fn header(name Str) Option[Str] =
         JavalinRuntimeContext.header(this.raw, name)
 
     get body Str =
@@ -187,12 +187,12 @@ public class HttpServer {
         this.backend = JavalinBackend(port)
     }
 
-    def virtualThreads() HttpServer {
+    fn virtualThreads() HttpServer {
         this.backend.virtualThreads()
         this
     }
 
-    def addController(controller Any) HttpServer {
+    fn addController(controller Any) HttpServer {
         controllerType Type[_] = controller.runtimeType
         let Some { value as classType } = controllerType.asClass() else return this
         var prefix Str = ""
@@ -255,7 +255,7 @@ public class HttpServer {
         this
     }
 
-    def run() HttpServer {
+    fn run() HttpServer {
         this.backend.run()
         this
     }

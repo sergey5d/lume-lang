@@ -3,20 +3,20 @@
 # INTERPRETER
 
 public interface Int with Comparable[Int] {
-    def compareTo(other Int) Int
-    def abs() Int
-    def pow(exponent Int) Int
-    def wrappingAdd(other Int) Int
-    def wrappingSub(other Int) Int
-    def wrappingMul(other Int) Int
-    def wrappingNeg() Int
-    def checkedAdd(other Int) Int?
-    def checkedSub(other Int) Int?
-    def checkedMul(other Int) Int?
-    def checkedPow(exponent Int) Int?
-    def sqrt() Float
-    def toFloat() Float
-    def toDecimal() Decimal
+    fn compareTo(other Int) Int
+    fn abs() Int
+    fn pow(exponent Int) Int
+    fn wrappingAdd(other Int) Int
+    fn wrappingSub(other Int) Int
+    fn wrappingMul(other Int) Int
+    fn wrappingNeg() Int
+    fn checkedAdd(other Int) Int?
+    fn checkedSub(other Int) Int?
+    fn checkedMul(other Int) Int?
+    fn checkedPow(exponent Int) Int?
+    fn sqrt() Float
+    fn toFloat() Float
+    fn toDecimal() Decimal
 }
 
 public object Int {
@@ -24,28 +24,28 @@ public object Int {
     get MIN Int = panic("Int.MIN is provided by the active runtime")
     get MAX Int = panic("Int.MAX is provided by the active runtime")
 
-    def parse(value Str) Option[Int] =
+    fn parse(value Str) Option[Int] =
         panic("Int.parse is provided by the active runtime")
 }
 
 public interface Float with Comparable[Float] {
-    def compareTo(other Float) Int
-    def abs() Float
-    def pow(exponent Int) Float
-    def pow(exponent Float) Float
-    def floor() Float
-    def ceil() Float
-    def round() Float
-    def sqrt() Float
-    def log() Float
-    def toInt() Int
-    def toDecimal() Decimal?
+    fn compareTo(other Float) Int
+    fn abs() Float
+    fn pow(exponent Int) Float
+    fn pow(exponent Float) Float
+    fn floor() Float
+    fn ceil() Float
+    fn round() Float
+    fn sqrt() Float
+    fn log() Float
+    fn toInt() Int
+    fn toDecimal() Decimal?
 }
 
 public object Float {
     get MIN Float = panic("Float.MIN is provided by the active runtime")
     get MAX Float = panic("Float.MAX is provided by the active runtime")
 
-    def parse(value Str) Option[Float] =
+    fn parse(value Str) Option[Float] =
         panic("Float.parse is provided by the active runtime")
 }

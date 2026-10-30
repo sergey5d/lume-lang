@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # runtime_error at .*: integer overflow: 2\.pow\(63\)
 
-def main() { println(2.pow(63)) }
+fn main() { println(2.pow(63)) }

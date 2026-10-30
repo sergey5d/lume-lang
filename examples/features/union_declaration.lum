@@ -10,7 +10,7 @@ type Outcome =
     | object Cancelled {}
 
 ext Outcome {
-    def result() Str = match this {
+    fn result() Str = match this {
         case Success { value } => value
         case Failure { message } => "Failed: " + message
         case Cancelled => "Cancelled"
@@ -22,13 +22,13 @@ type Boxed[T] =
     | object Empty {}
 
 ext Boxed[T] {
-    def valueOr(fallback fn() T) T = match this {
+    fn valueOr(fallback fn() T) T = match this {
         case Box { value } => value
         case Empty => fallback()
     }
 }
 
-def main() {
+fn main() {
     success Outcome = Success { value: "Great" }
     failure Outcome = Failure { message: "nope" }
     cancelled Outcome = Cancelled

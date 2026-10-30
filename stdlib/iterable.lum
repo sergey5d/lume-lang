@@ -4,9 +4,9 @@
 
 public interface Iterator[T] {
     get hasNext Bool
-    def next() T
+    fn next() T
 }
 
 public interface Iterable[T] {
-    def iterator() Iterator[T]
+    fn iterator() Iterator[T]
 }

@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*module 'customerStore' has no visible member 'prefix'.*
+
+use features/module_alias_support/customers/storage as customerStore
+
+fn main() {
+    println(customerStore.prefix())
+}

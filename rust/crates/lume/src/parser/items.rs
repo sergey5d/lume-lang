@@ -18,6 +18,7 @@ impl<'a> Parser<'a> {
         let (segments, mut span) = self.parse_import_segments("expected use path")?;
         let mut import = ImportDecl {
             path: String::new(),
+            alias: None,
             object_name: None,
             wildcard: false,
             symbols: Vec::new(),
@@ -91,6 +92,12 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 import.path = segments.join("/");
+                if self.match_keyword(Keyword::As) {
+                    let (alias, alias_span) =
+                        self.expect_identifier("expected module alias after 'as'")?;
+                    import.alias = Some(alias);
+                    span = span.cover(alias_span);
+                }
             }
         }
 
@@ -107,7 +114,7 @@ impl<'a> Parser<'a> {
             Visibility::Private
         };
         match self.current_kind() {
-            TokenKind::Keyword(Keyword::Def) => {
+            TokenKind::Keyword(Keyword::Fn) => {
                 let function = self.parse_function_decl(annotations, visibility)?;
                 Some(Item::Function(function))
             }
@@ -182,7 +189,7 @@ impl<'a> Parser<'a> {
                 }
                 self.error_at_current(
                     "unexpected_top_level_statement",
-                    "top-level statements are not allowed; move executable code into a function such as 'def main() Unit { ... }'",
+                    "top-level statements are not allowed; move executable code into a function such as 'fn main() Unit { ... }'",
                 );
                 None
             }
@@ -341,12 +348,6 @@ impl<'a> Parser<'a> {
                 "interface bounds on 'type' require an inline declared union",
             );
         }
-        if !generic_clause.params.is_empty() || !generic_clause.conditions.is_empty() {
-            self.error_at_current(
-                "generic_alias_not_supported",
-                "generic parameters on 'type' are currently supported only for inline union declarations",
-            );
-        }
         let target = self.parse_type_ref()?;
         if matches!(target, TypeRef::Record { .. }) {
             self.diagnostics.push(
@@ -364,6 +365,8 @@ impl<'a> Parser<'a> {
         Some(Item::TypeAlias(TypeAliasDecl {
             visibility,
             name,
+            type_params: generic_clause.params,
+            type_conditions: generic_clause.conditions,
             target,
             span,
         }))
@@ -417,7 +420,7 @@ impl<'a> Parser<'a> {
             self.skip_newlines();
             let mut fields = Vec::new();
             while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
-                if self.at_keyword(Keyword::Def)
+                if self.at_keyword(Keyword::Fn)
                     || self.at_keyword(Keyword::Get)
                     || self.starts_callable_decl()
                 {
@@ -568,13 +571,13 @@ impl<'a> Parser<'a> {
         annotations: Vec<Annotation>,
         visibility: Visibility,
     ) -> Option<FunctionDecl> {
-        let start = if self.match_keyword(Keyword::Def) {
+        let start = if self.match_keyword(Keyword::Fn) {
             self.previous_span()
         } else {
             let span = self.current_span();
             self.error_at_current(
-                "missing_def",
-                "function declarations require 'def'; write `def name(...) ...`",
+                "missing_fn",
+                "function declarations require 'fn'; write `fn name(...) ...`",
             );
             span
         };
@@ -776,7 +779,7 @@ impl<'a> Parser<'a> {
                     }
                     members.push(TypeMember::Method(constructor));
                 }
-                TokenKind::Keyword(Keyword::Def) | TokenKind::Keyword(Keyword::Get) => {
+                TokenKind::Keyword(Keyword::Fn) | TokenKind::Keyword(Keyword::Get) => {
                     let body_method_error = match kind {
                         TypeKind::Annotation => Some(format!(
                             "annotation '{}' cannot declare methods; annotations are data-only metadata shapes",
@@ -796,7 +799,7 @@ impl<'a> Parser<'a> {
                     if method.name == "new" {
                         self.diagnostics.push(Diagnostic::error(
                             "old_constructor_syntax",
-                            "constructors omit 'def'; use `new(params) { body }` or `new(params) = expression`",
+                            "constructors omit 'fn'; use `new(params) { body }` or `new(params) = expression`",
                             method.span,
                         ));
                     }
@@ -822,7 +825,7 @@ impl<'a> Parser<'a> {
                     if method.name == "new" {
                         self.diagnostics.push(Diagnostic::error(
                             "old_constructor_syntax",
-                            "constructors omit 'def'; use `new(params) { body }` or `new(params) = expression`",
+                            "constructors omit 'fn'; use `new(params) { body }` or `new(params) = expression`",
                             method.span,
                         ));
                     }
@@ -1145,15 +1148,15 @@ impl<'a> Parser<'a> {
         visibility: Visibility,
         signature_only: bool,
     ) -> Option<MethodDecl> {
-        let (start, getter) = if self.match_keyword(Keyword::Def) {
+        let (start, getter) = if self.match_keyword(Keyword::Fn) {
             (self.previous_span(), false)
         } else if self.match_keyword(Keyword::Get) {
             (self.previous_span(), true)
         } else {
             let span = self.current_span();
             self.error_at_current(
-                "missing_def",
-                "method declarations require 'def'; getter declarations require 'get'",
+                "missing_fn",
+                "method declarations require 'fn'; getter declarations require 'get'",
             );
             (span, false)
         };
@@ -1179,7 +1182,7 @@ impl<'a> Parser<'a> {
             self.diagnostics.push(
                 Diagnostic::error(
                     "getter_keyword_required",
-                    format!("getter '{}' must use 'get', not 'def'", name),
+                    format!("getter '{}' must use 'get', not 'fn'", name),
                     start.cover(name_span),
                 )
                 .with_help(format!("write `get {} Type = ...`", name)),
@@ -1193,7 +1196,7 @@ impl<'a> Parser<'a> {
                     self.current_span(),
                 )
                 .with_help(format!(
-                    "use `def {}(...)` for a method or `get {} Type` for a getter",
+                    "use `fn {}(...)` for a method or `get {} Type` for a getter",
                     name, name
                 )),
             );

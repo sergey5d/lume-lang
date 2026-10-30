@@ -31,7 +31,7 @@ class SecretBadge {
         this.code = 99
     }
 
-    def codeValue() Int = this.code
+    fn codeValue() Int = this.code
 }
 
 
@@ -40,11 +40,11 @@ class MixedProfile {
     age Int
     private score Int = 5
 
-    def scoreValue() Int = this.score
+    fn scoreValue() Int = this.score
 }
 
 
-def main() Unit {
+fn main() Unit {
     userShape = {
         name: "Ada"
         age: 10

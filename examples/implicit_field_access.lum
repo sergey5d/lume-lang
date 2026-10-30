@@ -15,17 +15,17 @@ class Counter {
         this.count = initial
     }
 
-    def value() Int = count
+    fn value() Int = count
 
-    def bump() Unit {
+    fn bump() Unit {
         count := count + 1
     }
 
-    def plus(delta Int) Int = count + delta
+    fn plus(delta Int) Int = count + delta
 
-    def shadow(count Int) Int = this.count + count
+    fn shadow(count Int) Int = this.count + count
 
-    def lambdaValue() Int {
+    fn lambdaValue() Int {
         reader = () => count + 1
         reader()
     }
@@ -37,13 +37,13 @@ type Color =
     | object Unknown {}
 
 ext Color {
-    def label() Str = match this {
+    fn label() Str = match this {
         case Red { code } => code
         case Unknown => "unknown"
     }
 }
 
-def main() Unit {
+fn main() Unit {
     counter = Counter(5)
     println("initial", counter.value())
     counter.bump()

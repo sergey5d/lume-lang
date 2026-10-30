@@ -1,0 +1,96 @@
+# EXPECT:
+# generic aliases ok
+
+use generic_aliases/models
+use generic_aliases/models/{RemoteResult as ImportedResult, AliasApi}
+
+public shape AppError {
+    message Str
+}
+
+public type AppResult[T] = Result[T, AppError]
+type Lookup[K with Hashed[K], V] = Map[K, V]
+type Transform[A, B] = fn(A) B
+type BatchResult[T] = AppResult[[T]]
+type Identity[T] = T
+type T = Str
+type Values[T] = [T]
+type Maybe[T] = T?
+type Pair[T] = (T, T)
+type Choice[T] = T | Str
+type Same[A, B when A = B] = (A, B)
+
+shape Customer {
+    id Int
+}
+
+shape Box[T] {
+    values Values[T]
+    get first Maybe[T] = values.first
+}
+
+object LocalApi {
+    type Reply[T] = AppResult[T]
+    fn echo[T](value Reply[T]) Reply[T] = value
+}
+
+mixin Applying {
+    fn apply(transform Transform[Int, Int]) Int = transform(1)
+}
+
+class Executor {
+    use Applying
+    fn apply(transform fn(Int) Int) Int = transform(2)
+}
+
+public fn loadCustomer(id Int) AppResult[Int] = Ok(id)
+public fn saveCustomer(id Int) AppResult[Unit] = Ok(())
+fn keep[T](value AppResult[T]) AppResult[T] = value
+fn sameValue[X](value Identity[X]) Identity[X] = value
+fn echoRemote(value ImportedResult[Customer]) ImportedResult[Customer] = value
+
+fn main() {
+    loaded AppResult[Int] = loadCustomer(7)
+    same Result[Int, AppError] = loaded
+    assert(same! == 7)
+    assert(keep(loaded)! == 7)
+    assert(typeOf[AppResult[Int]].name == typeOf[Result[Int, AppError]].name)
+    assert(saveCustomer(7).isOk)
+
+    batch BatchResult[Int] = Ok([1, 2])
+    assert(batch!.size == 2)
+    empty BatchResult[Int] = Ok([])
+    assert(empty!.isEmpty)
+    transform Transform[Int, Str] = value => value.toStr()
+    assert(transform(9) == "9")
+    assert(Executor().apply(value => value + 1) == 3)
+
+    lookup Lookup[Str, Int] = ["answer": 42]
+    ordinary [Str: Int] = lookup
+    assert(ordinary["answer"] == Some(42))
+    pair Pair[Int] = (1, 2)
+    let (left, right) = pair
+    assert(left + right == 3)
+    nested Identity[Identity[Int]] = sameValue(4)
+    assert(nested == 4)
+    assert(sameValue[Identity[Int]](5) == 5)
+    matching Same[Int, Int] = (1, 2)
+    assert(matching == (1, 2))
+    choice Choice[Int] = 12
+    ordinaryChoice Int | Str = choice
+    assert(ordinaryChoice is Int)
+    box = Box[Int]([5])
+    assert(box.first == Some(5))
+    reply LocalApi.Reply[Int] = Ok(8)
+    assert(LocalApi.echo(reply)! == 8)
+
+    remote models.RemoteResult[Customer] = Ok(Customer(9))
+    imported ImportedResult[Customer] = remote
+    assert(imported!.id == 9)
+    assert(echoRemote(imported)!.id == 9)
+    items AliasApi.Items[Int] = [10]
+    assert(items[0] == 10)
+    callback models.RemoteCallback[Customer] = customer => Ok(customer)
+    assert(callback(Customer(11))!.id == 11)
+    println("generic aliases ok")
+}

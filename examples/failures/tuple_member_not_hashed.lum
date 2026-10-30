@@ -5,7 +5,7 @@ class MutableReference {
     id Int
 }
 
-def main() Unit {
+fn main() Unit {
     key = (MutableReference(1), 2)
     _ = [key: "value"]
 }

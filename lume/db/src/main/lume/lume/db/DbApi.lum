@@ -3,65 +3,65 @@ module lume/db
 use lume/db/ { DbError }
 
 public interface Row {
-    def columns() [Str]
-    def has(column Str) Bool
-    def value(column Str) Result[Any, DbError]
-    def nullableValue(column Str) Result[Option[Any], DbError]
-    def decode[reified T]() Result[T, DbError]
-    def str(column Str) Result[Str, DbError]
-    def strOpt(column Str) Result[Option[Str], DbError]
-    def int(column Str) Result[Int, DbError]
-    def intOpt(column Str) Result[Option[Int], DbError]
-    def float(column Str) Result[Float, DbError]
-    def float64(column Str) Result[Float, DbError]
-    def floatOpt(column Str) Result[Option[Float], DbError]
-    def bool(column Str) Result[Bool, DbError]
-    def boolOpt(column Str) Result[Option[Bool], DbError]
+    fn columns() [Str]
+    fn has(column Str) Bool
+    fn value(column Str) Result[Any, DbError]
+    fn nullableValue(column Str) Result[Option[Any], DbError]
+    fn decode[reified T]() Result[T, DbError]
+    fn str(column Str) Result[Str, DbError]
+    fn strOpt(column Str) Result[Option[Str], DbError]
+    fn int(column Str) Result[Int, DbError]
+    fn intOpt(column Str) Result[Option[Int], DbError]
+    fn float(column Str) Result[Float, DbError]
+    fn float64(column Str) Result[Float, DbError]
+    fn floatOpt(column Str) Result[Option[Float], DbError]
+    fn bool(column Str) Result[Bool, DbError]
+    fn boolOpt(column Str) Result[Option[Bool], DbError]
 }
 
 public interface Query {
-    def bind(values [Any] vararg) Query
-    def rows() Result[[Row], DbError]
-    def all() Result[[Row], DbError]
-    def map[T](mapper fn(Row) T) Result[[T], DbError]
-    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[[T], DbError]
-    def decodeAll[reified T]() Result[[T], DbError]
+    fn bind(values [Any] vararg) Query
+    fn rows() Result[[Row], DbError]
+    fn all() Result[[Row], DbError]
+    fn map[T](mapper fn(Row) T) Result[[T], DbError]
+    fn flatMap[T](mapper fn(Row) Result[T, DbError]) Result[[T], DbError]
+    fn decodeAll[reified T]() Result[[T], DbError]
 }
 
 public interface RowQuery {
-    def bind(values [Any] vararg) RowQuery
-    def row() Result[Option[Row], DbError]
-    def map[T](mapper fn(Row) T) Result[Option[T], DbError]
-    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[Option[T], DbError]
-    def decodeOne[reified T]() Result[Option[T], DbError]
+    fn bind(values [Any] vararg) RowQuery
+    fn row() Result[Option[Row], DbError]
+    fn map[T](mapper fn(Row) T) Result[Option[T], DbError]
+    fn flatMap[T](mapper fn(Row) Result[T, DbError]) Result[Option[T], DbError]
+    fn decodeOne[reified T]() Result[Option[T], DbError]
 }
 
 public interface Exec {
-    def bind(values [Any] vararg) BoundExec
-    def run() Result[Int, DbError]
+    fn bind(values [Any] vararg) BoundExec
+    fn run() Result[Int, DbError]
 }
 
 public interface BoundExec {
-    def run() Result[Int, DbError]
+    fn run() Result[Int, DbError]
 }
 
 public interface Transaction {
-    def query(sql Str, values [Any] vararg) Query
-    def queryRow(sql Str, values [Any] vararg) RowQuery
-    def exec(sql Str) Exec
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError]
-    def commit() Result[Unit, DbError]
-    def rollback() Result[Unit, DbError]
-    def close() Result[Unit, DbError]
+    fn query(sql Str, values [Any] vararg) Query
+    fn queryRow(sql Str, values [Any] vararg) RowQuery
+    fn exec(sql Str) Exec
+    fn exec(sql Str, values [Any] vararg) Result[Int, DbError]
+    fn commit() Result[Unit, DbError]
+    fn rollback() Result[Unit, DbError]
+    fn close() Result[Unit, DbError]
 }
 
 public interface Database {
-    def query(sql Str, values [Any] vararg) Query
-    def queryRow(sql Str, values [Any] vararg) RowQuery
-    def exec(sql Str) Exec
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError]
-    def beginTransaction() Result[Transaction, DbError]
-    def close() Result[Unit, DbError]
-    def begin() Result[Transaction, DbError]
-    def transactionally[T](work fn(Transaction) Result[T, DbError]) Result[T, DbError]
+    fn query(sql Str, values [Any] vararg) Query
+    fn queryRow(sql Str, values [Any] vararg) RowQuery
+    fn exec(sql Str) Exec
+    fn exec(sql Str, values [Any] vararg) Result[Int, DbError]
+    fn beginTransaction() Result[Transaction, DbError]
+    fn close() Result[Unit, DbError]
+    fn begin() Result[Transaction, DbError]
+    fn transactionally[T](work fn(Transaction) Result[T, DbError]) Result[T, DbError]
 }

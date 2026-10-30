@@ -11,7 +11,7 @@ public shape Invoice {
     rate Decimal?
 }
 
-def main() {
+fn main() {
     decoded Result[Decimal, Str] = Json.decode[Decimal]("12345678901234567890.123456789")
     amount = decoded!
     assert(amount == 12345678901234567890.123456789d)

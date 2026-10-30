@@ -15,7 +15,7 @@
 # linked index 1 true
 # linked first 8
 
-def main() Unit {
+fn main() Unit {
     vector [Int] = [1, 3]
     println("vector at " + (vector.at(0) !))
     println("vector previous " + (vector.setAt(0, 2) !))

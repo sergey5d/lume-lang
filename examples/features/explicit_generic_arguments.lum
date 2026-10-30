@@ -1,6 +1,6 @@
-def keepValue[T](value T) T = value
+fn keepValue[T](value T) T = value
 
-def main() Unit {
+fn main() Unit {
     optional Int? = keepValue[Int?](^5)
     namedOptional Option[Int] = keepValue[Option[Int]](^6)
     callback fn(Int) Int = keepValue[fn(Int) Int]((value Int) => value + 1)

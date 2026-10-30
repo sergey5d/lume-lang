@@ -1,4 +1,0 @@
-# FAIL_REGEX:
-# .*function declarations require 'def'.*
-
-main() Unit = ()

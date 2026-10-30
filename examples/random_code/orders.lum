@@ -14,7 +14,7 @@ class OrderManager {
     private var currentTick Int = 0
     private queue [Order] = []
 
-    def parseOrder(str Str) Order? {
+    fn parseOrder(str Str) Order? {
 
         arr = str.splitRegex("\s*,\s*")
 
@@ -36,7 +36,7 @@ class OrderManager {
         )
     }
 
-    def checkQueuedOrders() {
+    fn checkQueuedOrders() {
         while !this.queue.isEmpty {
             first = this.queue[0]
             if first.status == "NEW" {
@@ -52,7 +52,7 @@ class OrderManager {
         }
     }
 
-    def handleOrder(str Str) {
+    fn handleOrder(str Str) {
 
         this.currentTick += 1
 
@@ -97,7 +97,7 @@ class OrderManager {
         }
     }
 
-    def testOrders() [Str] {
+    fn testOrders() [Str] {
 
         orders = [
             "1234, BUY, BTC, 10, NEW",
@@ -112,7 +112,7 @@ class OrderManager {
 }
 
 
-def main() {
+fn main() {
 
     manager = OrderManager {}
 

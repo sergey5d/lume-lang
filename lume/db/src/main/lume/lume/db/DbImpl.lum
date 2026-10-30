@@ -6,7 +6,7 @@ use lume/db/{DbError, JdbcDatabase, JdbcRow, JdbcRowDecoder, JdbcRunner, JdbcTra
 private object JdbcRowDecoderCache {
     private var decoders Map[Str, JdbcRowDecoder] = Map()
 
-    def decoder(targetType Type[_]) Result[JdbcRowDecoder, DbError] {
+    fn decoder(targetType Type[_]) Result[JdbcRowDecoder, DbError] {
         key Str = this.key(targetType)
 
         if let Some { value as decoder } = this.decoders.get(key) {
@@ -19,7 +19,7 @@ private object JdbcRowDecoderCache {
         Ok(prepared)
     }
 
-    def key(targetType Type[_]) Str =
+    fn key(targetType Type[_]) Str =
         targetType.qualifiedName ?? (targetType.name ?? "<anonymous>")
 }
 
@@ -31,36 +31,36 @@ private class JdbcRowImpl with Row {
         this.backend = backend
     }
 
-    def columns() [Str] = this.backend.columns()
+    fn columns() [Str] = this.backend.columns()
 
-    def has(column Str) Bool = this.backend.has(column)
+    fn has(column Str) Bool = this.backend.has(column)
 
-    def value(column Str) Result[Any, DbError] = this.backend.value(column)
+    fn value(column Str) Result[Any, DbError] = this.backend.value(column)
 
-    def nullableValue(column Str) Result[Option[Any], DbError] = this.backend.nullableValue(column)
+    fn nullableValue(column Str) Result[Option[Any], DbError] = this.backend.nullableValue(column)
 
-    def decode[reified T]() Result[T, DbError] {
+    fn decode[reified T]() Result[T, DbError] {
         decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
         decoder.decode(this.backend)
     }
 
-    def str(column Str) Result[Str, DbError] = this.backend.str(column)
+    fn str(column Str) Result[Str, DbError] = this.backend.str(column)
 
-    def strOpt(column Str) Result[Option[Str], DbError] = this.backend.strOpt(column)
+    fn strOpt(column Str) Result[Option[Str], DbError] = this.backend.strOpt(column)
 
-    def int(column Str) Result[Int, DbError] = this.backend.intValue(column)
+    fn int(column Str) Result[Int, DbError] = this.backend.intValue(column)
 
-    def intOpt(column Str) Result[Option[Int], DbError] = this.backend.intOpt(column)
+    fn intOpt(column Str) Result[Option[Int], DbError] = this.backend.intOpt(column)
 
-    def float(column Str) Result[Float, DbError] = this.backend.floatValue(column)
+    fn float(column Str) Result[Float, DbError] = this.backend.floatValue(column)
 
-    def float64(column Str) Result[Float, DbError] = this.backend.float64(column)
+    fn float64(column Str) Result[Float, DbError] = this.backend.float64(column)
 
-    def floatOpt(column Str) Result[Option[Float], DbError] = this.backend.floatOpt(column)
+    fn floatOpt(column Str) Result[Option[Float], DbError] = this.backend.floatOpt(column)
 
-    def bool(column Str) Result[Bool, DbError] = this.backend.bool(column)
+    fn bool(column Str) Result[Bool, DbError] = this.backend.bool(column)
 
-    def boolOpt(column Str) Result[Option[Bool], DbError] = this.backend.boolOpt(column)
+    fn boolOpt(column Str) Result[Option[Bool], DbError] = this.backend.boolOpt(column)
 }
 
 
@@ -75,9 +75,9 @@ private class JdbcQuery with Query {
         this.values = values
     }
 
-    def bind(values [Any] vararg) Query = JdbcQuery(this.runner, this.sql, values)
+    fn bind(values [Any] vararg) Query = JdbcQuery(this.runner, this.sql, values)
 
-    def rows() Result[[Row], DbError] {
+    fn rows() Result[[Row], DbError] {
         jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
         out [Row] = []
 
@@ -88,9 +88,9 @@ private class JdbcQuery with Query {
         Ok(out)
     }
 
-    def all() Result[[Row], DbError] = this.rows()
+    fn all() Result[[Row], DbError] = this.rows()
 
-    def map[T](mapper fn(Row) T) Result[[T], DbError] {
+    fn map[T](mapper fn(Row) T) Result[[T], DbError] {
         rows [Row] = try this.rows()
         out [T] = []
 
@@ -101,7 +101,7 @@ private class JdbcQuery with Query {
         Ok(out)
     }
 
-    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[[T], DbError] {
+    fn flatMap[T](mapper fn(Row) Result[T, DbError]) Result[[T], DbError] {
         rows [Row] = try this.rows()
         out [T] = []
 
@@ -120,7 +120,7 @@ private class JdbcQuery with Query {
         Ok(out)
     }
 
-    def decodeAll[reified T]() Result[[T], DbError] {
+    fn decodeAll[reified T]() Result[[T], DbError] {
         jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
         decoder JdbcRowDecoder = try JdbcRowDecoderCache.decoder(typeOf[T])
         out [T] = []
@@ -153,9 +153,9 @@ private class JdbcRowQuery with RowQuery {
         this.values = values
     }
 
-    def bind(values [Any] vararg) RowQuery = JdbcRowQuery(this.runner, this.sql, values)
+    fn bind(values [Any] vararg) RowQuery = JdbcRowQuery(this.runner, this.sql, values)
 
-    def row() Result[Option[Row], DbError] {
+    fn row() Result[Option[Row], DbError] {
         rows [Row] = try JdbcQuery(this.runner, this.sql, this.values).rows()
         count Int = rows.size
 
@@ -168,7 +168,7 @@ private class JdbcRowQuery with RowQuery {
         }
     }
 
-    def map[T](mapper fn(Row) T) Result[Option[T], DbError] {
+    fn map[T](mapper fn(Row) T) Result[Option[T], DbError] {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
@@ -177,7 +177,7 @@ private class JdbcRowQuery with RowQuery {
         }
     }
 
-    def flatMap[T](mapper fn(Row) Result[T, DbError]) Result[Option[T], DbError] {
+    fn flatMap[T](mapper fn(Row) Result[T, DbError]) Result[Option[T], DbError] {
         maybeRow Option[Row] = try this.row()
 
         match maybeRow {
@@ -192,7 +192,7 @@ private class JdbcRowQuery with RowQuery {
         }
     }
 
-    def decodeOne[reified T]() Result[Option[T], DbError] {
+    fn decodeOne[reified T]() Result[Option[T], DbError] {
         jdbcRows [JdbcRow] = try this.runner.query(this.sql, this.values)
         count Int = jdbcRows.size
 
@@ -222,9 +222,9 @@ private class JdbcExec with Exec {
         this.sql = sql
     }
 
-    def bind(values [Any] vararg) BoundExec = JdbcBoundExec(this.runner, this.sql, values)
+    fn bind(values [Any] vararg) BoundExec = JdbcBoundExec(this.runner, this.sql, values)
 
-    def run() Result[Int, DbError] = this.runner.exec(this.sql)
+    fn run() Result[Int, DbError] = this.runner.exec(this.sql)
 }
 
 
@@ -239,7 +239,7 @@ private class JdbcBoundExec with BoundExec {
         this.values = values
     }
 
-    def run() Result[Int, DbError] = this.runner.exec(this.sql, this.values)
+    fn run() Result[Int, DbError] = this.runner.exec(this.sql, this.values)
 }
 
 
@@ -250,19 +250,19 @@ private class JdbcTransactionImpl with Transaction {
         this.backend = backend
     }
 
-    def query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
+    fn query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
 
-    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
+    fn queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
 
-    def exec(sql Str) Exec = JdbcExec(this.backend, sql)
+    fn exec(sql Str) Exec = JdbcExec(this.backend, sql)
 
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError] = this.backend.exec(sql, values)
+    fn exec(sql Str, values [Any] vararg) Result[Int, DbError] = this.backend.exec(sql, values)
 
-    def commit() Result[Unit, DbError] = this.backend.commit()
+    fn commit() Result[Unit, DbError] = this.backend.commit()
 
-    def rollback() Result[Unit, DbError] = this.backend.rollback()
+    fn rollback() Result[Unit, DbError] = this.backend.rollback()
 
-    def close() Result[Unit, DbError] = this.backend.close()
+    fn close() Result[Unit, DbError] = this.backend.close()
 }
 
 
@@ -273,22 +273,22 @@ private class JdbcDatabaseImpl with Database {
         this.backend = backend
     }
 
-    def query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
+    fn query(sql Str, values [Any] vararg) Query = JdbcQuery(this.backend, sql, values)
 
-    def queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
+    fn queryRow(sql Str, values [Any] vararg) RowQuery = JdbcRowQuery(this.backend, sql, values)
 
-    def exec(sql Str) Exec = JdbcExec(this.backend, sql)
+    fn exec(sql Str) Exec = JdbcExec(this.backend, sql)
 
-    def exec(sql Str, values [Any] vararg) Result[Int, DbError] = this.backend.exec(sql, values)
+    fn exec(sql Str, values [Any] vararg) Result[Int, DbError] = this.backend.exec(sql, values)
 
-    def beginTransaction() Result[Transaction, DbError] {
+    fn beginTransaction() Result[Transaction, DbError] {
         backendTx JdbcTransaction = try this.backend.beginTransaction()
         Ok(JdbcTransactionImpl(backendTx))
     }
 
-    def begin() Result[Transaction, DbError] = this.beginTransaction()
+    fn begin() Result[Transaction, DbError] = this.beginTransaction()
 
-    def transactionally[T](work fn(Transaction) Result[T, DbError]) Result[T, DbError] {
+    fn transactionally[T](work fn(Transaction) Result[T, DbError]) Result[T, DbError] {
         tx Transaction = try this.beginTransaction()
 
         worked Result[T, DbError] = work(tx)
@@ -310,5 +310,5 @@ private class JdbcDatabaseImpl with Database {
         }
     }
 
-    def close() Result[Unit, DbError] = this.backend.close()
+    fn close() Result[Unit, DbError] = this.backend.close()
 }

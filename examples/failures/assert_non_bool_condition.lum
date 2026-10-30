@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*argument has type 'Int' but parameter expects 'Bool'.*
 
-def main() Unit {
+fn main() Unit {
     assert(1)
 }

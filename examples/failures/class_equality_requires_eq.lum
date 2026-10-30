@@ -5,6 +5,6 @@ class Account {
     id Int
 }
 
-def main() Unit {
+fn main() Unit {
     equal = Account(1) == Account(1)
 }

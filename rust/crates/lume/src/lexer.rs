@@ -12,8 +12,6 @@ pub enum Keyword {
     Case,
     Class,
     Defer,
-    Def,
-    Default,
     Do,
     Else,
     Ext,
@@ -378,8 +376,6 @@ impl<'a> Lexer<'a> {
             "case" => TokenKind::Keyword(Keyword::Case),
             "class" => TokenKind::Keyword(Keyword::Class),
             "defer" => TokenKind::Keyword(Keyword::Defer),
-            "def" => TokenKind::Keyword(Keyword::Def),
-            "default" => TokenKind::Keyword(Keyword::Default),
             "do" => TokenKind::Keyword(Keyword::Do),
             "else" => TokenKind::Keyword(Keyword::Else),
             "ext" => TokenKind::Keyword(Keyword::Ext),
@@ -645,10 +641,19 @@ mod tests {
 
     #[test]
     fn skips_hash_comments() {
-        let result = lex(&source("# PRELUDE_SKIP\ndef run() Int = 0\n"));
+        let result = lex(&source("# PRELUDE_SKIP\nfn run() Int = 0\n"));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(result.tokens[0].kind, TokenKind::Newline);
-        assert_eq!(result.tokens[1].kind, TokenKind::Keyword(Keyword::Def));
+        assert_eq!(result.tokens[1].kind, TokenKind::Keyword(Keyword::Fn));
+    }
+
+    #[test]
+    fn fn_is_reserved_but_def_is_an_identifier() {
+        let result = lex(&source("fn def"));
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.tokens[0].kind, TokenKind::Keyword(Keyword::Fn));
+        assert_eq!(result.tokens[1].kind, TokenKind::Identifier);
+        assert_eq!(result.tokens[1].lexeme, "def");
     }
 
     #[test]
@@ -742,13 +747,18 @@ mod tests {
     #[test]
     fn lexes_extended_language_tokens() {
         let result = lex(&source(
-            "annotation Route { path Str }\next User { def label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\npublic def api() Unit = ()\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\ndef metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = { ...value, amount: 1 }\ndefaulted = default {}\nmerged = { ...left, ...right, amount: right.amount }\ncount %= 2\ndef spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
+            "annotation Route { path Str }\next User { fn label() Str = this.name get name Str = this.name }\nprivate token Str\ninternal cache Str\npublic fn api() Unit = ()\nassert(true)\nuse model/things/{A as Alias}\nif true { 1 } else { 0 }\ntype Value = Int | Str\nfn metadata[reified A]() Type[A] = typeOf[A]\nmapper fn(Int) Str = value => value.toStr()\noptional Int? = None\nitems = for value <- values yield value + 1\nfor { value <- values } do { println(value) }\nvalue = try source.mapError { err => mapped(err) }\nfallback = maybe ?? 0\nupdated = { ...value, amount: 1 }\ndefault = 1\nmerged = { ...left, ...right, amount: right.amount }\ncount %= 2\nfn spread(value [Str] vararg) Unit = ()\nmatch size { case Small | Large => () }\ntext = \"\"\"\nhello\n\"\"\"\nrawText = raw\"$name\\n\"\npi = 1.25\n",
         ));
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         let kinds: Vec<TokenKind> = result.tokens.iter().map(|token| token.kind).collect();
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Annotation)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::As)));
-        assert!(kinds.contains(&TokenKind::Keyword(Keyword::Default)));
+        assert!(
+            result
+                .tokens
+                .iter()
+                .any(|token| token.lexeme == "default" && token.kind == TokenKind::Identifier)
+        );
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Do)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Ext)));
         assert!(kinds.contains(&TokenKind::Keyword(Keyword::Fn)));

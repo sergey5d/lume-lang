@@ -11,7 +11,7 @@ type MaybeInt =
     class SomeX { value Int }
     | object NoneX {}
 
-def main() Unit {
+fn main() Unit {
     a1 = {
         1 + 7
     }

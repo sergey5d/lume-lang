@@ -22,36 +22,36 @@ public type JsonValue =
     | class JsonObject { fields [JsonField] }
 
 ext JsonValue {
-    def stringify() Str = JsonRuntime.stringify(this)
+    fn stringify() Str = JsonRuntime.stringify(this)
 
     # Extracts provider-style rich text from strings, nested arrays, and
     # objects containing value, text, or content fields.
-    def textContent() Str = JsonRuntime.textContent(this)
+    fn textContent() Str = JsonRuntime.textContent(this)
 }
 
 public object Json {
 
-    def str(value Str) JsonValue = JsonRuntime.str(value)
+    fn str(value Str) JsonValue = JsonRuntime.str(value)
 
-    def int(value Int) JsonValue = JsonRuntime.int(value)
+    fn int(value Int) JsonValue = JsonRuntime.int(value)
 
-    def float(value Float) JsonValue = JsonRuntime.float(value)
+    fn float(value Float) JsonValue = JsonRuntime.float(value)
 
-    def bool(value Bool) JsonValue = JsonRuntime.bool(value)
+    fn bool(value Bool) JsonValue = JsonRuntime.bool(value)
 
-    def nil() JsonValue = JsonRuntime.nil()
+    fn nil() JsonValue = JsonRuntime.nil()
 
-    def field(name Str, value JsonValue) JsonField = JsonRuntime.field(name, value)
+    fn field(name Str, value JsonValue) JsonField = JsonRuntime.field(name, value)
 
-    def array(values [JsonValue] vararg) JsonValue = JsonRuntime.array(values)
+    fn array(values [JsonValue] vararg) JsonValue = JsonRuntime.array(values)
 
-    def obj(fields [JsonField] vararg) JsonValue = JsonRuntime.obj(fields)
+    fn obj(fields [JsonField] vararg) JsonValue = JsonRuntime.obj(fields)
 
-    def obj(value Any) JsonValue = JsonRuntime.encode(value)
+    fn obj(value Any) JsonValue = JsonRuntime.encode(value)
 
-    def encode(value Any) JsonValue = JsonRuntime.encode(value)
+    fn encode(value Any) JsonValue = JsonRuntime.encode(value)
 
-    def stringify(value Any) Str = JsonRuntime.stringify(value)
+    fn stringify(value Any) Str = JsonRuntime.stringify(value)
 
-    def decode[reified T](text Str) Result[T, Str] = JsonRuntime.decode(text, typeOf[T])
+    fn decode[reified T](text Str) Result[T, Str] = JsonRuntime.decode(text, typeOf[T])
 }

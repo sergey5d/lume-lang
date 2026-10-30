@@ -5,4 +5,4 @@ class Plain {
     value Int
 }
 
-def main() Bool = Plain(1) < Plain(2)
+fn main() Bool = Plain(1) < Plain(2)

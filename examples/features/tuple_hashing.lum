@@ -6,10 +6,10 @@ type LookupKey =
     class Number { value Int }
     | object Default {}
 
-def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed[T]](value T) Unit = ()
+fn requireEq[T with Eq[T]](value T) Unit = ()
+fn requireHash[T with Hashed[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     position = (10, 20)
     requireEq(position)
     requireHash(position)

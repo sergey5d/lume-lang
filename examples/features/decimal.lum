@@ -21,11 +21,11 @@ class Balance {
     var amount Decimal
 }
 
-def identity[T](value T) T = value
+fn identity[T](value T) T = value
 
-def withDefault(value Decimal = 1.25d) Decimal = value
+fn withDefault(value Decimal = 1.25d) Decimal = value
 
-def main() {
+fn main() {
     price = 19.99d
     quantity = 3d
     assert(price * quantity == 59.97d)
@@ -94,7 +94,7 @@ def main() {
     assert(123d.round(-1, HalfEven) == 120d)
     assert((-9223372036854775808d).toInt()! == Int.MIN)
 
-    defaults Defaults = default {}
+    defaults Defaults = { tax: 0d, previous: None }
     assert(defaults.amount == 9.99d)
     assert(defaults.tax == 0d)
     assert(defaults.previous.isEmpty)

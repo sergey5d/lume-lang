@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*invalid_binary_operand.*
 
-def main() {
+fn main() {
     println(1d + 0.5)
 }

@@ -1,0 +1,21 @@
+module storage
+
+public shape Customer {
+    id Int
+}
+
+public type CustomerRows[T] = [T]
+
+public shape PrefixSnapshot {
+    prefix Str
+    fn read() Str = prefix
+}
+
+fn prefix() Str = "customer:"
+
+public fn load(id Int) Str = prefix() + id.toStr()
+public fn literalPrefix(prefix Str) Str = prefix
+
+ext Str {
+    public fn moduleAliasLabel() Str = "customer " + this
+}

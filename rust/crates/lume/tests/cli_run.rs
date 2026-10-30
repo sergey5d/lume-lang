@@ -27,7 +27,7 @@ fn run_command_forwards_arguments_after_the_separator() {
     let path = temp_source(
         "args",
         r#"
-def selected() Unit {
+fn selected() Unit {
     received = OS.args
     received.add("local-only")
     fresh = OS.args
@@ -60,7 +60,7 @@ def selected() Unit {
 
 #[test]
 fn run_command_requires_the_argument_separator() {
-    let path = temp_source("missing-separator", "def main() Unit = ()\n");
+    let path = temp_source("missing-separator", "fn main() Unit = ()\n");
     let output = Command::new(env!("CARGO_BIN_EXE_lume"))
         .arg("run")
         .arg(&path)
@@ -80,7 +80,7 @@ fn run_command_supports_synchronous_file_io() {
     let path = temp_source(
         "file-io",
         r#"
-def main() Unit {
+fn main() Unit {
     path = OS.args[0]
     println(File.readText(path)!.size)
 
@@ -170,7 +170,7 @@ class User {
     private token Str = "secret"
 }
 
-def main() Unit {
+fn main() Unit {
     user = User {
         name: "Ada"
         age: 42

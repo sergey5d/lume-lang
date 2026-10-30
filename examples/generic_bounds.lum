@@ -7,7 +7,7 @@
 class ComparableInt with Comparable[ComparableInt] {
     value Int
 
-    def compareTo(other ComparableInt) Int = value.compareTo(other.value)
+    fn compareTo(other ComparableInt) Int = value.compareTo(other.value)
 }
 
 
@@ -17,15 +17,15 @@ class Box[T with Comparable[T]] {
 
 class Mapper {
 
-    def pick[X with Comparable[X]](value X) X = value
+    fn pick[X with Comparable[X]](value X) X = value
 }
 
 
-def pick[T with Comparable[T]](value T) T = value
+fn pick[T with Comparable[T]](value T) T = value
 
-def useBox(value Box[ComparableInt]) Int = value.value.value
+fn useBox(value Box[ComparableInt]) Int = value.value.value
 
-def main() Int {
+fn main() Int {
     mapper Mapper = Mapper {}
     left = ComparableInt { value: 3 }
     right = ComparableInt { value: 4 }

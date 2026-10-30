@@ -16,9 +16,9 @@ shape Snapshot with Identified[Int] {
     id Int
 }
 
-def printId(value Identified[Int]) Unit = println(value.id)
+fn printId(value Identified[Int]) Unit = println(value.id)
 
-def main() Unit {
+fn main() Unit {
     user = User(7, "Ada")
     println(user.id, user.name)
 

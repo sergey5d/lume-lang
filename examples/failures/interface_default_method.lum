@@ -2,5 +2,5 @@
 # .*interface members declare signatures, not implementations.*
 
 interface Contract {
-    def answer() Int = 42
+    fn answer() Int = 42
 }

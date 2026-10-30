@@ -623,9 +623,7 @@ impl<'a> Parser<'a> {
             let contextual_new = parser.at(TokenKind::Identifier)
                 && parser.current().lexeme == "new"
                 && (parser.at_next(TokenKind::LParen) || parser.at_next(TokenKind::LBrace));
-            let default_initialization =
-                parser.at_keyword(Keyword::Default) && parser.at_next(TokenKind::LBrace);
-            if contextual_new || default_initialization {
+            if contextual_new {
                 return false;
             }
         }
@@ -659,7 +657,7 @@ impl<'a> Parser<'a> {
                 | Some(TokenKind::Keyword(Keyword::Internal))
                 | Some(TokenKind::Keyword(Keyword::Private))
                 | Some(TokenKind::Keyword(Keyword::Public))
-                | Some(TokenKind::Keyword(Keyword::Def))
+                | Some(TokenKind::Keyword(Keyword::Fn))
                 | Some(TokenKind::Keyword(Keyword::Get))
         ) || self.starts_local_callable_decl_at(lookahead)
     }
@@ -697,7 +695,7 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            if self.at_keyword(Keyword::Def)
+            if self.at_keyword(Keyword::Fn)
                 || self.at_keyword(Keyword::Get)
                 || self.starts_callable_decl()
             {
@@ -876,22 +874,13 @@ impl<'a> Parser<'a> {
 
     fn parse_contextual_new_expr(&mut self) -> Option<Expr> {
         let start = self.current_span();
-        let default_initialize = self.at_keyword(Keyword::Default);
         self.advance();
-        if default_initialize && !self.at(TokenKind::LBrace) {
-            self.error_at_current(
-                "expected_expression",
-                "default initialization uses 'default { ... }'",
-            );
-            return None;
-        }
         if self.match_token(TokenKind::LParen) {
             let args = self.with_trailing_block_calls_allowed(|parser| parser.parse_call_args())?;
             let end = self.consume(TokenKind::RParen, "expected ')' after constructor inputs")?;
             return Some(Expr::ContextualNew {
                 args,
                 uses_brace_syntax: false,
-                default_initialize: false,
                 span: start.cover(end),
             });
         }
@@ -912,13 +901,12 @@ impl<'a> Parser<'a> {
                     span,
                 }],
                 uses_brace_syntax: true,
-                default_initialize,
                 span,
             });
         }
         self.error_at_current(
             "expected_expression",
-            "contextual construction uses 'new(...)', 'new { ... }', or 'default { ... }'",
+            "contextual construction uses 'new(...)' or 'new { ... }'",
         );
         None
     }
@@ -948,7 +936,7 @@ impl<'a> Parser<'a> {
         while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
             let annotations = self.parse_annotations()?;
             let visibility = self.parse_visibility();
-            if self.at_keyword(Keyword::Def)
+            if self.at_keyword(Keyword::Fn)
                 || self.at_keyword(Keyword::Get)
                 || self.starts_callable_decl()
             {
@@ -2067,10 +2055,7 @@ impl<'a> Parser<'a> {
             && self.current().lexeme == "new"
             && (self.at_next(TokenKind::LParen)
                 || (self.allow_trailing_block_call && self.at_next(TokenKind::LBrace)));
-        let default_initialization = self.at_keyword(Keyword::Default)
-            && self.allow_trailing_block_call
-            && self.at_next(TokenKind::LBrace);
-        if contextual_new || default_initialization {
+        if contextual_new {
             return self
                 .with_trailing_block_calls_allowed(|parser| parser.parse_contextual_new_expr());
         }

@@ -139,7 +139,7 @@ produced return types.
 ### 7. Annotation Targets
 
 Open question:
-- do we want annotations on global functions/method-like top-level `def` declarations as a first-class supported target
+- do we want annotations on global functions/method-like top-level `fn` declarations as a first-class supported target
 - do we want annotations on global variables/top-level bindings
 - if top-level bindings become annotatable, immutable constants are the only viable target because top-level mutable bindings are not allowed
 - whether annotated globals should affect module export/import metadata, runtime reflection, generated code, or only checker/tooling behavior
@@ -202,7 +202,7 @@ Open reified-generic follow-ups:
 Possible target-typed inference rule:
 
 ```txt
-def load[reified A]() Option[A] {
+fn load[reified A]() Option[A] {
     ...
 }
 
@@ -225,7 +225,7 @@ The rule should stay conservative:
 Parameter-based inference should also be considered:
 
 ```txt
-def describe[reified A](value A) Str {
+fn describe[reified A](value A) Str {
     typeOf[A].qualifiedName !
 }
 

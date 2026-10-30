@@ -6,7 +6,7 @@ shape Point {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     point Point = {
         x: 1
         y: 2

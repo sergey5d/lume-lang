@@ -6,7 +6,7 @@
 # args 0
 # done
 
-def main() Unit {
+fn main() Unit {
     OS.print("hello")
     println(" world")
     OS.printf("fmt %d\n", 7)

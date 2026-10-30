@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*decimal division by zero.*
 
-def main() {
+fn main() {
     println(1d / 0d)
 }

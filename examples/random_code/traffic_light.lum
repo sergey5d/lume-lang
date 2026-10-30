@@ -4,7 +4,7 @@ type Side =
     | object EW {}
 
 ext Side {
-    def reverse() Side {
+    fn reverse() Side {
         match this {
             case NS => EW
             case EW => NS
@@ -13,11 +13,11 @@ ext Side {
 }
 
 
-def await(side Side, timeout Int) Int {
+fn await(side Side, timeout Int) Int {
     return 1
 }
 
-def set_light() {
+fn set_light() {
 }
 
 class TrafficControl {
@@ -27,7 +27,7 @@ class TrafficControl {
     var passedNS Int = 0
     var passedEW Int = 0
 
-    def inc(time Int) {
+    fn inc(time Int) {
         if this.side == NS {
             this.passedNS += time
         } else {
@@ -35,7 +35,7 @@ class TrafficControl {
         }
     }
 
-    def getPassed() Int {
+    fn getPassed() Int {
         if this.side == NS {
             this.passedNS
         } else {
@@ -43,14 +43,14 @@ class TrafficControl {
         }
     }
 
-    def reverseAndZero() {
+    fn reverseAndZero() {
         this.side := this.side.reverse()
         this.passedNS := 0
         this.passedEW := 0
     }
 }
 
-def doProcess() {
+fn doProcess() {
 
     min Int = 10
     max Int = 1000

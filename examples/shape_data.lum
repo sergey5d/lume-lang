@@ -14,11 +14,11 @@
 # named shapes support field-wise updates, methods, and interface conformance
 
 interface Hopper {
-    def hop() Str
+    fn hop() Str
 }
 
 interface Jumper {
-    def jump(steps Int) Str
+    fn jump(steps Int) Str
 }
 
 shape Amount with Hopper, Jumper {
@@ -26,19 +26,19 @@ shape Amount with Hopper, Jumper {
     description Str
     count Int
 
-    def multiple(other Amount) Amount = Amount {
+    fn multiple(other Amount) Amount = Amount {
         amount: this.amount * other.amount
         description: this.description + " " + other.description
         count: 0
     }
 
-    def reportAmount() {
+    fn reportAmount() {
         println("amount:", this.amount)
     }
 
-    def hop() Str = "Hop-hop"
+    fn hop() Str = "Hop-hop"
 
-    def jump(steps Int) Str = "Jump " + steps + " steps"
+    fn jump(steps Int) Str = "Jump " + steps + " steps"
 }
 
 
@@ -53,7 +53,7 @@ a3 Amount = { ...a2, amount: 101, description: a2.description + " updated" }
 
 a4 Amount = { ...a3, amount: 102, count: 7 }
 
-def main() Unit {
+fn main() Unit {
     println(amountAmount)
     println(amountDescr)
     println(a1.count)

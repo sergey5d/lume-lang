@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*expected '\]' after sequence pattern.*
 
-def main() Unit {
+fn main() Unit {
     values [Int] = [1, 2, 3]
     let [first, ...rest, last] = values else return ()
 

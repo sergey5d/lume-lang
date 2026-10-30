@@ -1,7 +1,7 @@
 # EXPECT_ERROR:
 # narrow the value before comparing it
 
-def main() Unit {
+fn main() Unit {
     unknown Any = 5
     equal = unknown == 5
 }

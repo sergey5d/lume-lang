@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*type alias 'Transform' expects 2 type arguments.*
+
+type Transform[A, B] = fn(A) B
+
+fn invalid(value Transform[Int]) {}

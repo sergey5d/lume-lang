@@ -5,22 +5,22 @@
 # 0
 
 interface WorkerLike {
-    def doWork() Int
+    fn doWork() Int
 }
 
 class Worker with WorkerLike {
-    def doWork() Int = 7
+    fn doWork() Int = 7
 }
 
 class Other with WorkerLike {
-    def doWork() Int = 3
+    fn doWork() Int = 3
 }
 
 class Slacker with WorkerLike {
-    def doWork() Int = -1
+    fn doWork() Int = -1
 }
 
-def describe(value WorkerLike) {
+fn describe(value WorkerLike) {
     match value {
         case worker Worker => {
             println("worker " + worker.doWork())
@@ -36,7 +36,7 @@ def describe(value WorkerLike) {
     }
 }
 
-def main() Int {
+fn main() Int {
     describe(Worker {})
     describe(Other {})
     describe(Slacker {})

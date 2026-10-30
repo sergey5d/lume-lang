@@ -1,0 +1,30 @@
+# EXPECT:
+# default identifier ok
+
+class Choice {
+    default Int = 3
+}
+
+fn default(work fn() Int) Int = work()
+
+fn invokeDefault() Int = default { => 7 }
+
+fn select(default Int) Int = default
+
+fn main() {
+    default = [1, 2]
+    var total = 0
+    for value <- default {
+        total += value
+    }
+    assert(total == 3)
+    match default {
+        case [first, second] => assert(first + second == 3)
+        case _ => panic("unexpected values")
+    }
+    choice = Choice()
+    assert(choice.default == 3)
+    assert(select(default = 4) == 4)
+    assert(invokeDefault() == 7)
+    println("default identifier ok")
+}

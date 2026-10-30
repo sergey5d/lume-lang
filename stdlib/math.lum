@@ -3,15 +3,15 @@
 # INTERPRETER
 
 public object Math {
-    def min(left Int, right Int) Int =
+    fn min(left Int, right Int) Int =
         if left <= right { left } else { right }
 
-    def min(left Float, right Float) Float =
+    fn min(left Float, right Float) Float =
         if left <= right { left } else { right }
 
-    def max(left Int, right Int) Int =
+    fn max(left Int, right Int) Int =
         if left >= right { left } else { right }
 
-    def max(left Float, right Float) Float =
+    fn max(left Float, right Float) Float =
         if left >= right { left } else { right }
 }

@@ -2,11 +2,11 @@
 # .*callable reference 'render' is overloaded.*
 
 class Formatter {
-    def render(value Int) Str = value.toStr()
-    def render(value Str) Str = value
+    fn render(value Int) Str = value.toStr()
+    fn render(value Str) Str = value
 }
 
-def main() Unit {
+fn main() Unit {
     formatter = Formatter()
     ambiguous = formatter.render
 }

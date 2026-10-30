@@ -12,7 +12,7 @@ class SecretName {
     private secret Str = "hidden"
 }
 
-def main() Unit {
+fn main() Unit {
     named = { name: "Ada" }
     located = { age: 42, location: "Tampa" }
     user = {

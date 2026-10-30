@@ -3,43 +3,43 @@
 # conflict first
 
 interface Greeter {
-    def greet() Str
+    fn greet() Str
 }
 
 mixin Greeting with Greeter {
-    def greet() Str = "interface"
+    fn greet() Str = "interface"
 }
 
 class OverrideBox with Greeter {
     use Greeting
 
-    def greet() Str = "class"
+    fn greet() Str = "class"
 }
 
 interface FirstChoice {
-    def choose() Str
+    fn choose() Str
 }
 
 interface SecondChoice {
-    def choose() Str
+    fn choose() Str
 }
 
 mixin FirstImplementation with FirstChoice {
-    def choose() Str = "first"
+    fn choose() Str = "first"
 }
 
 mixin SecondImplementation with SecondChoice {
-    def choose() Str = "second"
+    fn choose() Str = "second"
 }
 
 class PreferFirst with FirstChoice, SecondChoice {
     use FirstImplementation
     use SecondImplementation
 
-    def choose() Str = "first"
+    fn choose() Str = "first"
 }
 
-def main() Unit {
+fn main() Unit {
     greeter Greeter = OverrideBox {}
     prefer = PreferFirst {}
 

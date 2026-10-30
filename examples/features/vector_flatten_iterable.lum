@@ -3,7 +3,7 @@
 # nested 3 1 3
 # loop 4
 
-def main() Unit {
+fn main() Unit {
     optional [Int?] = [Some(1), None, Some(3)]
     present [Int] = optional.flatten()
     println("optional", present.size, present.first ?? 0, present.last ?? 0)

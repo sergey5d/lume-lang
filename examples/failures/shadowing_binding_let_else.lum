@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*binding 'item' shadows a local binding; use a different name.*
 
-def main() Int {
+fn main() Int {
     item = 1
     let Some { value as item } = Some(2) else return item
     item

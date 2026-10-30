@@ -13,13 +13,13 @@ class WorkerInfo {
     completed [Int]
     var open Int?
 
-    def total() Int = completed.fold(0, (total, duration) => total + duration)
+    fn total() Int = completed.fold(0, (total, duration) => total + duration)
 }
 
 class WorkerTimeTracker {
     private workers [Str: WorkerInfo] = []
 
-    def addWorker(workerId Str, position Str, compensation Int) Bool {
+    fn addWorker(workerId Str, position Str, compensation Int) Bool {
         if workers.contains(workerId) {
             return false
         }
@@ -28,7 +28,7 @@ class WorkerTimeTracker {
         true
     }
 
-    def register(workerId Str, timestamp Int) Bool {
+    fn register(workerId Str, timestamp Int) Bool {
         let worker <- workers[workerId] else return false
 
         if worker.open is None {
@@ -40,12 +40,12 @@ class WorkerTimeTracker {
         true
     }
 
-    def get(workerId Str) Int? {
+    fn get(workerId Str) Int? {
         worker = try workers[workerId]
         Some(worker.total())
     }
 
-    def topWorkers(count Int, position Str) [Str] {
+    fn topWorkers(count Int, position Str) [Str] {
         eligible = workers.values().filter(worker => worker.position == position)
         totals [Str: Int] = []
 
@@ -60,7 +60,7 @@ class WorkerTimeTracker {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     tracker = WorkerTimeTracker()
     println("add", tracker.addWorker("Ada", "engineer", 100), tracker.addWorker("Ada", "engineer", 100))
     tracker.addWorker("Bob", "engineer", 120)

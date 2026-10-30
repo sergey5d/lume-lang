@@ -6,7 +6,7 @@
 # annotation Annotation
 
 interface Labeled {
-    def label() Str
+    fn label() Str
 }
 
 interface Metadata {
@@ -20,7 +20,7 @@ annotation Route with Metadata {
 shape NamedShape with Labeled {
     name Str
 
-    def label() Str = this.name
+    fn label() Str = this.name
 }
 
 
@@ -29,7 +29,7 @@ type Status =
     | class Failed { reason Str }
 
 ext Status {
-    def label() Str = match this {
+    fn label() Str = match this {
         case Ready => "ready"
         case Failed { reason } => reason
     }
@@ -38,13 +38,13 @@ ext Status {
 
 object Greeter with Labeled {
 
-    def label() Str = this.hello()
+    fn label() Str = this.hello()
 
-    def hello() Str = "hi"
+    fn hello() Str = "hi"
 }
 
 
-def main() Unit {
+fn main() Unit {
     named NamedShape = NamedShape { name: "shape-value" }
     namedLabel Labeled = named
     println("shape", namedLabel.label())

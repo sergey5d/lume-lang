@@ -11,7 +11,7 @@ shape Point {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     pixel = Pixel(1, 2)
     point Point = pixel
 }

@@ -6,8 +6,8 @@
 # user Ada
 
 class Renderer {
-    def render(value Int) Str = "int"
-    def render(value Str) Str = "str"
+    fn render(value Int) Str = "int"
+    fn render(value Str) Str = "str"
 }
 
 class User {
@@ -19,11 +19,11 @@ class Admin {
 }
 
 class Saver {
-    def save(tag Int, value User) Str = "user ${value.name}"
-    def save(tag Str, value Admin) Str = "admin ${value.name}"
+    fn save(tag Int, value User) Str = "user ${value.name}"
+    fn save(tag Str, value Admin) Str = "admin ${value.name}"
 }
 
-def main() Unit {
+fn main() Unit {
     renderer = Renderer()
     numbers = [1]
 

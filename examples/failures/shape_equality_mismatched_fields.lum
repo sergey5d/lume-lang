@@ -12,6 +12,6 @@ shape Point3D {
     z Int
 }
 
-def main() Unit {
+fn main() Unit {
     same = Point(1, 2) == Point3D(1, 2, 3)
 }

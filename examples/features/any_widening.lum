@@ -10,9 +10,9 @@ shape Point {
     y Int
 }
 
-def printAnything(value Any) Unit = println(value.toStr())
+fn printAnything(value Any) Unit = println(value.toStr())
 
-def main() Unit {
+fn main() Unit {
     number = Any(42)
     text = Any("hello")
     point = Point(1, 2)

@@ -11,32 +11,32 @@
 # single 9
 # many 3 rest 2
 
-def pairSum(values [Int]) Str {
+fn pairSum(values [Int]) Str {
     let [left, right] = values else return "pair fallback"
     "pair " + (left + right)
 }
 
-def typedSummary(values [Any]) Str {
+fn typedSummary(values [Any]) Str {
     let [name Str, age Int] = values else return "typed fallback"
     "typed " + name + " " + age
 }
 
-def headTail(values [Int]) Str {
+fn headTail(values [Int]) Str {
     let [head, ...tail] = values else return "empty head"
     "head " + head + " tail " + tail.size
 }
 
-def leadingPair(values [Int]) Str {
+fn leadingPair(values [Int]) Str {
     let [left, right, ...] = values else return "prefix fallback"
     "prefix " + (left + right)
 }
 
-def copyAll(values [Int]) Str {
+fn copyAll(values [Int]) Str {
     let [...all] = values
     "all " + all.size
 }
 
-def describe(values [Int]) Str {
+fn describe(values [Int]) Str {
     match values {
         case [] => "empty"
         case [only] => "single " + only
@@ -44,7 +44,7 @@ def describe(values [Int]) Str {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     println(pairSum([3, 4]))
     println(pairSum([3, 4, 5]))
     println(typedSummary(["Ada", 42]))

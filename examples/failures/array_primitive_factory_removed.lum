@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*ofInt.*
 
-def main() Unit {
+fn main() Unit {
     values Array[Int] = Array.ofInt(2)
     println(values[0])
 }

@@ -4,5 +4,5 @@
 class Amount {
     label Str
 
-    def label() Str = this.label
+    fn label() Str = this.label
 }

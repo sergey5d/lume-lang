@@ -1,7 +1,7 @@
 # FAIL_REGEX:
-# .*shape argument expansion requires positional arguments, then explicit named arguments, then shape spreads.*
+# .*positional arguments must precede named arguments and shape spreads.*
 
-def consume(first Int, second Int) {}
-def main() {
-    consume(...{ first: 1 }, second = 2)
+fn consume(first Int, second Int) {}
+fn main() {
+    consume(...{ first: 1 }, 2)
 }

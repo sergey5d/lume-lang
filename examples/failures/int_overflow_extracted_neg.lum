@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # runtime_error at .*: integer overflow: -\(-9223372036854775808\)
 
-def main() { println(-Int.MIN.checkedAdd(0)!) }
+fn main() { println(-Int.MIN.checkedAdd(0)!) }

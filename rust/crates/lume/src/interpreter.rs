@@ -225,9 +225,11 @@ pub(crate) fn merged_runtime_program(
         span: root_module.program.span,
     };
 
+    let function_names = runtime_function_names(graph, &order, root);
+
     merged
         .items
-        .extend(prepare_runtime_module(root_module, graph, true).items);
+        .extend(prepare_runtime_module(root_module, graph, true, &function_names).items);
     for path in order {
         if &path == root {
             continue;
@@ -237,7 +239,7 @@ pub(crate) fn merged_runtime_program(
         };
         merged
             .items
-            .extend(prepare_runtime_module(module, graph, false).items);
+            .extend(prepare_runtime_module(module, graph, false, &function_names).items);
     }
 
     Ok(merged)
@@ -261,13 +263,87 @@ fn collect_runtime_module_order(
     out.push(root.clone());
 }
 
+type RuntimeFunctionNames = HashMap<(PathBuf, usize), String>;
+
+fn runtime_function_names(
+    graph: &ModuleGraph,
+    order: &[PathBuf],
+    root: &Path,
+) -> RuntimeFunctionNames {
+    let mut owners = HashMap::<String, HashSet<PathBuf>>::new();
+    for path in order {
+        for item in &graph.modules[path].program.items {
+            if let ast::Item::Function(function) = item
+                && function.name != "main"
+            {
+                owners
+                    .entry(function.name.clone())
+                    .or_default()
+                    .insert(path.clone());
+            }
+        }
+    }
+    let mut names = HashMap::new();
+    for (index, path) in order.iter().enumerate() {
+        if path == root {
+            continue;
+        }
+        for item in &graph.modules[path].program.items {
+            if let ast::Item::Function(function) = item
+                && owners
+                    .get(&function.name)
+                    .is_some_and(|owners| owners.len() > 1)
+            {
+                names.insert(
+                    (path.clone(), function.span.start),
+                    format!("$module{index}${}", function.name),
+                );
+            }
+        }
+    }
+    names
+}
+
+struct RuntimeModule<'a> {
+    module: &'a LoadedModule,
+    names: HashMap<(usize, usize), String>,
+}
+
+impl std::ops::Deref for RuntimeModule<'_> {
+    type Target = LoadedModule;
+
+    fn deref(&self) -> &Self::Target {
+        self.module
+    }
+}
+
 fn prepare_runtime_module(
     module: &LoadedModule,
     graph: &ModuleGraph,
     is_root: bool,
+    function_names: &RuntimeFunctionNames,
 ) -> ast::Program {
     let mut program = module.program.clone();
-    rewrite_program_for_runtime(&mut program, module, graph);
+    let mut names = HashMap::new();
+    if !function_names.is_empty() {
+        // Reuse resolved definitions so parameters, local functions, and fields
+        // that shadow a top-level function keep their original bindings.
+        for (reference, target) in crate::resolver::module_definition_references(module, graph) {
+            if let Some(name) = function_names.get(&(PathBuf::from(target.path), target.span.start))
+            {
+                names.insert(reference, name.clone());
+            }
+        }
+        for item in &program.items {
+            if let ast::Item::Function(function) = item
+                && let Some(name) = function_names.get(&(module.path.clone(), function.span.start))
+            {
+                names.insert((function.span.start, function.span.end), name.clone());
+            }
+        }
+    }
+    let module = RuntimeModule { module, names };
+    rewrite_program_for_runtime(&mut program, &module, graph);
     program.imports.clear();
     if module.source == crate::resolver::ModuleSource::Library {
         program.items.retain(|item| match item {
@@ -285,7 +361,7 @@ fn prepare_runtime_module(
 
 fn rewrite_program_for_runtime(
     program: &mut ast::Program,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     for item in &mut program.items {
@@ -293,11 +369,28 @@ fn rewrite_program_for_runtime(
     }
 }
 
-fn rewrite_item_for_runtime(item: &mut ast::Item, module: &LoadedModule, graph: &ModuleGraph) {
+fn rewrite_item_for_runtime(item: &mut ast::Item, module: &RuntimeModule<'_>, graph: &ModuleGraph) {
     match item {
         ast::Item::Function(function) => rewrite_function_for_runtime(function, module, graph),
         ast::Item::TypeAlias(alias) => {
             rewrite_type_ref_for_runtime(&mut alias.target, module);
+            for param in &mut alias.type_params {
+                for bound in &mut param.bounds {
+                    rewrite_type_ref_for_runtime(bound, module);
+                }
+            }
+            for condition in &mut alias.type_conditions {
+                match condition {
+                    ast::GenericCondition::Bound { subject, bound, .. } => {
+                        rewrite_type_ref_for_runtime(subject, module);
+                        rewrite_type_ref_for_runtime(bound, module);
+                    }
+                    ast::GenericCondition::Equal { left, right, .. } => {
+                        rewrite_type_ref_for_runtime(left, module);
+                        rewrite_type_ref_for_runtime(right, module);
+                    }
+                }
+            }
         }
         ast::Item::Type(decl) => rewrite_type_decl_for_runtime(decl, module, graph),
         ast::Item::Extension(block) => rewrite_extension_block_for_runtime(block, module, graph),
@@ -307,7 +400,7 @@ fn rewrite_item_for_runtime(item: &mut ast::Item, module: &LoadedModule, graph: 
 
 fn rewrite_type_decl_for_runtime(
     decl: &mut ast::TypeDecl,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     for bound in &mut decl.with_bounds {
@@ -343,7 +436,7 @@ fn rewrite_type_decl_for_runtime(
 
 fn rewrite_extension_block_for_runtime(
     block: &mut ast::ExtensionBlock,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     rewrite_type_ref_for_runtime(&mut block.target, module);
@@ -354,9 +447,12 @@ fn rewrite_extension_block_for_runtime(
 
 fn rewrite_function_for_runtime(
     function: &mut ast::FunctionDecl,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
+    if let Some(name) = module.names.get(&(function.span.start, function.span.end)) {
+        function.name = name.clone();
+    }
     for param in &mut function.params {
         if let Some(ty) = &mut param.ty {
             rewrite_type_ref_for_runtime(ty, module);
@@ -370,7 +466,7 @@ fn rewrite_function_for_runtime(
 
 fn rewrite_method_for_runtime(
     method: &mut ast::MethodDecl,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     for param in &mut method.params {
@@ -388,7 +484,7 @@ fn rewrite_method_for_runtime(
 
 fn rewrite_callable_body_for_runtime(
     body: &mut ast::CallableBody,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     match body {
@@ -397,13 +493,17 @@ fn rewrite_callable_body_for_runtime(
     }
 }
 
-fn rewrite_block_for_runtime(block: &mut ast::Block, module: &LoadedModule, graph: &ModuleGraph) {
+fn rewrite_block_for_runtime(
+    block: &mut ast::Block,
+    module: &RuntimeModule<'_>,
+    graph: &ModuleGraph,
+) {
     for stmt in &mut block.statements {
         rewrite_stmt_for_runtime(stmt, module, graph);
     }
 }
 
-fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: &ModuleGraph) {
+fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &RuntimeModule<'_>, graph: &ModuleGraph) {
     match stmt {
         ast::Stmt::Binding(binding) => {
             for local in &mut binding.bindings {
@@ -483,7 +583,11 @@ fn rewrite_stmt_for_runtime(stmt: &mut ast::Stmt, module: &LoadedModule, graph: 
     }
 }
 
-fn rewrite_if_stmt_for_runtime(stmt: &mut ast::IfStmt, module: &LoadedModule, graph: &ModuleGraph) {
+fn rewrite_if_stmt_for_runtime(
+    stmt: &mut ast::IfStmt,
+    module: &RuntimeModule<'_>,
+    graph: &ModuleGraph,
+) {
     if let Some(condition) = &mut stmt.condition {
         rewrite_expr_for_runtime(condition, module, graph);
     }
@@ -524,7 +628,7 @@ fn rewrite_if_stmt_for_runtime(stmt: &mut ast::IfStmt, module: &LoadedModule, gr
 
 fn rewrite_for_binding_for_runtime(
     binding: &mut ast::ForBinding,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     if let Some(pattern) = &mut binding.pattern {
@@ -545,7 +649,7 @@ fn rewrite_for_binding_for_runtime(
 
 fn rewrite_else_branch_for_runtime(
     branch: &mut ast::ElseBranch,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     match branch {
@@ -556,7 +660,7 @@ fn rewrite_else_branch_for_runtime(
 
 fn rewrite_match_case_for_runtime(
     case: &mut ast::MatchCase,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     rewrite_pattern_for_runtime(&mut case.pattern, module);
@@ -604,7 +708,19 @@ fn rewrite_pattern_for_runtime(pattern: &mut ast::Pattern, module: &LoadedModule
     }
 }
 
-fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: &ModuleGraph) {
+fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &RuntimeModule<'_>, graph: &ModuleGraph) {
+    let reference = match expr {
+        ast::Expr::Identifier { span, .. } => Some((span.start, span.end)),
+        ast::Expr::Member { name, span, .. } => Some((span.end - name.len(), span.end)),
+        _ => None,
+    };
+    if let Some(name) = reference.and_then(|reference| module.names.get(&reference)) {
+        *expr = ast::Expr::Identifier {
+            name: name.clone(),
+            span: expr.span(),
+        };
+        return;
+    }
     match expr {
         ast::Expr::Identifier { name, span } => {
             if let Some(path) = rewritten_imported_symbol_path(module, name) {
@@ -781,7 +897,7 @@ fn rewrite_expr_for_runtime(expr: &mut ast::Expr, module: &LoadedModule, graph: 
 
 fn rewrite_else_expr_branch_for_runtime(
     branch: &mut ast::ElseExprBranch,
-    module: &LoadedModule,
+    module: &RuntimeModule<'_>,
     graph: &ModuleGraph,
 ) {
     match branch {
@@ -8542,14 +8658,14 @@ mod tests {
 
             use lume/json/{Json, JsonValue}
 
-            def readRichText() Result[Str, Str] {
+            fn readRichText() Result[Str, Str] {
                 value JsonValue = try Json.decode[JsonValue](
                     "{\"content\":[{\"value\":\" Rich text \"}]}"
                 )
                 Ok(Json.textContent(value))
             }
 
-            def main() Unit {
+            fn main() Unit {
                 println(readRichText()!)
             }
             "#,
@@ -8784,7 +8900,7 @@ mod tests {
                     this.count = count
                 }
 
-                def bump(delta Int) Int {
+                fn bump(delta Int) Int {
                     this.count += delta
                     return this.count
                 }
@@ -8793,7 +8909,7 @@ mod tests {
 
             seed Int = 1
 
-            def run() Int {
+            fn run() Int {
                 c Counter = Counter(seed)
                 return c.bump(2)
             }
@@ -8824,10 +8940,10 @@ mod tests {
 
             shape Marker {}
 
-            def noop() Unit {}
-            def noop2() = ()
+            fn noop() Unit {}
+            fn noop2() = ()
 
-            def main() Unit {
+            fn main() Unit {
                 counter Counter = new {}
                 defaulted Defaulted = new {}
                 marker Marker = {}
@@ -8837,7 +8953,6 @@ mod tests {
                 nothing Unit = ()
                 anonymous {} = new {}
                 structural {} = {}
-                defaultedStructural {} = default {}
                 widened Any = anonymous
                 extended = { ...anonymous, value: 2 }
                 positional { x Int, y Int } = new(1, 2)
@@ -8868,7 +8983,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_default_initialization_without_recursive_derivation() {
+    fn runs_explicit_construction_preserving_declared_defaults() {
         let program = lower_inline(
             r#"
             class RetrySettings {
@@ -8898,10 +9013,18 @@ mod tests {
                 counts [Str: Int]
             }
 
-            def main() Unit {
-                config Config = default {}
-                changed Config = default { label: "changed" }
-                anonymous { enabled Bool, files [Str] } = default {}
+            fn main() Unit {
+                config Config = new {
+                    enabled: false
+                    retries: RetrySettings()
+                    explicit: ExplicitSettings()
+                    nested: NestedDefaults()
+                    note: None
+                    files: []
+                    counts: []
+                }
+                changed Config = new { ...config, label: "changed" }
+                anonymous { enabled Bool, files [Str] } = { enabled: false, files: [] }
 
                 println(
                     config.label,
@@ -8939,11 +9062,11 @@ mod tests {
                 class Worker {
                     name Str
 
-                    def point(x Int) Point = Point(x)
+                    fn point(x Int) Point = Point(x)
                 }
 
                 interface Reader {
-                    def read() Str
+                    fn read() Str
                 }
 
                 object Defaults {
@@ -8954,23 +9077,23 @@ mod tests {
                     value Str
                 }
 
-                def worker(name Str) Worker = Worker(name)
-                def point(x Int) Point = Point(x)
-                def workerName(worker Worker) Str = match worker {
+                fn worker(name Str) Worker = Worker(name)
+                fn point(x Int) Point = Point(x)
+                fn workerName(worker Worker) Str = match worker {
                     case Worker { name } => name
                 }
             }
 
-            def qualifiedWorkerName(worker Namespace.Worker) Str = match worker {
+            fn qualifiedWorkerName(worker Namespace.Worker) Str = match worker {
                 case Namespace.Worker { name } => name
             }
 
             class TextReader with Namespace.Reader {
-                def read() Str = "!"
+                fn read() Str = "!"
             }
 
             @Namespace.Label { value: "entry" }
-            def run() Str {
+            fn run() Str {
                 namespace = Namespace()
                 worker Namespace.Worker = namespace.worker("Ada")
                 point Namespace.Point = worker.point(7)
@@ -8996,10 +9119,10 @@ mod tests {
                     class Parsed { text Text }
                     | object Empty {}
 
-                def parse(text Text) Outcome = Outcome.Parsed(text)
+                fn parse(text Text) Outcome = Outcome.Parsed(text)
             }
 
-            def run() Str {
+            fn run() Str {
                 outcome Parser.Outcome = Parser().parse("ok")
                 return match outcome {
                     case Parsed { text } => text
@@ -9025,7 +9148,7 @@ mod tests {
                 get quadrupled Int = doubled * 2
             }
 
-            def run() Int {
+            fn run() Int {
                 counter Counter = Counter(6)
                 return counter.quadrupled
             }
@@ -9046,7 +9169,7 @@ mod tests {
                 get implicitCall Int = creator(4)
             }
 
-            def run() Int {
+            fn run() Int {
                 factory Factory = Factory()
                 return factory.creator(5) + factory.implicitCall
             }
@@ -9065,10 +9188,10 @@ mod tests {
             class Box with Eq[Box] {
                 value Int
 
-                def equals(other Box) Bool = this.value == other.value
+                fn equals(other Box) Bool = this.value == other.value
             }
 
-            def main() Unit {
+            fn main() Unit {
                 first = Box(1)
                 alias = first
                 separate = Box(1)
@@ -9115,7 +9238,7 @@ mod tests {
                 x Int
             }
 
-            def main() Unit {
+            fn main() Unit {
                 point = Point(1, "one")
                 same = ReorderedPoint("one", 1)
                 different = ReorderedPoint("two", 2)
@@ -9151,7 +9274,7 @@ mod tests {
                 id Int
                 note Str
 
-                def equals(other Key) Bool = this.id == other.id
+                fn equals(other Key) Bool = this.id == other.id
             }
 
             shape WrappedKey {
@@ -9162,7 +9285,7 @@ mod tests {
                 id Int
                 private note Str = "hidden"
 
-                def equals(other PrivateEntry) Bool = this.id == other.id
+                fn equals(other PrivateEntry) Bool = this.id == other.id
             }
 
             shape PrivateKey with Hashed[PrivateKey] {
@@ -9170,11 +9293,11 @@ mod tests {
                 note Str
                 private marker Int = 0
 
-                def equals(other PrivateKey) Bool = this.id == other.id
-                def hash() Int = this.id
+                fn equals(other PrivateKey) Bool = this.id == other.id
+                fn hash() Int = this.id
             }
 
-            def main() Unit {
+            fn main() Unit {
                 println(WrappedKey(Key(1, "left")) == WrappedKey(Key(1, "right")))
                 println(WrappedKey(Key(1, "left")) == WrappedKey(Key(2, "left")))
                 println(PrivateEntry(1) == PrivateEntry(1))
@@ -9206,28 +9329,28 @@ mod tests {
             class Account with Eq[Account] {
                 id Int
 
-                def equals(other Account) Bool = this.id == other.id
+                fn equals(other Account) Bool = this.id == other.id
             }
 
             interface Identified with Eq[Identified] {
-                def code() Int
+                fn code() Int
             }
 
             class Entry with Identified {
                 value Int
 
-                def code() Int = this.value
-                def equals(other Identified) Bool = this.value == other.code()
+                fn code() Int = this.value
+                fn equals(other Identified) Bool = this.value == other.code()
             }
 
             class AlternateEntry with Identified {
                 value Int
 
-                def code() Int = this.value
-                def equals(other Identified) Bool = this.value == other.code()
+                fn code() Int = this.value
+                fn equals(other Identified) Bool = this.value == other.code()
             }
 
-            def main() Unit {
+            fn main() Unit {
                 println(Account(1) == Account(1))
                 println(Account(1) != Account(2))
                 left Identified = Entry(1)
@@ -9261,8 +9384,8 @@ mod tests {
                 id Int
                 note Str
 
-                def equals(other Key) Bool = this.id == other.id
-                def hash() Int = this.id
+                fn equals(other Key) Bool = this.id == other.id
+                fn hash() Int = this.id
             }
 
             shape WrappedKey {
@@ -9273,7 +9396,7 @@ mod tests {
                 shape Chosen { key Key }
                 | object Missing {}
 
-            def main() Unit {
+            fn main() Unit {
                 left = Key(1, "left")
                 right = Key(1, "right")
 
@@ -9323,10 +9446,10 @@ mod tests {
             }
 
             ext User {
-                def label() Str = this.name + ":" + this.age.toStr()
+                fn label() Str = this.name + ":" + this.age.toStr()
             }
 
-            def main() Unit {
+            fn main() Unit {
                 user = User { name: "Ada", age: 36 }
                 println(user.label())
             }
@@ -9342,10 +9465,10 @@ mod tests {
     fn runs_trailing_block_as_explicit_zero_arg_lambda_argument() {
         let program = lower_inline(
             r#"
-            def process(f fn() Unit) Unit = f()
-            def compute(f fn() Int) Int = f()
+            fn process(f fn() Unit) Unit = f()
+            fn compute(f fn() Int) Int = f()
 
-            def main() Unit {
+            fn main() Unit {
                 process { () => println("hehe") }
                 println(compute { () => 42 })
             }
@@ -9361,7 +9484,7 @@ mod tests {
     fn runs_range_loops_and_println() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 range IntRange = Range(1, 4)
                 OS.println("bounds", range.start, range.end, range.step)
                 var total Int = 0
@@ -9404,7 +9527,7 @@ mod tests {
     fn rejects_zero_step_ranges() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 for item <- Range(0, 3, 0) {
                     println(item)
                 }
@@ -9438,7 +9561,7 @@ mod tests {
 }
 
 
-            def main() Unit {
+            fn main() Unit {
                 ada User = User("Ada")
                 ben User = User { age: 12, name: "Ben" }
                 OS.println(ada.name, ada.age)
@@ -9468,7 +9591,7 @@ mod tests {
                 }
             }
 
-            def main() Unit {
+            fn main() Unit {
                 payload = { x: 7 }
 
                 implicitFromValue = Holder(payload)
@@ -9495,8 +9618,8 @@ mod tests {
     fn runs_defaulted_function_and_method_parameters() {
         let program = lower_inline(
             r#"
-            def increment(value Int, amount Int = 1) Int = value + amount
-            def isMissing(value Int? = None) Bool = value.isEmpty
+            fn increment(value Int, amount Int = 1) Int = value + amount
+            fn isMissing(value Int? = None) Bool = value.isEmpty
 
             class Counter {
                 value Int
@@ -9505,10 +9628,10 @@ mod tests {
                     this.value = value
                 }
 
-                def add(amount Int = 1) Int = this.value + amount
+                fn add(amount Int = 1) Int = this.value + amount
             }
 
-            def main() Unit {
+            fn main() Unit {
                 counter Counter = Counter(10)
                 println(increment(4), increment(4, 3))
                 println(counter.add(), counter.add(5))
@@ -9529,7 +9652,7 @@ mod tests {
             class Recorder {
                 values [Int] = []
 
-                def mark(value Int) Int {
+                fn mark(value Int) Int {
                     this.values.add(value)
                     value
                 }
@@ -9553,12 +9676,12 @@ mod tests {
             class Service {
                 recorder Recorder
 
-                def send(request Int) Int {
+                fn send(request Int) Int {
                     this.recorder.mark(3)
                     request
                 }
 
-                def combine(first Int, second Int) Int {
+                fn combine(first Int, second Int) Int {
                     this.recorder.mark(4)
                     first * 10 + second
                 }
@@ -9567,22 +9690,22 @@ mod tests {
             class Harness {
                 recorder Recorder
 
-                def makeService() Service {
+                fn makeService() Service {
                     this.recorder.mark(1)
                     Service(this.recorder)
                 }
 
-                def makeRequest() Int = this.recorder.mark(2)
+                fn makeRequest() Int = this.recorder.mark(2)
             }
 
-            def combine(first Int, second Int) Int = first * 10 + second
+            fn combine(first Int, second Int) Int = first * 10 + second
 
-            def collect(prefix Int, values [Int] vararg) Int =
+            fn collect(prefix Int, values [Int] vararg) Int =
                 prefix + values.fold(0, (sum, value) => sum + value)
 
-            def keep(first Int, second fn() Int) Int = first
+            fn keep(first Int, second fn() Int) Int = first
 
-            def main() Unit {
+            fn main() Unit {
                 callRecorder = Recorder {}
                 combined = combine(
                     second = callRecorder.mark(2),
@@ -9692,14 +9815,14 @@ mod tests {
             }
 
             class Client {
-                def connect(protocol Str = "https", host Str, port Int = 443) Str =
+                fn connect(protocol Str = "https", host Str, port Int = 443) Str =
                     protocol + "://" + host + ":" + port.toStr()
             }
 
-            def connect(protocol Str = "https", host Str, port Int = 443) Str =
+            fn connect(protocol Str = "https", host Str, port Int = 443) Str =
                 protocol + "://" + host + ":" + port.toStr()
 
-            def main() Unit {
+            fn main() Unit {
                 x1 X1 = X1 { b: "one" }
                 x2 X2 = X2("two")
                 x3 X3 = X3 { a: "three", c: "four" }
@@ -9744,13 +9867,13 @@ mod tests {
                     this.segments = segments
                 }
 
-                def size() Int = this.segments.size
+                fn size() Int = this.segments.size
 
-                def firstOr(value Str) Str = this.segments.at(0) ?? value
+                fn firstOr(value Str) Str = this.segments.at(0) ?? value
 }
 
 
-            def run() Str {
+            fn run() Str {
                 empty Path = Path()
                 path Path = Path("usr", "local", "bin")
                 return empty.size() + ":" + path.size() + ":" + path.firstOr("?")
@@ -9775,7 +9898,7 @@ mod tests {
                 }
             }
 
-            def main() Unit {
+            fn main() Unit {
                 set Set[Str] = new {}
                 map Map[Str, Int] = Map[Str, Int]()
                 inferred = Box("hello")
@@ -9802,9 +9925,9 @@ mod tests {
     fn runs_explicit_generic_calls_with_complete_type_arguments() {
         let program = lower_inline(
             r#"
-            def keepValue[T](value T) T = value
+            fn keepValue[T](value T) T = value
 
-            def main() Unit {
+            fn main() Unit {
                 optional Int? = keepValue[Int?](^5)
                 namedOptional Option[Int] = keepValue[Option[Int]](^6)
                 callback fn(Int) Int = keepValue[fn(Int) Int]((value Int) => value + 1)
@@ -9834,21 +9957,21 @@ mod tests {
                 label Str
             }
 
-            def source() StoredRollup? = Some(StoredRollup {
+            fn source() StoredRollup? = Some(StoredRollup {
                 total: 7
                 label: "week"
                 internalId: 99
             })
 
-            def named() Rollup? = source().map(r => Rollup { ...r })
-            def bareFields() Rollup? = source().map(r => { ...r })
-            def implicitShape() Rollup? = source().map(r => { ...r })
-            def contextualNew() Rollup? = source().map(r => new { ...r })
-            def namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
-            def bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
-            def contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
+            fn named() Rollup? = source().map(r => Rollup { ...r })
+            fn bareFields() Rollup? = source().map(r => { ...r })
+            fn implicitShape() Rollup? = source().map(r => { ...r })
+            fn contextualNew() Rollup? = source().map(r => new { ...r })
+            fn namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
+            fn bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
+            fn contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
 
-            def main() Unit {
+            fn main() Unit {
                 println(named()!.total)
                 println(bareFields()!.total)
                 println(implicitShape()!.total)
@@ -9900,9 +10023,9 @@ mod tests {
                 y Int = 42
             }
 
-            def view(point Point) Point = point
+            fn view(point Point) Point = point
 
-            def main() Unit {
+            fn main() Unit {
                 first3d = Point3D(1, 2, 3)
                 second3d = Point3D(1, 2, 99)
                 first Point = view(first3d)
@@ -9990,16 +10113,16 @@ mod tests {
                 label Str
             }
 
-            def project(value XYZ | Label) XY | Label = value
+            fn project(value XYZ | Label) XY | Label = value
 
-            def printSelected(value XY | X) Unit {
+            fn printSelected(value XY | X) Unit {
                 match value {
                     case XY { x, y } => println("xy", x, y)
                     case X { x } => println("x", x)
                 }
             }
 
-            def main() Unit {
+            fn main() Unit {
                 wider = XYZ(1, 2, 3)
                 unique XY | Label = wider
                 exact XY | X = Position(4, 5)
@@ -10035,13 +10158,13 @@ mod tests {
                     this.items = Array(left, right)
                 }
 
-                def [](index Int) Int = this.items[index]
-                def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
-                def -() Vec = Vec(-this[0], -this[1])
+                fn [](index Int) Int = this.items[index]
+                fn +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
+                fn -() Vec = Vec(-this[0], -this[1])
 }
 
 
-            def main() Unit {
+            fn main() Unit {
                 items = Vector(1, 2)
                 items.add(3)
                 items.addAll(Vector(4, 5))
@@ -10083,7 +10206,7 @@ mod tests {
     fn preserves_integer_precision_and_defined_numeric_edge_behavior() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 low Int = 9007199254740992
                 high Int = 9007199254740993
 
@@ -10124,7 +10247,7 @@ mod tests {
         ] {
             let program = lower_inline(&format!(
                 r#"
-                def main() Unit {{
+                fn main() Unit {{
                     println({expression})
                 }}
                 "#
@@ -10178,7 +10301,7 @@ mod tests {
                 "9223372036854775807 + 1",
             ),
         ] {
-            let program = lower_inline(&format!("def main() {{\n{statement}\n}}"));
+            let program = lower_inline(&format!("fn main() {{\n{statement}\n}}"));
             let run = run_program(&program);
             assert_eq!(
                 run.diagnostics.len(),
@@ -10197,7 +10320,7 @@ mod tests {
     fn runs_list_remove_first_and_seeded_fold() {
         let program = lower_inline(
             r#"
-            def main() Int {
+            fn main() Int {
                 values = Vector(1, 2, 3)
                 values.removeFirst()
                 return values.fold(0, (acc, value) => acc + value)
@@ -10221,13 +10344,13 @@ mod tests {
                 private queue [Str] = []
 
 
-                def current() Int = this.currentTick
-                def queued() Int = this.queue.size
-                def entries() Int = this.map.size
+                fn current() Int = this.currentTick
+                fn queued() Int = this.queue.size
+                fn entries() Int = this.map.size
 }
 
 
-            def main() Int {
+            fn main() Int {
                 manager = OrderManager {}
                 return manager.current() + manager.queued() + manager.entries()
             }
@@ -10250,11 +10373,11 @@ mod tests {
                 balance Int
                 private cache Int = 7
 
-                def label() Str = this.owner + ":" + this.region + ":" + this.balance.toStr()
-                def cacheValue() Int = this.cache
+                fn label() Str = this.owner + ":" + this.region + ":" + this.balance.toStr()
+                fn cacheValue() Int = this.cache
             }
 
-            def main() Unit {
+            fn main() Unit {
                 positional = Account("Ada", 10)
                 named = Account { owner: "Ben", balance: 20 }
                 println(positional.label(), positional.cacheValue())
@@ -10276,7 +10399,7 @@ mod tests {
                 quantity Int
             }
 
-            def main() Int {
+            fn main() Int {
                 maybeOrder = Some(
                     Order {
                         quantity: 7
@@ -10298,12 +10421,12 @@ mod tests {
     fn runs_match_for_yield_and_try() {
         let program = lower_inline(
             r#"
-            def countItems(items [Int]) Option[Int] {
+            fn countItems(items [Int]) Option[Int] {
                 count = try Some(items.size)
                 Some(count)
             }
 
-            def main() Int {
+            fn main() Int {
                 items = for item <- [1, 2, 3] yield {
                     item + 1
                 }
@@ -10336,7 +10459,7 @@ mod tests {
     fn runs_grouped_imperative_for_generators() {
         let program = lower_inline(
             r#"
-            def main() Int {
+            fn main() Int {
                 var total Int = 0
                 for {
                     left <- [1, 2]
@@ -10361,13 +10484,13 @@ mod tests {
             class Guard {
                 var calls Int = 0
 
-                def allowed() Bool {
+                fn allowed() Bool {
                     this.calls += 1
                     false
                 }
             }
 
-            def main() Unit {
+            fn main() Unit {
                 tracker = Guard {}
                 result = match (0, 0) {
                     case (0, _) | (_, 0) if tracker.allowed() => "accepted"
@@ -10391,7 +10514,7 @@ mod tests {
                 value Float
             }
 
-            def main() Unit {
+            fn main() Unit {
                 intLabel = match -1 {
                     case -1 => "negative int"
                     case 0 => "zero"
@@ -10430,7 +10553,7 @@ mod tests {
 }
 
 
-            def main() Unit {
+            fn main() Unit {
                 users = Vector(
                     SecretUser("Sergey", "secret-1", "Tampa"),
                     SecretUser("Ada", "secret-2", "London")
@@ -10461,7 +10584,7 @@ mod tests {
     fn runs_option_and_result_methods() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 some = Some(5)
                 none = None
                 ok = Ok(9)
@@ -10483,7 +10606,7 @@ mod tests {
     fn runs_string_interpolation_multiline_strings_and_printf() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 name Str = "world"
                 count Int = 6
                 text Str = """
@@ -10516,7 +10639,7 @@ $name
     fn runs_simple_string_interpolation_identifier_shapes() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 user_name Str = "Ada"
                 _name Str = "hidden"
                 name2 Str = "second"
@@ -10534,7 +10657,7 @@ $name
     fn runs_string_rune_access_methods() {
         let program = lower_inline(
             r##"
-            def main() Unit {
+            fn main() Unit {
                 word Str = "apple"
                 first Rune = word.runeAt(0)!
                 let second <- word.runeAt(1) else panic("expected second rune")
@@ -10573,7 +10696,7 @@ $name
     fn runs_collection_from_add_and_add_all_methods() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 base = [1, 2]
                 grown = Vector.from(base)
                 grown.add(3)
@@ -10607,7 +10730,7 @@ $name
     fn collection_flat_map_accepts_any_iterable_result() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 vector [Int] = [1, 2].flatMap(value => Some(value))
                 setSource Set[Int] = Set()
                 setSource.add(1)
@@ -10634,7 +10757,7 @@ $name
     fn runs_vector_fill_and_generate_factories() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 filled = Vector.fill(2, 7)
                 filled.add(9)
                 generated = Vector.generate(3, index => index * 2)
@@ -10654,7 +10777,7 @@ $name
     fn runs_linked_list_and_unsafe_extract() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 values LinkedList[Int] = LinkedList {}
                 values.add(5)
                 values.add(8)
@@ -10680,7 +10803,7 @@ $name
     fn unsafe_extract_panics_on_missing_value() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 missing Option[Int] = None
                 println(missing !)
             }
@@ -10707,7 +10830,7 @@ $name
                 age Int
             }
 
-            def main() Unit {
+            fn main() Unit {
                 user User = User { name: "Sergey", location: "Tampa", age: 37 }
 
                 let { name, location } = user
@@ -10734,7 +10857,7 @@ $name
     fn runs_trailing_block_lambda_call_syntax() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 empty [Int] = []
                 mappedEmpty = empty.map { value => value + 5 }
 
@@ -10959,7 +11082,7 @@ $name
                 }
 
             ext Color {
-                def isReddish() Bool = match this {
+                fn isReddish() Bool = match this {
                     case Black { temperature } => temperature % 5 == 0
                     case Red { temperature } => temperature % 5 == 0
                 }
@@ -10970,13 +11093,13 @@ $name
                 | class SomeX { value T }
 
             ext OptionX[T] {
-                def isDefined() Bool = match this {
+                fn isDefined() Bool = match this {
                     case SomeX { value: _ } => true
                     case NoneX => false
                 }
             }
 
-            def main() Unit {
+            fn main() Unit {
                 black = Color.Black()
                 someInt = OptionX.SomeX(5)
                 noneInt = OptionX.NoneX
@@ -11002,7 +11125,7 @@ $name
                 | object Blue {}
 
             ext Color {
-                def label() Str = match this {
+                fn label() Str = match this {
                     case Color.Red => "red"
                     case Color.Blue => "blue"
                 }
@@ -11011,11 +11134,11 @@ $name
             object Color {
 
 
-                def palette() Str = "palette"
+                fn palette() Str = "palette"
 }
 
 
-            def main() Unit {
+            fn main() Unit {
                 color Color = Color.Red
                 OS.println(color.label())
                 OS.println(Color.palette())
@@ -11039,11 +11162,11 @@ $name
             object Box {
 
 
-                def from(value Int) Box = Box { value: value }
+                fn from(value Int) Box = Box { value: value }
 }
 
 
-            def main() Unit {
+            fn main() Unit {
                 box = Box.from(7)
                 OS.println(box.value)
             }
@@ -11059,18 +11182,18 @@ $name
     fn runs_composed_control_flow_expressions_at_block_tail() {
         let program = lower_inline(
             r#"
-            def ifAnswer(flag Bool) Int {
+            fn ifAnswer(flag Bool) Int {
                 if flag { 40 } else { 0 } + 2
             }
 
-            def matchAnswer(flag Bool) Int {
+            fn matchAnswer(flag Bool) Int {
                 match flag {
                     case true => 40
                     case false => 0
                 } + 2
             }
 
-            def main() Unit {
+            fn main() Unit {
                 println(ifAnswer(true), ifAnswer(false))
                 println(matchAnswer(true), matchAnswer(false))
             }
@@ -11086,7 +11209,7 @@ $name
     fn runs_multiline_type_tests_in_conditions() {
         let program = lower_inline(
             r#"
-            def classify(value Any) Int {
+            fn classify(value Any) Int {
                 if value is
                     Str {
                     return 1
@@ -11099,7 +11222,7 @@ $name
                 3
             }
 
-            def main() Unit {
+            fn main() Unit {
                 println(classify("text"), classify(true), classify(5))
             }
             "#,
@@ -11114,7 +11237,7 @@ $name
     fn runs_unit_lambda_body_after_newline() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 sameLine fn() Unit = () => ()
                 nextLine fn() Unit = () =>
                     ()
@@ -11135,7 +11258,7 @@ $name
     fn runs_parse_and_list_string_helpers() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 values = ["btc", "usd"]
                 labels = Set("btc", "usd")
                 linked = LinkedList("btc", "usd")
@@ -11173,7 +11296,7 @@ $name
             r#"
 module app
 
-def main() Unit {
+fn main() Unit {
     whole Int = 9
     fraction Float = 2.25
     one Float = 1.0
@@ -11212,7 +11335,7 @@ def main() Unit {
     fn runs_intrinsic_numeric_limit_members() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 println(Int.MIN)
                 println(Int.MAX)
                 println(Float.MIN < 0.0)
@@ -11234,7 +11357,7 @@ def main() Unit {
     fn runs_option_when_static_helper() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 someValue = Option.when(true, 7)
                 noValue = Option.when(false, 7)
                 OS.println(someValue !)
@@ -11266,7 +11389,7 @@ def main() Unit {
                 object NoneX {}
                 | class SomeX { value Int }
 
-            def main() Unit {
+            fn main() Unit {
                 amount Amount = Amount(42, "hello")
                 pair PairBox = PairBox(5, 9)
                 values [MaybeInt] = [MaybeInt.SomeX(1), MaybeInt.NoneX, MaybeInt.SomeX(3)]
@@ -11304,7 +11427,7 @@ def main() Unit {
                 count Int
 
 
-                def multiple(other Amount) Amount = Amount {
+                fn multiple(other Amount) Amount = Amount {
                     amount: this.amount * other.amount
                     description: this.description + " " + other.description
                     count: 0
@@ -11317,7 +11440,7 @@ def main() Unit {
             a3 Amount = { ...a2, amount: 101, description: a2.description + " updated" }
             a4 Amount = { ...a3, amount: 102, count: 7 }
 
-            def main() Unit {
+            fn main() Unit {
                 OS.println(a2.amount, a2.description)
                 OS.println(a3.amount, a3.description)
                 OS.println(a4.amount, a4.description)
@@ -11338,7 +11461,7 @@ def main() Unit {
     fn resolves_shape_spread_collisions_at_runtime() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 point = { x: 1, y: 2 }
                 dot = { x: 3, time: 4 }
                 selected = { ...point, ...dot, x: point.x }
@@ -11371,7 +11494,7 @@ def main() Unit {
 }
 
 
-            def main() Unit {
+            fn main() Unit {
                 portfolio = Portfolio {}
                 OS.println(portfolio.assets.makeStr("-"))
                 OS.println(portfolio.assetCount)
@@ -11406,7 +11529,7 @@ def main() Unit {
                 object NoneX {}
                 | class SomeX { value Amount }
 
-            def main() Unit {
+            fn main() Unit {
                 apple = Apple(12)
                 OS.println(match MaybeApple.SomeX(apple) {
                     case MaybeApple.SomeX { value: Apple { size } } => "apple " + size
@@ -11430,18 +11553,18 @@ def main() Unit {
     fn runs_composed_control_flow_expressions() {
         let program = lower_inline(
             r#"
-            def answer() Int =
+            fn answer() Int =
                 { 40 } + 2
 
-            def render() Str =
+            fn render() Str =
                 { 42 }.toStr()
 
-            def choose(flag Bool) Int = match flag {
+            fn choose(flag Bool) Int = match flag {
                 case true => { 40 } + 2
                 case false => 0
             }
 
-            def main() Unit {
+            fn main() Unit {
                 ifValue = if true { 10 } else { 20 } - 1
                 matchValue = match false {
                     case true => 10
@@ -11468,7 +11591,7 @@ def main() Unit {
     fn runs_mixed_boolean_and_let_condition_clauses() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 maybe Int? = Some(4)
 
                 selected = if true && let value <- maybe && value > 3 {
@@ -11505,7 +11628,7 @@ def main() Unit {
     fn preserves_boolean_precedence_in_control_flow_headers() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 a = true
                 b = false
                 c = false
@@ -11536,7 +11659,7 @@ def main() Unit {
     fn runs_if_unwrap_bindings() {
         let program = lower_inline(
             r#"
-            def main() Int {
+            fn main() Int {
                 values = [7]
                 if let Some { value } = values.at(0) {
                     OS.println("binding " + value)
@@ -11563,7 +11686,7 @@ def main() Unit {
                 right Int
             }
 
-            def main() Unit {
+            fn main() Unit {
                 pair Pair = Pair(5, 9)
                 let Pair { left as item, right as other } = pair
                 OS.println("let", item + other)
@@ -11614,7 +11737,7 @@ def main() Unit {
     fn runs_let_else_panic_pattern_bindings() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 first Option[Int] = Some(5)
                 let Some { value } = first else panic("expected first value")
                 OS.println("let-panic", value)
@@ -11631,7 +11754,7 @@ def main() Unit {
     fn runs_assert_runtime_calls() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 split = "BTC-USD-5.0".split("-")
                 assert(split.size == 3)
                 assert(split.size == 3, "split should have 3 parts")
@@ -11650,9 +11773,9 @@ def main() Unit {
     fn runs_get_as_a_named_argument() {
         let program = lower_inline(
             r#"
-            def echo(get Int) Int = get
+            fn echo(get Int) Int = get
 
-            def main() Unit {
+            fn main() Unit {
                 println(echo(5))
                 println(echo(get = 6))
             }
@@ -11668,7 +11791,7 @@ def main() Unit {
     fn fails_assert_runtime_call_with_message() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 assert(false, "split must have 3 parts")
             }
             "#,
@@ -11688,7 +11811,7 @@ def main() Unit {
     fn fails_assert_runtime_call_with_default_message() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 assert(false)
             }
             "#,
@@ -11708,7 +11831,7 @@ def main() Unit {
     fn runs_regex_string_split() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 literal Vector[Str] = "a.b".split(".")
                 assert(literal.size == 2)
                 assert(literal[0] == "a")
@@ -11735,7 +11858,7 @@ def main() Unit {
     fn runs_string_empty_checks() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 OS.println("".isEmpty)
                 OS.println("lume".nonEmpty)
                 OS.println("".nonEmpty)
@@ -11753,7 +11876,7 @@ def main() Unit {
     fn runs_trailing_block_lambda_with_multiline_body() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 items = [1, 2, 3]
                 items.forEach { item =>
                     plusOne = item + 1
@@ -11773,25 +11896,25 @@ def main() Unit {
         let program = lower_inline(
             r#"
             interface Reader {
-                def read() Str
+                fn read() Str
             }
 
             interface Closer {
-                def close() Unit
+                fn close() Unit
             }
 
-            def main() Unit {
+            fn main() Unit {
                 handler = object with Reader, Closer {
                     source Str = "x"
 
-                    def read() Str = source
-                    def close() Unit = OS.println("closed")
+                    fn read() Str = source
+                    fn close() Unit = OS.println("closed")
                 }
 
                 soloReader Reader = object with Reader {
                     source Str = "solo"
 
-                    def read() Str = source
+                    fn read() Str = source
                 }
 
                 OS.println(handler.read())
@@ -11831,10 +11954,10 @@ def main() Unit {
                 label Str
             }
 
-            def readId(value Identified[Int]) Int = value.id
-            def readLabel(value Labeled) Str = value.label
+            fn readId(value Identified[Int]) Int = value.id
+            fn readLabel(value Labeled) Str = value.label
 
-            def main() Unit {
+            fn main() Unit {
                 user Identified[Int] = User(7, "Ada")
                 snapshot Identified[Int] = Snapshot(8)
                 anonymous Identified[Int] = object with Identified[Int] {
@@ -11858,27 +11981,27 @@ def main() Unit {
         let program = lower_inline(
             r#"
             interface Hopper {
-                def hop() Str
+                fn hop() Str
             }
 
             mixin Hopping with Hopper {
-                def hop() Str = "hop"
+                fn hop() Str = "hop"
             }
 
             interface FirstChoice {
-                def choose() Str
+                fn choose() Str
             }
 
             interface SecondChoice {
-                def choose() Str
+                fn choose() Str
             }
 
             mixin FirstImplementation with FirstChoice {
-                def choose() Str = "first"
+                fn choose() Str = "first"
             }
 
             mixin SecondImplementation with SecondChoice {
-                def choose() Str = "second"
+                fn choose() Str = "second"
             }
 
             class Rabbit with Hopper { use Hopping }
@@ -11886,10 +12009,10 @@ def main() Unit {
             class PreferFirst with FirstChoice, SecondChoice {
                 use FirstImplementation
                 use SecondImplementation
-                def choose() Str = "first"
+                fn choose() Str = "first"
             }
 
-            def main() Unit {
+            fn main() Unit {
                 rabbit = Rabbit {}
                 prefer = PreferFirst {}
                 OS.println(rabbit.hop())
@@ -11915,18 +12038,18 @@ def main() Unit {
                 | object Empty {}
 
             ext Outcome {
-                def tag() Str = match this {
+                fn tag() Str = match this {
                     case Left { tag } => tag
                     case Empty => ""
                 }
             }
 
-            def boom() Bool {
+            fn boom() Bool {
                 OS.println("boom")
                 true
             }
 
-            def main() Unit {
+            fn main() Unit {
                 left = Outcome.Left("bad")
                 if true || boom() {
                     OS.println(left.tag())
@@ -11944,11 +12067,11 @@ def main() Unit {
     fn runs_defer_at_callable_exit_not_block_exit() {
         let program = lower_inline(
             r#"
-            def cleanup(label Str) Unit {
+            fn cleanup(label Str) Unit {
                 OS.println(label)
             }
 
-            def main() Unit {
+            fn main() Unit {
                 defer cleanup("outer")
                 {
                     defer cleanup("inner")
@@ -11968,7 +12091,7 @@ def main() Unit {
     fn runs_defer_before_return_and_freezes_return_value() {
         let program = lower_inline(
             r#"
-            def compute() Int {
+            fn compute() Int {
                 var current Int = 1
                 defer {
                     current := 2
@@ -11977,7 +12100,7 @@ def main() Unit {
                 return current
             }
 
-            def main() Unit {
+            fn main() Unit {
                 OS.println(compute())
             }
             "#,
@@ -11992,15 +12115,15 @@ def main() Unit {
     fn runs_defer_before_propagating_lifted_failure() {
         let program = lower_inline(
             r#"
-            def fail() Result[Int, Str] = Err("failure")
+            fn fail() Result[Int, Str] = Err("failure")
 
-            def load() Result[Int, Str] {
+            fn load() Result[Int, Str] {
                 defer OS.println("cleanup")
                 value = try fail()
                 Ok(value)
             }
 
-            def main() Unit {
+            fn main() Unit {
                 result Result[Int, Str] = load()
                 OS.println(result is Err)
             }
@@ -12016,7 +12139,7 @@ def main() Unit {
     fn runs_defer_as_lambda_bound() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 defer OS.println("main")
 
                 run = () => {
@@ -12039,12 +12162,12 @@ def main() Unit {
     fn runs_all_defers_during_runtime_error_unwinding_and_preserves_primary_error() {
         let program = lower_inline(
             r#"
-            def failCleanup() Unit {
+            fn failCleanup() Unit {
                 OS.println("failing cleanup")
                 panic("cleanup failure")
             }
 
-            def main() Unit {
+            fn main() Unit {
                 defer OS.println("outer cleanup")
                 defer failCleanup()
                 defer OS.println("inner cleanup")
@@ -12072,7 +12195,7 @@ def main() Unit {
     fn reports_cleanup_failure_after_attempting_remaining_defers() {
         let program = lower_inline(
             r#"
-            def main() Unit {
+            fn main() Unit {
                 defer OS.println("outer cleanup")
                 defer panic("cleanup failure")
                 defer OS.println("inner cleanup")
@@ -12098,6 +12221,47 @@ def main() Unit {
         let run = run_path(path, None).expect("run uses");
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "hello, Ada\n36\n");
+    }
+
+    #[test]
+    fn module_aliases_initialize_each_module_once() {
+        let temp = repo_root().join("rust/target/interpreter-module-alias-init-test");
+        let _ = fs::remove_dir_all(&temp);
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            temp.join("storage.lum"),
+            r#"
+module storage
+
+BOOT Int = initialize()
+
+fn initialize() Int {
+    println("initialized")
+    7
+}
+
+public fn load() Int = BOOT
+"#,
+        )
+        .expect("write storage module");
+        let source = temp.join("app.lum");
+        fs::write(
+            &source,
+            r#"
+use storage as firstStore
+use storage as secondStore
+
+fn main() {
+    println(firstStore.load())
+    println(secondStore.load())
+}
+"#,
+        )
+        .expect("write source");
+        let run = run_path(&source, None).expect("run source");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "initialized\n7\n7\n");
+        let _ = fs::remove_dir_all(&temp);
     }
 
     #[test]
@@ -12132,7 +12296,7 @@ module app
 
 use states/{ConnectionState, ConnectionState.Ready as ConnectionReady}
 
-def main() Unit {
+fn main() Unit {
     value ConnectionState = ConnectionReady
     println(match value {
         case ConnectionReady => "ready"
@@ -12181,21 +12345,21 @@ def main() Unit {
         let program = lower_inline(
             r#"
 interface Spec {
-    def it()
+    fn it()
 }
 
 class PassingSpec with Spec {
-    def it() Unit {}
+    fn it() Unit {}
 }
 
 class FailingSpec with Spec {
-    def it() Unit {
+    fn it() Unit {
         panic("expected failure")
     }
 }
 
 class LaterSpec with Spec {
-    def it() Unit {}
+    fn it() Unit {}
 }
 "#,
         );
@@ -12228,7 +12392,7 @@ class LaterSpec with Spec {
         for statement in ["value = Regex()", "value = RegexMatch()"] {
             fs::write(
                 &path,
-                format!("use lume/regex/{{Regex, RegexMatch}}\ndef main() {{\n{statement}\n}}\n"),
+                format!("use lume/regex/{{Regex, RegexMatch}}\nfn main() {{\n{statement}\n}}\n"),
             )
             .unwrap();
             let checked = check_path(&path).unwrap();
@@ -12242,7 +12406,7 @@ class LaterSpec with Spec {
             );
         }
         for getter in ["groups", "groupMap"] {
-            fs::write(&path, format!("use lume/regex/Regex\ndef main() {{\nhit = Regex.compile(\"a\")!.find(\"a\")!\nvalue = hit.{getter}()\n}}\n")).unwrap();
+            fs::write(&path, format!("use lume/regex/Regex\nfn main() {{\nhit = Regex.compile(\"a\")!.find(\"a\")!\nvalue = hit.{getter}()\n}}\n")).unwrap();
             let checked = check_path(&path).unwrap();
             assert!(
                 checked

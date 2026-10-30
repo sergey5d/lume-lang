@@ -33,21 +33,21 @@
 
 class LambdaRunner {
 
-    def zero(f fn() Int) Int = f()
+    fn zero(f fn() Int) Int = f()
 
-    def one(f fn(Int) Int, value Int) Int = f(value)
+    fn one(f fn(Int) Int, value Int) Int = f(value)
 
-    def two(f fn(Int, Int) Int, left Int, right Int) Int = f(left, right)
+    fn two(f fn(Int, Int) Int, left Int, right Int) Int = f(left, right)
 
-    def tupleOne(f fn((Int, Int)) Int, pair (Int, Int)) Int = f(pair)
+    fn tupleOne(f fn((Int, Int)) Int, pair (Int, Int)) Int = f(pair)
 
-    def userOne(f fn(User) Str, user User) Str = f(user)
+    fn userOne(f fn(User) Str, user User) Str = f(user)
 
-    def withIndex(f fn((Int, Int), Int) Str, pair (Int, Int), index Int) Str = f(pair, index)
+    fn withIndex(f fn((Int, Int), Int) Str, pair (Int, Int), index Int) Str = f(pair, index)
 
-    def combine(f fn(Str, (Int, Int)) Str, name Str, pair (Int, Int)) Str = f(name, pair)
+    fn combine(f fn(Str, (Int, Int)) Str, name Str, pair (Int, Int)) Str = f(name, pair)
 
-    def twoTuples(f fn((Int, Int), (Int, Int)) Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
+    fn twoTuples(f fn((Int, Int), (Int, Int)) Int, left (Int, Int), right (Int, Int)) Int = f(left, right)
 }
 
 
@@ -56,7 +56,7 @@ class User {
     age Int
 }
 
-def main() Unit {
+fn main() Unit {
     zero = () => 10
     bare = x => x + 1
     paren = (x) => x + 2

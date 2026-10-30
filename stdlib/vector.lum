@@ -3,47 +3,47 @@
 # INTERPRETER
 
 private interface VectorApi[T] with Iterable[T] {
-    def add(value T) Vector[T]
-    def addAll(values Iterable[T]) Vector[T]
-    def map[X](f fn(T) X) Vector[X]
-    def flatMap[X](f fn(T) Iterable[X]) Vector[X]
-    def flatten[X when T with Iterable[X]]() Vector[X]
-    def filter(f fn(T) Bool) Vector[T]
-    def fold[X](initial X, f fn(X, T) X) X
-    def reduce(f fn(T, T) T) Option[T]
-    def exists(f fn(T) Bool) Bool
-    def forAll(f fn(T) Bool) Bool
-    def contains(value T) Bool
-    def indexOf(value T) Option[Int]
-    def sort[when T with Comparable[T]]() Vector[T]
-    def sort(compare fn(T, T) Int) Vector[T]
-    def take(count Int) Vector[T]
-    def zip[X](other Vector[X]) Vector[(T, X)]
-    def zipWithIndex() Vector[(T, Int)]
-    def at(index Int) Option[T]
-    def slice() Vector[T]
-    def slice(start Int) Vector[T]
-    def slice(start Int, end Int) Vector[T]
-    def setAt(index Int, value T) Result[T, InvalidIndex]
-    def insertAt(index Int, value T) Result[Unit, InvalidIndex]
-    def removeAt(index Int) Result[T, InvalidIndex]
+    fn add(value T) Vector[T]
+    fn addAll(values Iterable[T]) Vector[T]
+    fn map[X](f fn(T) X) Vector[X]
+    fn flatMap[X](f fn(T) Iterable[X]) Vector[X]
+    fn flatten[X when T with Iterable[X]]() Vector[X]
+    fn filter(f fn(T) Bool) Vector[T]
+    fn fold[X](initial X, f fn(X, T) X) X
+    fn reduce(f fn(T, T) T) Option[T]
+    fn exists(f fn(T) Bool) Bool
+    fn forAll(f fn(T) Bool) Bool
+    fn contains(value T) Bool
+    fn indexOf(value T) Option[Int]
+    fn sort[when T with Comparable[T]]() Vector[T]
+    fn sort(compare fn(T, T) Int) Vector[T]
+    fn take(count Int) Vector[T]
+    fn zip[X](other Vector[X]) Vector[(T, X)]
+    fn zipWithIndex() Vector[(T, Int)]
+    fn at(index Int) Option[T]
+    fn slice() Vector[T]
+    fn slice(start Int) Vector[T]
+    fn slice(start Int, end Int) Vector[T]
+    fn setAt(index Int, value T) Result[T, InvalidIndex]
+    fn insertAt(index Int, value T) Result[Unit, InvalidIndex]
+    fn removeAt(index Int) Result[T, InvalidIndex]
     get first Option[T]
     get last Option[T]
-    def tail() Vector[T]
+    fn tail() Vector[T]
     get isEmpty Bool
     get nonEmpty Bool
-    def removeFirst() Option[T]
-    def removeLast() Option[T]
+    fn removeFirst() Option[T]
+    fn removeLast() Option[T]
     get size Int
-    def forEach(f fn(T) Unit)
-    def makeStr(separator Str) Str
-    def makeStr(separator Str, render fn(T) Str) Str
+    fn forEach(f fn(T) Unit)
+    fn makeStr(separator Str) Str
+    fn makeStr(separator Str, render fn(T) Str) Str
 }
 
 private mixin VectorParts[T] with VectorApi[T] {
     get nonEmpty Bool = !this.isEmpty
 
-    def makeStr(separator Str) Str {
+    fn makeStr(separator Str) Str {
         var result Str = ""
         for idx <- Range(0, this.size) {
             if let Some { value as item } = this.at(idx) {
@@ -56,7 +56,7 @@ private mixin VectorParts[T] with VectorApi[T] {
         result
     }
 
-    def makeStr(separator Str, render fn(T) Str) Str {
+    fn makeStr(separator Str, render fn(T) Str) Str {
         var result Str = ""
         for idx <- Range(0, this.size) {
             if let Some { value as item } = this.at(idx) {

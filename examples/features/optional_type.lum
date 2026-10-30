@@ -2,9 +2,9 @@
 # 6
 # 7
 
-def increment(value Int?) Int? = value.map(item => item + 1)
+fn increment(value Int?) Int? = value.map(item => item + 1)
 
-def main() Unit {
+fn main() Unit {
     shorthand Int? = Some(5)
     explicit Option[Int] = shorthand
     println(increment(explicit)!)

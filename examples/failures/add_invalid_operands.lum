@@ -1,4 +1,4 @@
 # FAIL_REGEX:
 # .*operator '\+' expects numeric operands, a Str operand, or a compatible '\+' method; got 'Bool' and 'Bool'.*
 
-def broken() Int = true + false
+fn broken() Int = true + false

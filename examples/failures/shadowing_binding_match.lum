@@ -5,7 +5,7 @@ type MaybeInt =
     class SomeX { value Int }
     | object NoneX {}
 
-def main() Int {
+fn main() Int {
     value = 3
     maybe = MaybeInt.SomeX(1)
     match maybe {

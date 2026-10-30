@@ -33,23 +33,23 @@ public type SeekFrom =
 
 public interface Closeable {
     get closed Bool
-    def close() Result[Unit, FileError]
+    fn close() Result[Unit, FileError]
 }
 
 public interface ByteReader {
-    def read(maxBytes Int) Result[[Byte], FileError]
-    def readToEnd() Result[[Byte], FileError]
+    fn read(maxBytes Int) Result[[Byte], FileError]
+    fn readToEnd() Result[[Byte], FileError]
 }
 
 public interface Seekable {
     get position Int
-    def seek(offset Int) Result[Int, FileError]
-    def seek(offset Int, from SeekFrom) Result[Int, FileError]
+    fn seek(offset Int) Result[Int, FileError]
+    fn seek(offset Int, from SeekFrom) Result[Int, FileError]
 }
 
 public interface TextReader with Closeable {
-    def readLine() Result[Str?, FileError]
-    def readToEnd() Result[Str, FileError]
+    fn readLine() Result[Str?, FileError]
+    fn readToEnd() Result[Str, FileError]
 }
 
 public class FileStream with ByteReader, Seekable, Closeable {
@@ -59,19 +59,19 @@ public class FileStream with ByteReader, Seekable, Closeable {
     get position Int = panic("FileStream is provided by the active runtime")
     get closed Bool = panic("FileStream is provided by the active runtime")
 
-    def read(maxBytes Int) Result[[Byte], FileError] =
+    fn read(maxBytes Int) Result[[Byte], FileError] =
         panic("FileStream is provided by the active runtime")
 
-    def readToEnd() Result[[Byte], FileError] =
+    fn readToEnd() Result[[Byte], FileError] =
         panic("FileStream is provided by the active runtime")
 
-    def seek(offset Int) Result[Int, FileError] =
+    fn seek(offset Int) Result[Int, FileError] =
         panic("FileStream is provided by the active runtime")
 
-    def seek(offset Int, from SeekFrom) Result[Int, FileError] =
+    fn seek(offset Int, from SeekFrom) Result[Int, FileError] =
         panic("FileStream is provided by the active runtime")
 
-    def close() Result[Unit, FileError] =
+    fn close() Result[Unit, FileError] =
         panic("FileStream is provided by the active runtime")
 }
 
@@ -81,26 +81,26 @@ public class TextFileReader with TextReader {
     get path Str = panic("TextFileReader is provided by the active runtime")
     get closed Bool = panic("TextFileReader is provided by the active runtime")
 
-    def readLine() Result[Str?, FileError] =
+    fn readLine() Result[Str?, FileError] =
         panic("TextFileReader is provided by the active runtime")
 
-    def readToEnd() Result[Str, FileError] =
+    fn readToEnd() Result[Str, FileError] =
         panic("TextFileReader is provided by the active runtime")
 
-    def close() Result[Unit, FileError] =
+    fn close() Result[Unit, FileError] =
         panic("TextFileReader is provided by the active runtime")
 }
 
 public object File {
-    def readBytes(path Str) Result[[Byte], FileError] =
+    fn readBytes(path Str) Result[[Byte], FileError] =
         panic("File is provided by the active runtime")
 
-    def readText(path Str) Result[Str, FileError] =
+    fn readText(path Str) Result[Str, FileError] =
         panic("File is provided by the active runtime")
 
-    def open(path Str) Result[FileStream, FileError] =
+    fn open(path Str) Result[FileStream, FileError] =
         panic("File is provided by the active runtime")
 
-    def openText(path Str) Result[TextFileReader, FileError] =
+    fn openText(path Str) Result[TextFileReader, FileError] =
         panic("File is provided by the active runtime")
 }

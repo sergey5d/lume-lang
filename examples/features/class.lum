@@ -7,7 +7,7 @@ class KeywordBox {
     value Str
 }
 
-def main() Unit {
+fn main() Unit {
     box KeywordBox = KeywordBox { value: "box" }
     println("kind", box.value)
     anotherBox KeywordBox = KeywordBox("another box")

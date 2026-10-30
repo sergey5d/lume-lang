@@ -6,17 +6,17 @@
 
 class Extractor {
 
-    def withDefault(value Int?, defaultValue Int) Int =
+    fn withDefault(value Int?, defaultValue Int) Int =
         value ?? defaultValue
 
-    def withReturn(value Int?) Str {
+    fn withReturn(value Int?) Str {
         item = value ?? return "missing"
         "value " + item
     }
 }
 
 
-def main() Unit {
+fn main() Unit {
     extractor = Extractor {}
 
     println("method default value " + extractor.withDefault(Some(5), 10))

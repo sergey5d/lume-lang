@@ -6,10 +6,10 @@ shape User {
     age Int
 }
 
-def main() Unit {
+fn main() Unit {
     users [User] = [User("Ada", 37)]
 
     for { name, age } <- users {
-        def println(name, age)
+        fn println(name, age)
     }
 }

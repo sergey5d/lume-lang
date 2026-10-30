@@ -6,7 +6,7 @@ class User {
     location Str
 }
 
-def main() Unit {
+fn main() Unit {
     user = User { name: "Ada", location: "London" }
     match user {
         case User(name, location) => println(name, location)

@@ -5,6 +5,6 @@ class MutableKey {
     id Int
 }
 
-def main() Unit {
+fn main() Unit {
     values = [MutableKey(1): "one"]
 }

@@ -6,7 +6,7 @@ class Box[T] {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     users Vector[Str] = Vector()
     lookup Map[Str, Int] = Map()
     names Set[Str] = Set()

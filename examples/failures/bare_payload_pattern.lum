@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*bare case pattern 'Some' has a payload; use 'Some \{ value \}' to unpack it or 'Some \{ value: _ \}' to ignore it.*
 
-def main(value Option[Int]) Unit {
+fn main(value Option[Int]) Unit {
     match value {
         case Some => ()
         case None => ()

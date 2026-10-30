@@ -9,7 +9,7 @@ shape Leak {
     token Str
 }
 
-def main() Unit {
+fn main() Unit {
     secret Secret = Secret()
     leak Leak = secret
 }

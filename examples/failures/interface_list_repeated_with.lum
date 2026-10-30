@@ -2,11 +2,11 @@
 # .*interface lists use one 'with' followed by comma-separated types.*
 
 interface First {
-    def first() Str
+    fn first() Str
 }
 
 interface Second {
-    def second() Str
+    fn second() Str
 }
 
 class Combined with First with Second {

@@ -157,10 +157,6 @@
     "keywords": {
       "patterns": [
         {
-          "name": "keyword.control.lume",
-          "match": "\\bdefault\\b"
-        },
-        {
           "match": "\\b(is)([ \\t]+)(not)\\b",
           "captures": {
             "1": {
@@ -181,11 +177,15 @@
         },
         {
           "name": "keyword.declaration.lume",
-          "match": "\\b(?:def|new|type|annotation|class|shape|interface|mixin|object|ext|use|module|with|when|as|public|private|internal|case|var|vararg|let)\\b"
+          "match": "\\b(?:new|type|annotation|class|shape|interface|mixin|object|ext|use|module|with|when|as|public|private|internal|case|var|vararg|let)\\b"
         },
         {
           "name": "storage.modifier.generic.reified.lume",
           "match": "\\b(?:reified)\\b"
+        },
+        {
+          "name": "keyword.declaration.function.lume",
+          "match": "\\bfn\\b(?![ \\t]*\\()"
         },
         {
           "name": "storage.type.function.lume",

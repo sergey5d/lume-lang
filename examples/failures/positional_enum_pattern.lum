@@ -8,7 +8,7 @@ type Pair =
     }
     | object Empty {}
 
-def main() Unit {
+fn main() Unit {
     pair Pair = Pair.Values(1, 2)
     match pair {
         case Pair.Values(left, right) => println(left, right)

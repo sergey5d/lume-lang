@@ -1,11 +1,11 @@
 # FAIL_REGEX:
 # .*continue used outside of a loop.*
 
-def run(work fn() Unit) Unit {
+fn run(work fn() Unit) Unit {
     work()
 }
 
-def main() Unit {
+fn main() Unit {
     for maybe <- [Some(1)] {
         run { () =>
             value = maybe ?? continue

@@ -521,15 +521,15 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn can_start_type_ref(&self) -> bool {
+        // `fn name` starts a declaration; only `fn (` starts a function type.
         matches!(
             self.current_kind(),
             TokenKind::Identifier
-                | TokenKind::Keyword(Keyword::Fn)
                 | TokenKind::Keyword(Keyword::Shape)
                 | TokenKind::LParen
                 | TokenKind::LBrace
                 | TokenKind::LBracket
-        )
+        ) || (self.at_keyword(Keyword::Fn) && self.at_next(TokenKind::LParen))
     }
 
     pub(super) fn parse_path_string(&mut self) -> Option<String> {

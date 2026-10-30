@@ -8,10 +8,10 @@ class Counter {
         this.count = count
     }
 
-    def bad(count Int) Unit {
+    fn bad(count Int) Unit {
         count := count + 1
     }
 }
 
 
-def main() Unit {}
+fn main() Unit {}

@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*expected newline.*after statement.*
 
-def main() Unit {
+fn main() Unit {
     value = left | right
 }

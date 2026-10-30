@@ -21,10 +21,10 @@ shape Point3D {
     z Int
 }
 
-def requireEq[T with Eq[T]](value T) Unit = ()
-def requireHash[T with Hashed[T]](value T) Unit = ()
+fn requireEq[T with Eq[T]](value T) Unit = ()
+fn requireHash[T with Hashed[T]](value T) Unit = ()
 
-def main() Unit {
+fn main() Unit {
     point = Point(1, 2)
     same = Position(2, 1)
     different = Position(1, 2)

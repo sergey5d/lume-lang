@@ -42,7 +42,7 @@ pub(crate) fn interface_member_body(span: Span) -> Diagnostic {
 pub(crate) fn interface_nested_declaration(span: Span) -> Diagnostic {
     Diagnostic::error(
         "interface_nested_declaration",
-        "interface bodies contain only 'get' and 'def' signatures, not nested declarations",
+        "interface bodies contain only 'get' and 'fn' signatures, not nested declarations",
         span,
     )
     .with_help("move the declaration to module scope or into a class, shape, object, or annotation")

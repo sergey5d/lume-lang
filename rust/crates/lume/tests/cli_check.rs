@@ -22,7 +22,7 @@ fn temp_source(name: &str, source: &str) -> PathBuf {
 fn check_reports_unused_mutability_without_failing() {
     let path = temp_source(
         "unused-mutability",
-        "def main() Unit {\n    var count = 1\n    println(count)\n}\n",
+        "fn main() Unit {\n    var count = 1\n    println(count)\n}\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_lume"))
         .arg("check")
@@ -65,8 +65,8 @@ fn check_reports_unused_mutability_without_failing() {
 #[test]
 fn interface_methods_and_getters_cannot_have_bodies() {
     for member in [
-        "def answer() Int = 42",
-        "def answer() Int { 42 }",
+        "fn answer() Int = 42",
+        "fn answer() Int { 42 }",
         "get answer Int = 42",
         "get answer Int { 42 }",
     ] {
@@ -153,7 +153,7 @@ fn interfaces_cannot_contain_nested_declarations() {
                 stderr.contains("error[interface_nested_declaration]"),
                 "{stderr}"
             );
-            assert!(stderr.contains("'get' and 'def' signatures"), "{stderr}");
+            assert!(stderr.contains("'get' and 'fn' signatures"), "{stderr}");
             assert!(output.stdout.is_empty());
         }
         fs::remove_file(path).expect("remove temporary source");
@@ -171,7 +171,7 @@ fn named_unpacking_requires_braces() {
     ] {
         let path = temp_source(
             "parenthesized-unpacking",
-            &format!("def main() {{\nresult Result[Int, Str] = Ok(1)\n{body}\n}}"),
+            &format!("fn main() {{\nresult Result[Int, Str] = Ok(1)\n{body}\n}}"),
         );
         for command in ["check", "run"] {
             let output = Command::new(env!("CARGO_BIN_EXE_lume"))

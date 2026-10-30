@@ -6,7 +6,7 @@
 # precedence
 # 0
 
-def main() Int {
+fn main() Int {
     if true {
         println("then")
     } else {

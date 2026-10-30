@@ -1,13 +1,13 @@
 # PRELUDE_SKIP
 # INTERPRETER
 
-public def panic(value [Any] vararg) Never = panic()
+public fn panic(value [Any] vararg) Never = panic()
 
-public def assert(condition Bool, message Str = "assert condition was false") Unit = assert(condition)
+public fn assert(condition Bool, message Str = "assert condition was false") Unit = assert(condition)
 
-public def identity[T](value T) T = value
+public fn identity[T](value T) T = value
 
-public def ensure[E](condition Bool, error fn() E) Result[Unit, E] =
+public fn ensure[E](condition Bool, error fn() E) Result[Unit, E] =
     if condition {
         Ok(())
     } else {

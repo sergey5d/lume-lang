@@ -6,6 +6,6 @@ shape SecretPoint {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     _ = SecretPoint(1) == SecretPoint(1)
 }

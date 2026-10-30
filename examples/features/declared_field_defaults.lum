@@ -8,23 +8,26 @@ class RetrySettings {
 
 shape Person {
     name Str = "Alex"
-    family Str
-    active Bool
+    family Str = ""
+    active Bool = false
     nickname Str?
-    tags [Str]
+    tags [Str] = []
     scores [Str: Int]
     retries RetrySettings
 }
 
-def main() Unit {
-    person Person = default {}
-    changed Person = default {
+fn main() {
+    person Person = { nickname: None, scores: [], retries: RetrySettings() }
+    changed Person = {
         name: "Jordan"
         family: "Doe"
         active: true
+        nickname: None
+        scores: []
+        retries: RetrySettings()
     }
-    flags { active Bool, tags [Str] } = default {}
-    empty {} = default {}
+    flags { active Bool, tags [Str] } = { active: false, tags: [] }
+    empty {} = {}
 
     println(
         person.name,

@@ -9,7 +9,7 @@
 # grouped 22
 # shorthand 4
 
-def main() Unit {
+fn main() Unit {
     for item <- [1, 2] do println("single", item)
 
     for item <- [-1, 2] do

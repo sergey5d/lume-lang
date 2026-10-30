@@ -5,7 +5,7 @@ interface Named {
     get name Str
 }
 
-def main(existing Named) Unit {
+fn main(existing Named) Unit {
     var value Named = existing
     value := {}
 }

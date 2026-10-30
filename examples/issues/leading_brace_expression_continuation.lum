@@ -9,32 +9,32 @@
 
 module leading_brace_expression_continuation
 
-def readX() Int =
+fn readX() Int =
     { x: 1 }.x
 
-def invoke() Int =
+fn invoke() Int =
     { callback: () => 2 }.callback()
 
-def extract() Int =
+fn extract() Int =
     { value: Some(3) }.value!
 
-def increment() Int =
+fn increment() Int =
     { x: 4 }.x + 1
 
-def choose(flag Bool) Int = match flag {
+fn choose(flag Bool) Int = match flag {
     case true => { x: 5 }.x
     case false => 0
 }
 
-def lambdaRead() Int {
+fn lambdaRead() Int {
     reader fn() Int = () => { x: 6 }.x
     reader()
 }
 
-def yieldRead() [Int] =
+fn yieldRead() [Int] =
     for value <- [7, 8] yield { x: value }.x
 
-def main() Unit {
+fn main() Unit {
     projected = yieldRead()
 
     println("read", readX())

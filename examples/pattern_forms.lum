@@ -29,7 +29,7 @@ class User {
 
 object Ready {}
 
-def main() Int {
+fn main() Int {
     missing Int? = None
     match missing {
         case Some { value: _ } => ()

@@ -29,13 +29,13 @@ fn definition_command_uses_unsaved_source_and_follows_imported_types() {
     )
     .expect("models module should be writable");
     let source_path = directory.join("app.lum");
-    fs::write(&source_path, "module app\n\ndef main() {}\n")
+    fs::write(&source_path, "module app\n\nfn main() {}\n")
         .expect("root module should be writable");
 
     let source = concat!(
         "module app\n",
         "use models/{User}\n\n",
-        "def main() {\n",
+        "fn main() {\n",
         "    user User = User { name: \"Ada\" }\n",
         "}\n",
     );
@@ -98,7 +98,7 @@ fn definition_command_finds_imports_from_an_enclosing_source_root() {
         "use Config/*\n\n",
         "use unavailable/db/{Database}\n\n",
         "public interface Store {\n",
-        "    def open(db Database, config ServiceConfig) Unit\n",
+        "    fn open(db Database, config ServiceConfig) Unit\n",
         "}\n",
     );
     fs::write(&source_path, source).expect("nested module should be writable");
@@ -133,10 +133,64 @@ fn definition_command_finds_imports_from_an_enclosing_source_root() {
 }
 
 #[test]
+fn definition_command_follows_aliased_module_members() {
+    let directory = temp_directory("module-alias");
+    let customers = directory.join("customers");
+    fs::create_dir_all(&customers).expect("create module directory");
+    let storage = customers.join("storage.lum");
+    fs::write(
+        &storage,
+        concat!(
+            "module customers/storage\n\n",
+            "public shape Customer { id Int }\n\n",
+            "public fn load(id Int) Customer = Customer(id)\n",
+        ),
+    )
+    .expect("write storage module");
+    let source_path = directory.join("app.lum");
+    let source = concat!(
+        "use customers/storage as customerStore\n\n",
+        "fn main() {\n",
+        "    customer customerStore.Customer = customerStore.load(1)\n",
+        "}\n",
+    );
+    fs::write(&source_path, source).expect("write root module");
+    for (symbol, line) in [("Customer", 3usize), ("load", 5usize)] {
+        let reference = format!("customerStore.{symbol}");
+        let offset = source.find(&reference).expect("reference") + "customerStore.".len();
+        let output = Command::new(env!("CARGO_BIN_EXE_lume"))
+            .arg("definition")
+            .arg(&source_path)
+            .arg("--offset")
+            .arg(offset.to_string())
+            .env(
+                "LUME_STDLIB",
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../stdlib"),
+            )
+            .output()
+            .expect("run definition command");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("definition output should be JSON");
+        assert_eq!(
+            PathBuf::from(value["path"].as_str().expect("definition path")),
+            fs::canonicalize(&storage).expect("storage path should resolve"),
+            "wrong target for {symbol}"
+        );
+        assert_eq!(value["line"], line, "wrong target line for {symbol}");
+    }
+    fs::remove_dir_all(directory).expect("remove temporary directory");
+}
+
+#[test]
 fn definition_command_returns_null_when_cursor_is_not_on_a_type() {
     let directory = temp_directory("no-target");
     let source_path = directory.join("app.lum");
-    let source = "module app\n\ndef main() {\n    value = 42\n}\n";
+    let source = "module app\n\nfn main() {\n    value = 42\n}\n";
     fs::write(&source_path, source).expect("source should be writable");
     let offset = source.find("42").expect("literal");
     let output = Command::new(env!("CARGO_BIN_EXE_lume"))
@@ -168,7 +222,7 @@ fn definition_command_opens_native_library_sources() {
     let source = concat!(
         "module app\n",
         "use lume/json/{JsonValue}\n\n",
-        "def identity(value JsonValue) JsonValue = value\n",
+        "fn identity(value JsonValue) JsonValue = value\n",
     );
     fs::write(&source_path, source).expect("source should be writable");
     let offset = source.find("value JsonValue").expect("type use") + "value ".len();
@@ -221,7 +275,7 @@ fn definition_command_follows_values_functions_and_members() {
         concat!(
             "module helpers\n",
             "use models/{User}\n\n",
-            "public def copyUser(value User) User = User { name: value.name }\n",
+            "public fn copyUser(value User) User = User { name: value.name }\n",
         ),
     )
     .expect("helpers module should be writable");
@@ -230,7 +284,7 @@ fn definition_command_follows_values_functions_and_members() {
         "module app\n",
         "use models/{User}\n",
         "use helpers/{copyUser}\n\n",
-        "def render(value User) Str {\n",
+        "fn render(value User) Str {\n",
         "    copied User = copyUser(value)\n",
         "    users [User] = [copied]\n",
         "    users.add(copied)\n",

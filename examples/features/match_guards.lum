@@ -9,26 +9,26 @@ type MaybeInt =
     class SomeX { value Int }
     | object NoneX {}
 
-def describe(value MaybeInt) Int =
+fn describe(value MaybeInt) Int =
     match value {
         case SomeX { value as x } if x > 10 => x
         case SomeX { value: _ } => 10
         case MaybeInt.NoneX => 0
     }
 
-def whenReady(value MaybeInt, ready Bool) Int =
+fn whenReady(value MaybeInt, ready Bool) Int =
     match value {
         case _ if ready => 1
         case _ => 0
     }
 
-def whenInt(value Any) Int =
+fn whenInt(value Any) Int =
     match value {
         case _ if value is Int => 1
         case _ => 0
     }
 
-def main() Unit {
+fn main() Unit {
     large MaybeInt = MaybeInt.SomeX(12)
     small MaybeInt = MaybeInt.SomeX(3)
     empty MaybeInt = MaybeInt.NoneX

@@ -1,6 +1,6 @@
 module examples/numeric_math_members
 
-def main() Unit {
+fn main() Unit {
     whole Int = 9
     fraction Float = 2.25
     one Float = 1.0

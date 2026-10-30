@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # runtime_error at .*: integer division by zero
 
-def main() {
+fn main() {
     var value = 1
     value /= 0
 }

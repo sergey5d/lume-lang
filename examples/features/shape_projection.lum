@@ -36,9 +36,9 @@ shape Items {
     items [Int]
 }
 
-def project(point Point) Point = point
+fn project(point Point) Point = point
 
-def main() Unit {
+fn main() Unit {
     first3d = Point3D(1, 2, 3)
     second3d = Point3D(1, 2, 99)
     first Point = project(first3d)

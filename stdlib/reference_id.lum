@@ -6,9 +6,9 @@
 public class ReferenceId with Hashed[ReferenceId] {
     private new() {}
 
-    def equals(other ReferenceId) Bool =
+    fn equals(other ReferenceId) Bool =
         panic("ReferenceId equality is provided by the active runtime")
 
-    def hash() Int =
+    fn hash() Int =
         panic("ReferenceId hashing is provided by the active runtime")
 }

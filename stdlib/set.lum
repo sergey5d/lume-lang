@@ -3,29 +3,29 @@
 # INTERPRETER
 
 private interface SetApi[T] with Iterable[T] {
-    def add(value T) Set[T]
-    def addAll(values Iterable[T]) Set[T]
-    def iterator() Iterator[T]
-    def map[X](f fn(T) X) Set[X]
-    def flatMap[X](f fn(T) Iterable[X]) Set[X]
-    def filter(f fn(T) Bool) Set[T]
-    def fold[X](initial X, f fn(X, T) X) X
-    def reduce(f fn(T, T) T) Option[T]
-    def exists(f fn(T) Bool) Bool
-    def forAll(f fn(T) Bool) Bool
-    def forEach(f fn(T) Unit)
-    def contains(value T) Bool
+    fn add(value T) Set[T]
+    fn addAll(values Iterable[T]) Set[T]
+    fn iterator() Iterator[T]
+    fn map[X](f fn(T) X) Set[X]
+    fn flatMap[X](f fn(T) Iterable[X]) Set[X]
+    fn filter(f fn(T) Bool) Set[T]
+    fn fold[X](initial X, f fn(X, T) X) X
+    fn reduce(f fn(T, T) T) Option[T]
+    fn exists(f fn(T) Bool) Bool
+    fn forAll(f fn(T) Bool) Bool
+    fn forEach(f fn(T) Unit)
+    fn contains(value T) Bool
     get isEmpty Bool
     get nonEmpty Bool
     get size Int
-    def makeStr(separator Str) Str
-    def makeStr(separator Str, render fn(T) Str) Str
+    fn makeStr(separator Str) Str
+    fn makeStr(separator Str, render fn(T) Str) Str
 }
 
 private mixin SetParts[T] with SetApi[T] {
     get nonEmpty Bool = !this.isEmpty
 
-    def makeStr(separator Str) Str {
+    fn makeStr(separator Str) Str {
         var result Str = ""
         var first Bool = true
         for item <- this {
@@ -38,7 +38,7 @@ private mixin SetParts[T] with SetApi[T] {
         result
     }
 
-    def makeStr(separator Str, render fn(T) Str) Str {
+    fn makeStr(separator Str, render fn(T) Str) Str {
         var result Str = ""
         var first Bool = true
         for item <- this {

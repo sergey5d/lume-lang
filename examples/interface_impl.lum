@@ -4,25 +4,25 @@
 # 0
 
 interface Hopper {
-    def hop() Str
+    fn hop() Str
 }
 
 mixin Hopping with Hopper {
-    def hop() Str = "hop"
+    fn hop() Str = "hop"
 }
 
 interface Jumper {
-    def jump(steps Int) Str
+    fn jump(steps Int) Str
 }
 
 class Rabbit with Hopper, Jumper {
     use Hopping
 
-    def jump(steps Int) Str = "jump " + steps
+    fn jump(steps Int) Str = "jump " + steps
 }
 
 
-def main() Int {
+fn main() Int {
     rabbit Hopper = Rabbit {}
     jumper Jumper = Rabbit {}
     println(rabbit.hop())

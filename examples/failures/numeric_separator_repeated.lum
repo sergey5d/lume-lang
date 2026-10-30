@@ -1,5 +1,5 @@
 # FAIL_REGEX:
 # .*numeric separators must appear between decimal digits.*
 
-def main() Int =
+fn main() Int =
     1__000

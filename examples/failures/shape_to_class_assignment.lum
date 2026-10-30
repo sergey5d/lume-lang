@@ -11,7 +11,7 @@ shape UserData {
     age Int
 }
 
-def main() Unit {
+fn main() Unit {
     data = UserData {
         name: "Ada"
         age: 42

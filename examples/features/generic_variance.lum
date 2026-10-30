@@ -6,7 +6,7 @@ class Cell[T] {
     var value T
 }
 
-def main() Unit {
+fn main() Unit {
     arbitrary [Any] = [1]
     arbitrary.add("valid")
 

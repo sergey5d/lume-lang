@@ -10,29 +10,29 @@ The public API uses Lume core values at its boundary:
 ```lume
 use lume/db/{Database, Row, DbError}
 
-def loadUsers(db Database) Result[[User], DbError] {
+fn loadUsers(db Database) Result[[User], DbError] {
     db.query("select id, name from users where active = ?")
         .bind(true)
         .decodeAll[User]()
 }
 
-def loadUser(db Database, id Int) Result[User?, DbError] {
+fn loadUser(db Database, id Int) Result[User?, DbError] {
     db.queryRow("select id, name from users where id = ?")
         .bind(id)
         .decodeOne[User]()
 }
 
-def updateUser(db Database, id Int, name Str) Result[Int, DbError] {
+fn updateUser(db Database, id Int, name Str) Result[Int, DbError] {
     db.exec("update users set name = ? where id = ?", name, id)
 }
 
-def updateUserStaged(db Database, id Int, name Str) Result[Int, DbError] {
+fn updateUserStaged(db Database, id Int, name Str) Result[Int, DbError] {
     db.exec("update users set name = ? where id = ?")
         .bind(name, id)
         .run()
 }
 
-def replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
+fn replaceUser(db Database, id Int, name Str) Result[Unit, DbError] {
     db.transactionally(tx => {
         try tx.exec("delete from users where id = ?", id)
         try tx.exec("insert into users(id, name) values (?, ?)", id, name)

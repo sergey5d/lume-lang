@@ -2,14 +2,14 @@
 # INTERPRETER
 
 public interface Annotated {
-    def annotation[reified Ann]() Option[AnnotationValue]
-    def hasAnnotation[reified Ann]() Bool
+    fn annotation[reified Ann]() Option[AnnotationValue]
+    fn hasAnnotation[reified Ann]() Bool
 }
 
 public interface AnnotationValue {
     get name Str
-    def field(name Str) Option[Any]
-    def str(name Str) Option[Str]
+    fn field(name Str) Option[Any]
+    fn str(name Str) Option[Str]
 }
 
 public class ReflectionError {
@@ -33,31 +33,31 @@ public interface Type[A] with Annotated {
     get qualifiedName Option[Str]
     get kind TypeKind
 
-    def asClass() Option[ClassType[A]]
-    def asShape() Option[ShapeType[A]]
-    def asUnion() Option[UnionType[A]]
-    def asInterface() Option[InterfaceType[A]]
-    def asObject() Option[ObjectType[A]]
-    def asAnnotation() Option[AnnotationType[A]]
+    fn asClass() Option[ClassType[A]]
+    fn asShape() Option[ShapeType[A]]
+    fn asUnion() Option[UnionType[A]]
+    fn asInterface() Option[InterfaceType[A]]
+    fn asObject() Option[ObjectType[A]]
+    fn asAnnotation() Option[AnnotationType[A]]
 }
 
 public interface ClassType[A] with Type[A] {
     get fields [Field]
     get methods [Method]
-    def field(name Str) Option[Field]
-    def method(name Str) Option[Method]
-    def construct(args [Any] vararg) Result[A, ReflectionError]
+    fn field(name Str) Option[Field]
+    fn method(name Str) Option[Method]
+    fn construct(args [Any] vararg) Result[A, ReflectionError]
 }
 
 public interface ShapeType[A] with Type[A] {
     get fields [Field]
     get methods [Method]
-    def construct(args [Any] vararg) Result[A, ReflectionError]
+    fn construct(args [Any] vararg) Result[A, ReflectionError]
 }
 
 public interface UnionType[A] with Type[A] {
     get alternatives [UnionAlternative]
-    def alternative(name Str) Option[UnionAlternative]
+    fn alternative(name Str) Option[UnionAlternative]
     get methods [Method]
 }
 
@@ -68,8 +68,8 @@ public interface InterfaceType[A] with Type[A] {
 public interface ObjectType[A] with Type[A] {
     get fields [Field]
     get methods [Method]
-    def field(name Str) Option[Field]
-    def method(name Str) Option[Method]
+    fn field(name Str) Option[Field]
+    fn method(name Str) Option[Method]
 }
 
 public interface AnnotationType[A] with Type[A] {
@@ -80,14 +80,14 @@ public interface Field with Annotated {
     get name Str
     get fieldType Type[_]
     get isPrivate Bool
-    def get(receiver Any) Result[Any, ReflectionError]
+    fn get(receiver Any) Result[Any, ReflectionError]
 }
 
 public interface Method with Annotated {
     get name Str
     get params [Param]
     get returnType Type[_]
-    def call(receiver Any, args [Any] vararg) Result[Any, ReflectionError]
+    fn call(receiver Any, args [Any] vararg) Result[Any, ReflectionError]
 }
 
 public interface Param {
@@ -98,5 +98,5 @@ public interface Param {
 public interface UnionAlternative with Annotated {
     get name Str
     get fields [Field]
-    def construct(args [Any] vararg) Result[Any, ReflectionError]
+    fn construct(args [Any] vararg) Result[Any, ReflectionError]
 }

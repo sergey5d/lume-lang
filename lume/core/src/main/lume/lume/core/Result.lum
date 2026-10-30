@@ -20,37 +20,37 @@ ext Result[T, E] {
         case Err { error: _ } => true
     }
 
-    def map[X](f fn(T) X) Result[X, E] = match this {
+    fn map[X](f fn(T) X) Result[X, E] = match this {
         case Ok { value } => Ok(f(value))
         case Err { error } => Err(error)
     }
 
-    def mapError[X](f fn(E) X) Result[T, X] = match this {
+    fn mapError[X](f fn(E) X) Result[T, X] = match this {
         case Ok { value } => Ok(value)
         case Err { error } => Err(f(error))
     }
 
-    def flatMap[X](f fn(T) Result[X, E]) Result[X, E] = match this {
+    fn flatMap[X](f fn(T) Result[X, E]) Result[X, E] = match this {
         case Ok { value } => f(value)
         case Err { error } => Err(error)
     }
 
-    def orElse(fallback fn() Result[T, E]) Result[T, E] = match this {
+    fn orElse(fallback fn() Result[T, E]) Result[T, E] = match this {
         case Ok { value } => Ok(value)
         case Err { error: _ } => fallback()
     }
 
-    def toOption() Option[T] = match this {
+    fn toOption() Option[T] = match this {
         case Ok { value } => Some(value)
         case Err { error: _ } => None
     }
 
-    def toEither() Either[E, T] = match this {
+    fn toEither() Either[E, T] = match this {
         case Ok { value } => Right(value)
         case Err { error } => Left(error)
     }
 
-    def expectErr() E = match this {
+    fn expectErr() E = match this {
         case Ok { value: _ } => panic("expected Result.Err")
         case Err { error } => error
     }

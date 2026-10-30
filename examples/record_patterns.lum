@@ -43,7 +43,7 @@ class Order {
     amount Int
 }
 
-def describeUser(value Any) Str = match value {
+fn describeUser(value Any) Str = match value {
     case User {
         name
         location as home
@@ -51,7 +51,7 @@ def describeUser(value Any) Str = match value {
     case _ => "not a user"
 }
 
-def describeOrder(value Order) Str = match value {
+fn describeOrder(value Order) Str = match value {
     case Order {
         status: Paid
         customer: User { name }
@@ -60,12 +60,12 @@ def describeOrder(value Order) Str = match value {
     case _ => "other order"
 }
 
-def unwrapResult(result Result[Str, Str]) Str = match result {
+fn unwrapResult(result Result[Str, Str]) Str = match result {
     case Ok { value } => value
     case Err { error } => error
 }
 
-def describeMaybeUser(maybeUser User?) Str = match maybeUser {
+fn describeMaybeUser(maybeUser User?) Str = match maybeUser {
     case Some {
         value: User {
             name
@@ -75,14 +75,14 @@ def describeMaybeUser(maybeUser User?) Str = match maybeUser {
     case _ => "other"
 }
 
-def typedLet(value Any) Str {
+fn typedLet(value Any) Str {
     let User { name, age } = value else {
         return "not a user"
     }
     name + " " + age
 }
 
-def main() Int {
+fn main() Int {
     location = Location { city: "Tampa", country: "US" }
     user = User { name: "Sergey", location: location, age: 37 }
     adult = User { name: "Sergey", location: location, age: 18 }

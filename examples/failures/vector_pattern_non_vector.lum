@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*sequence pattern requires a Vector or Array value, got '\(Int, Int\)'.*
 
-def main() Unit {
+fn main() Unit {
     pair = (1, 2)
     let [left, right] = pair else return ()
 

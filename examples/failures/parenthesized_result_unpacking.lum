@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*named-value unpacking uses braces; 'Ok\(\.\.\.\)' is not supported.*
 
-def main() {
+fn main() {
     result Result[Int, Str] = Ok(7)
     match result {
         case Ok(value) => println(value)

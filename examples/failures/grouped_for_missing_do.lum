@@ -1,6 +1,6 @@
 # EXPECT-ERROR: .*expected 'do' or 'yield' after grouped for header.*
 
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for {
         value <- values
     } {

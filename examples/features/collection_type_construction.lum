@@ -1,7 +1,7 @@
 # EXPECT:
 # 0 0 0 1 0
 
-def main() Unit {
+fn main() Unit {
     options = {
         verbose: false
         help: false

@@ -5,19 +5,19 @@
 # annotation ok
 
 interface C {
-    def label() Str
+    fn label() Str
 }
 
 class A with C {
     value Str
 
-    def label() Str = this.value
+    fn label() Str = this.value
 }
 
 shape B {
     value Int
 
-    def doubled() Int = this.value * 2
+    fn doubled() Int = this.value * 2
 }
 
 annotation D {
@@ -27,14 +27,14 @@ annotation D {
 object E with C {
     value Str = "settings"
 
-    def label() Str = this.value
+    fn label() Str = this.value
 }
 
 @D { value: "example" }
 class Marked {
 }
 
-def main() Unit {
+fn main() Unit {
     a A = A { value: "Ada" }
     b B = B { value: 4 }
     marked Marked = Marked {}

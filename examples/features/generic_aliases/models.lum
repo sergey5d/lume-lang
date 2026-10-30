@@ -1,0 +1,10 @@
+public shape RemoteError {
+    message Str
+}
+
+public type RemoteResult[T] = Result[T, RemoteError]
+public type RemoteCallback[T] = fn(T) RemoteResult[T]
+
+public object AliasApi {
+    type Items[T] = [T]
+}

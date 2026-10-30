@@ -116,6 +116,17 @@ pub fn definition_at_path(
     Ok(resolver.definition)
 }
 
+pub(crate) fn module_definition_references(
+    module: &LoadedModule,
+    graph: &ModuleGraph,
+) -> HashMap<(usize, usize), DefinitionTarget> {
+    let ambient = default_inline_ambient_registry();
+    let mut resolver = Resolver::new(&module.display_path, module, &graph.modules, &ambient);
+    resolver.definition_references = Some(HashMap::new());
+    resolver.resolve();
+    resolver.definition_references.unwrap_or_default()
+}
+
 pub(crate) fn resolve_path_with_options(
     path: impl AsRef<Path>,
     options: &ModuleLoadOptions,
@@ -411,6 +422,7 @@ struct TopLevelDecls {
 #[derive(Debug, Clone)]
 struct TypeAliasInfo {
     visibility: Visibility,
+    arity: usize,
     span: crate::source::Span,
 }
 
@@ -603,7 +615,11 @@ fn load_module_with_options(
             module.dependencies.push(child_abs.clone());
         }
         if import.object_name.is_none() && import.symbols.is_empty() && !import.wildcard {
-            let alias = module_alias(&import.path);
+            let original_name = module_alias(&import.path);
+            let alias = import
+                .alias
+                .clone()
+                .unwrap_or_else(|| original_name.clone());
             if let Some(existing) = import_paths.get(&alias) {
                 if existing != &import.path {
                     return Err(format!(
@@ -619,10 +635,10 @@ fn load_module_with_options(
                 ));
             }
             if let Some(child_module) = child.program.module.as_ref() {
-                if child_module.name != alias {
+                if child_module.name != original_name && child_module.name != import.path {
                     return Err(format!(
                         "use '{}' expected module '{}', got '{}'",
-                        import.path, alias, child_module.name
+                        import.path, original_name, child_module.name
                     ));
                 }
             }
@@ -1193,6 +1209,7 @@ fn collect_top_level_decls(program: &Program) -> TopLevelDecls {
                     alias.name.clone(),
                     TypeAliasInfo {
                         visibility: alias.visibility,
+                        arity: alias.type_params.len(),
                         span: alias.span,
                     },
                 );
@@ -1324,6 +1341,7 @@ struct Resolver<'a> {
     current_constructor: bool,
     definition_offset: Option<usize>,
     definition: Option<DefinitionTarget>,
+    definition_references: Option<HashMap<(usize, usize), DefinitionTarget>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -1362,6 +1380,7 @@ impl<'a> Resolver<'a> {
             current_constructor: false,
             definition_offset: None,
             definition: None,
+            definition_references: None,
         }
     }
 
@@ -1446,6 +1465,7 @@ impl<'a> Resolver<'a> {
                             alias.name.clone(),
                             TypeAliasInfo {
                                 visibility: alias.visibility,
+                                arity: alias.type_params.len(),
                                 span: alias.span,
                             },
                         );
@@ -1717,7 +1737,14 @@ impl<'a> Resolver<'a> {
                     if let Some((owner, _)) = alias.name.rsplit_once('.') {
                         self.current_type_paths.push(owner.to_string());
                     }
+                    self.push_type_scope();
+                    for param in &alias.type_params {
+                        self.define_type_param(param);
+                    }
+                    self.resolve_type_parameter_bounds(&alias.type_params);
+                    self.resolve_generic_conditions(&alias.type_conditions);
                     self.resolve_type_ref(Some(&alias.target));
+                    self.pop_type_scope();
                     if alias.name.contains('.') {
                         self.current_type_paths.pop();
                     }
@@ -3088,12 +3115,17 @@ impl<'a> Resolver<'a> {
                     }
                     return;
                 }
-                if self.lookup_alias(name).is_some() {
+                if let Some(alias) = self.lookup_alias(name) {
+                    let arity = alias.arity;
                     self.record_definition(*span, self.alias_definition(name));
-                    if !args.is_empty() {
+                    if args.len() != arity {
                         self.add_error(
                             "invalid_type_arity",
-                            format!("type alias '{}' does not accept type arguments", name),
+                            format!(
+                                "type alias '{}' expects {} type arguments",
+                                name,
+                                arity_label(arity)
+                            ),
                             *span,
                         );
                     }
@@ -3628,11 +3660,13 @@ impl<'a> Resolver<'a> {
                 scope = parent;
             }
         }
-        if let Some((module, member)) = qualified_type_parts(name) {
-            return self
+        if let Some((module, member)) = qualified_type_parts(name)
+            && let Some(info) = self
                 .modules_by_alias
                 .get(module)
-                .and_then(|namespace| namespace.aliases.get(member));
+                .and_then(|namespace| namespace.aliases.get(member))
+        {
+            return Some(info);
         }
         self.imported_aliases
             .get(name)
@@ -3644,6 +3678,11 @@ impl<'a> Resolver<'a> {
         reference_span: crate::source::Span,
         target: Option<DefinitionTarget>,
     ) {
+        if let Some(references) = &mut self.definition_references
+            && let Some(target) = &target
+        {
+            references.insert((reference_span.start, reference_span.end), target.clone());
+        }
         if self.definition.is_some()
             || !self
                 .definition_offset
@@ -3676,6 +3715,11 @@ impl<'a> Resolver<'a> {
     fn identifier_definition(&self, name: &str) -> Option<DefinitionTarget> {
         if let Some(symbol) = self.lookup_scoped_value(name) {
             return Some(self.local_definition(symbol.span));
+        }
+        if (self.is_field_hint(name) || self.is_getter_hint(name))
+            && let Some(target) = self.current_member_definition(name)
+        {
+            return Some(target);
         }
         if let Some(symbol) = self.globals.get(name) {
             return Some(self.local_definition(symbol.span));
@@ -4509,10 +4553,33 @@ mod tests {
     }
 
     #[test]
+    fn resolves_generic_transparent_alias_parameters_and_arity() {
+        let valid = parse_inline(
+            "type Transform[A, B] = fn(A) B\nfn useAlias(value Transform[Int, Str]) {}\n",
+        );
+        let result = resolve_program(&valid);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        for arguments in ["", "[Int]", "[Int, Str, Bool]"] {
+            let source = format!(
+                "type Transform[A, B] = fn(A) B\nfn bad(value Transform{arguments}) {{}}\n"
+            );
+            let result = resolve_program(&parse_inline(&source));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "invalid_type_arity"),
+                "{source}: {:?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
     fn reports_undefined_local_name() {
         let program = parse_inline(
             r#"
-def main() Int {
+fn main() Int {
     value = missing + 1
     return 0
 }
@@ -4534,9 +4601,9 @@ def main() Int {
         let program = parse_inline(
             r#"
 class Tracker {
-    def rollups() [Str] = []
+    fn rollups() [Str] = []
 
-    def allRollups() [Str] {
+    fn allRollups() [Str] {
         rollups = rollups()
         rollups
     }
@@ -4558,9 +4625,9 @@ class Tracker {
         let program = parse_inline(
             r#"
 class Tracker {
-    def rollups() [Str] = []
+    fn rollups() [Str] = []
 
-    def allRollups() [Str] {
+    fn allRollups() [Str] {
         rollups = this.rollups()
         rollups
     }
@@ -4578,10 +4645,10 @@ class Tracker {
 class Namespace {
     shape Point { x Int }
 
-    def point(x Int) Point = Point(x)
+    fn point(x Int) Point = Point(x)
 }
 
-def main() Namespace.Point = Namespace.Point(1)
+fn main() Namespace.Point = Namespace.Point(1)
 "#,
         );
         let result = resolve_program(&program);
@@ -4598,10 +4665,10 @@ class Parser {
         class Parsed { text Key }
         | object Empty {}
 
-    def parse(text Key) Outcome = Outcome.Parsed(text)
+    fn parse(text Key) Outcome = Outcome.Parsed(text)
 }
 
-def main() Parser.Outcome = Parser().parse("ok")
+fn main() Parser.Outcome = Parser().parse("ok")
 "#,
         );
         let result = resolve_program(&program);
@@ -4663,7 +4730,7 @@ object Config {
     score: 1 + 2,
     nested: { name: Config.path, value: 1 }
 }
-def main() Unit {}
+fn main() Unit {}
 "#,
         );
         let result = resolve_program(&program);
@@ -4682,11 +4749,11 @@ object Config {
     var path Str = "/config"
 }
 
-def makePath() Str = "/runtime"
+fn makePath() Str = "/runtime"
 
 @Route { path: Config.path }
 @Route { path: makePath() }
-def main() Unit {}
+fn main() Unit {}
 "#,
         );
         let result = resolve_program(&program);
@@ -4716,7 +4783,7 @@ def main() Unit {}
 public type ConnectionState = object Ready {} | object Closed {}
 public type JobState = object Ready {} | object Running {}
 
-def main() Unit {
+fn main() Unit {
     value = Ready
 }
 "#,
@@ -4756,7 +4823,7 @@ public type JobState = object Ready {} | object Running {}
 module app
 use states/{ConnectionState}
 
-def main() Unit {
+fn main() Unit {
     value ConnectionState = Ready
 }
 "#,
@@ -4779,7 +4846,7 @@ def main() Unit {
 module app
 use states/{ConnectionState, ConnectionState.Ready as ConnectionReady}
 
-def main() ConnectionState = ConnectionReady
+fn main() ConnectionState = ConnectionReady
 "#,
         )
         .expect("write explicit source");
@@ -4810,7 +4877,7 @@ private type SecretState = object Hidden {} | object Revealed {}
 module app
 use states/{SecretState.Hidden as Hidden}
 
-def main() Unit {
+fn main() Unit {
     value = Hidden
 }
 "#,
@@ -4837,7 +4904,7 @@ def main() Unit {
             r#"
 use lib/math/{Adder}
 
-def main() Unit {
+fn main() Unit {
     value Adder = Adder(1)
 }
 "#,
@@ -4887,8 +4954,8 @@ public class Adder {
 use lib/nested
 use lib/nested/{Namespace}
 
-def selected() Namespace.Point = Namespace.Point(1)
-def qualified() nested.Namespace.Point = nested.Namespace.Point(2)
+fn selected() Namespace.Point = Namespace.Point(1)
+fn qualified() nested.Namespace.Point = nested.Namespace.Point(2)
 "#,
         )
         .expect("write source");
@@ -4948,7 +5015,7 @@ private class PrivateContainer {
 module app
 use support
 
-def expose(value support.PrivateContainer.Public) support.PrivateContainer.Alias = "value"
+fn expose(value support.PrivateContainer.Public) support.PrivateContainer.Alias = "value"
 "#,
         )
         .expect("write consumer module");
@@ -4974,7 +5041,7 @@ def expose(value support.PrivateContainer.Public) support.PrivateContainer.Alias
             r#"
 module shared
 
-internal def answer() Int = 42
+internal fn answer() Int = 42
 "#,
         )
         .expect("write support");
@@ -4985,7 +5052,7 @@ internal def answer() Int = 42
             r#"
 module shared
 use support/{answer}
-def main() Int = answer()
+fn main() Int = answer()
 "#,
         )
         .expect("write same-module source");
@@ -4998,7 +5065,7 @@ def main() Int = answer()
             r#"
 module app
 use support/{answer}
-def main() Int = answer()
+fn main() Int = answer()
 "#,
         )
         .expect("write cross-module source");
@@ -5020,9 +5087,9 @@ def main() Int = answer()
             temp.join("support.lum"),
             r#"
 module support
-private mixin Hidden { def answer() Int = 1 }
-internal mixin Shared { def answer() Int = 2 }
-public mixin Exported { def answer() Int = 3 }
+private mixin Hidden { fn answer() Int = 1 }
+internal mixin Shared { fn answer() Int = 2 }
+public mixin Exported { fn answer() Int = 3 }
 private class Container { public mixin Nested {} }
 public class Box { use Hidden }
 "#,
@@ -5087,8 +5154,8 @@ public class Box { use Hidden }
             r#"
 module support
 
-def hidden() Int = 1
-public def exposed() Int = 2
+fn hidden() Int = 1
+public fn exposed() Int = 2
 
 shape HiddenValue {
     value Int
@@ -5108,7 +5175,7 @@ public shape ExposedValue {
 module app
 use support/{exposed, ExposedValue}
 
-def main() Int = exposed() + ExposedValue(1).value
+fn main() Int = exposed() + ExposedValue(1).value
 "#,
         )
         .expect("write visible consumer");
@@ -5122,7 +5189,7 @@ def main() Int = exposed() + ExposedValue(1).value
 module app
 use support/{hidden, HiddenValue}
 
-def main() Int = hidden() + HiddenValue(1).value
+fn main() Int = hidden() + HiddenValue(1).value
 "#,
         )
         .expect("write hidden consumer");
@@ -5144,7 +5211,7 @@ def main() Int = hidden() + HiddenValue(1).value
             r#"
 module app
 
-def consume(value VectorApi[Int]) Unit {}
+fn consume(value VectorApi[Int]) Unit {}
 "#,
         )
         .expect("write source");

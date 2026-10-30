@@ -1,12 +1,12 @@
 # EXPECT:
 # try 3
 
-def increment(value Int?) Int? {
+fn increment(value Int?) Int? {
     item = try value
     Some(item + 1)
 }
 
-def main() Unit {
+fn main() Unit {
     let value <- increment(Some(2)) else panic("expected incremented value")
     println("try", value)
 }

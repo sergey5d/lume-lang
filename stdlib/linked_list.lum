@@ -3,40 +3,40 @@
 # INTERPRETER
 
 private interface LinkedListApi[T] with Iterable[T] {
-    def add(value T) LinkedList[T]
-    def addAll(values Iterable[T]) LinkedList[T]
-    def map[X](f fn(T) X) LinkedList[X]
-    def flatMap[X](f fn(T) Iterable[X]) LinkedList[X]
-    def filter(f fn(T) Bool) LinkedList[T]
-    def fold[X](initial X, f fn(X, T) X) X
-    def reduce(f fn(T, T) T) Option[T]
-    def exists(f fn(T) Bool) Bool
-    def forAll(f fn(T) Bool) Bool
-    def indexOf(value T) Option[Int]
-    def zip[X](other LinkedList[X]) LinkedList[(T, X)]
-    def zipWithIndex() LinkedList[(T, Int)]
-    def at(index Int) Option[T]
-    def setAt(index Int, value T) Result[T, InvalidIndex]
-    def insertAt(index Int, value T) Result[Unit, InvalidIndex]
-    def removeAt(index Int) Result[T, InvalidIndex]
+    fn add(value T) LinkedList[T]
+    fn addAll(values Iterable[T]) LinkedList[T]
+    fn map[X](f fn(T) X) LinkedList[X]
+    fn flatMap[X](f fn(T) Iterable[X]) LinkedList[X]
+    fn filter(f fn(T) Bool) LinkedList[T]
+    fn fold[X](initial X, f fn(X, T) X) X
+    fn reduce(f fn(T, T) T) Option[T]
+    fn exists(f fn(T) Bool) Bool
+    fn forAll(f fn(T) Bool) Bool
+    fn indexOf(value T) Option[Int]
+    fn zip[X](other LinkedList[X]) LinkedList[(T, X)]
+    fn zipWithIndex() LinkedList[(T, Int)]
+    fn at(index Int) Option[T]
+    fn setAt(index Int, value T) Result[T, InvalidIndex]
+    fn insertAt(index Int, value T) Result[Unit, InvalidIndex]
+    fn removeAt(index Int) Result[T, InvalidIndex]
     get first Option[T]
     get last Option[T]
-    def tail() LinkedList[T]
+    fn tail() LinkedList[T]
     get isEmpty Bool
     get nonEmpty Bool
-    def removeFirst() Option[T]
-    def removeLast() Option[T]
+    fn removeFirst() Option[T]
+    fn removeLast() Option[T]
     get size Int
-    def forEach(f fn(T) Unit)
-    def iterator() Iterator[T]
-    def makeStr(separator Str) Str
-    def makeStr(separator Str, render fn(T) Str) Str
+    fn forEach(f fn(T) Unit)
+    fn iterator() Iterator[T]
+    fn makeStr(separator Str) Str
+    fn makeStr(separator Str, render fn(T) Str) Str
 }
 
 private mixin LinkedListParts[T] with LinkedListApi[T] {
     get nonEmpty Bool = !this.isEmpty
 
-    def makeStr(separator Str) Str {
+    fn makeStr(separator Str) Str {
         var result Str = ""
         for idx <- Range(0, this.size) {
             if let Some { value as item } = this.at(idx) {
@@ -49,7 +49,7 @@ private mixin LinkedListParts[T] with LinkedListApi[T] {
         result
     }
 
-    def makeStr(separator Str, render fn(T) Str) Str {
+    fn makeStr(separator Str, render fn(T) Str) Str {
         var result Str = ""
         for idx <- Range(0, this.size) {
             if let Some { value as item } = this.at(idx) {

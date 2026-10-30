@@ -16,16 +16,16 @@ class PairBox {
 }
 
 interface WorkerLike {
-    def doWork() Int
+    fn doWork() Int
 }
 
 class Worker with WorkerLike {
 
-    def doWork() Int = 7
+    fn doWork() Int = 7
 }
 
 
-def printBodyShape(value Int) {
+fn printBodyShape(value Int) {
     match value {
         case 0 => ()
         case 1 => ()
@@ -43,7 +43,7 @@ def printBodyShape(value Int) {
     }
 }
 
-def main() Int {
+fn main() Int {
     pair PairBox = PairBox(5, 9)
 
     match pair {

@@ -1,9 +1,9 @@
 # FAIL_REGEX:
 # .*break used outside of a loop.*
 
-def invoke(work fn() Unit) = work()
+fn invoke(work fn() Unit) = work()
 
-def main() {
+fn main() {
     for value <- [1] {
         invoke { => break }
     }

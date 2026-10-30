@@ -8,5 +8,5 @@ private class SecretBox {
     value Str
 }
 
-public def greet(name Str) Str = prefix + ", " + name
-private def whisper() Str = secret
+public fn greet(name Str) Str = prefix + ", " + name
+private fn whisper() Str = secret

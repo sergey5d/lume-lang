@@ -8,12 +8,12 @@ The lexer reserves these words for language grammar:
 
 ```txt
 annotation  as        break     case       class      continue
-defer       def       default   do         else       ext
-false       fn        for       get        if         interface
-internal    is        let       match      mixin      module     object
-private     public    reified   return     shape      true
-try         type      use       var        vararg     when
-while       with      yield
+defer       do        else      ext        false      fn
+for         get       if        interface  internal   is
+let         match     mixin     module     object     private
+public      reified   return    shape      true       try
+type        use       var       vararg     when       while
+with        yield
 ```
 
 They are not ordinary identifiers. A grammar rule may explicitly reuse a
@@ -64,7 +64,7 @@ Vector and map shorthand can be nested, for example:
 
 ```txt
 count Int? = Some(5)
-def find(id Int) User? = ...
+fn find(id Int) User? = ...
 values [Str?] = [Some("one"), None]
 ```
 
@@ -79,13 +79,15 @@ remain where needed for nested options, such as `Option[Int?]`.
 ### Qualified Type Paths
 
 A module imported without a symbol selector exposes its visible types through
-the module alias in every type position:
+its local module qualifier in every type position. The qualifier defaults to
+the final path component and may be renamed with `as`:
 
 ```txt
 use app/models
+use customers/storage as customerStore
 
-def display(user models.User) Str = user.name
-def choose(users Vector[models.User]) models.User | models.Guest = users[0]
+fn display(user models.User) Str = user.name
+fn choose(users Vector[models.User]) models.User | models.Guest = users[0]
 
 if value is models.User {
     println(value.name)
@@ -102,7 +104,7 @@ short local name is preferable:
 ```txt
 use app/models/{User as ModelUser}
 
-def display(user ModelUser) Str = user.name
+fn display(user ModelUser) Str = user.name
 ```
 
 ### Type Aliases
@@ -116,12 +118,27 @@ type UserId = Int
 type Handler = fn(Request) Response
 type Users = [User]
 type Companion = Pet
+type AppResult[T] = Result[T, AppError]
+type Lookup[K with Hashed[K], V] = Map[K, V]
+type Transform[A, B] = fn(A) B
 ```
 
 An alias introduces no new nominal type. The alias and its recursively expanded
 target are the same type for assignment, calls, inference, and code generation.
 Aliases may refer to aliases declared before or after them; direct and indirect
 cycles are rejected.
+
+Generic aliases use ordinary type parameters and bounds. Supply exactly the
+declared number of type arguments; substitution is transparent throughout the
+target, including function, collection, optional, tuple, and union types.
+For example, `AppResult[Customer]` is exactly `Result[Customer, AppError]`.
+Alias bounds are checked at each use, and cycles remain invalid after
+substitution. Aliases do not introduce runtime metadata, constructors,
+conversions, or a separate equality contract. Alias parameters cannot be
+`reified`.
+
+Aliases may be nested in declaration scopes and imported or qualified like
+other named type declarations. Their existing visibility rules apply.
 
 An anonymous shape schema cannot be a `type` alias target. Declare a reusable
 record with `shape Name { ... }`, or keep the anonymous schema inline.
@@ -133,7 +150,7 @@ Use `|` to declare a value that may have any one of several types:
 ```txt
 value Cat | Dog = Cat("Milo")
 
-def describe(value Cat | Dog) Str = match value {
+fn describe(value Cat | Dog) Str = match value {
     case Cat { name } => "cat " + name
     case Dog { name } => "dog " + name
 }
@@ -157,7 +174,7 @@ type Outcome =
     | object Cancelled {}
 
 ext Outcome {
-    def result() Str = match this {
+    fn result() Str = match this {
         case Success { value } => value
         case Failure { message } => "Failed: " + message
         case Cancelled => "Cancelled"
@@ -340,7 +357,7 @@ Any { value: 1 }      # error: Any is not constructed with fields
 Implicit widening remains the normal convenient form:
 
 ```txt
-def printAnything(value Any) Unit = ...
+fn printAnything(value Any) Unit = ...
 
 value Any = "hello"
 printAnything("hello")
@@ -423,7 +440,7 @@ The captured type is only equal to itself when it comes from the same unknown
 source:
 
 ```txt
-def same[T](left T, right T) Unit {}
+fn same[T](left T, right T) Unit {}
 
 same(a[0], a[1])      # allowed; both values come from a
 same(a[0], b[0])      # rejected if b is a different Vector[_] source
@@ -469,7 +486,7 @@ by the expected type to be accepted by the actual function, while the actual
 return value must be assignable to the expected return type:
 
 ```txt
-def ignore(value Any) Str = "ignored"
+fn ignore(value Any) Str = "ignored"
 
 acceptsAny fn(Any) Str = ignore
 acceptsStr fn(Str) Any = acceptsAny # valid
@@ -829,7 +846,7 @@ assert(ready, "not ready")
 `assert` has one ordinary callable signature:
 
 ```txt
-def assert(condition Bool, message Str = "assert condition was false") Unit
+fn assert(condition Bool, message Str = "assert condition was false") Unit
 ```
 
 The message is optional but not variadic. Normal positional and named-argument
@@ -842,6 +859,7 @@ Supported use forms:
 
 ```txt
 use module/sub
+use module/sub as localName
 use module/sub/*
 use module/sub/A
 use module/sub/A as B
@@ -852,6 +870,8 @@ Meaning:
 
 - `use module/sub`
   qualified access through the module name, for example `sub.A`
+- `use module/sub as localName`
+  qualified access through a local module alias, for example `localName.A`
 - `use module/sub/*`
   use all visible symbols unqualified; extension methods declared by that module are also available as receiver methods in this file
 - `use module/sub/A`
@@ -869,8 +889,21 @@ Built-in `OS` methods are available implicitly in every file, so `print(...)`, `
 
 Extension methods are made available only by wildcard module use. They are visible in
 the module where the `ext` block is declared and in files that write
-`use module/sub/*`. Selective use forms such as `use module/sub/Name` do not
-make extension methods available.
+`use module/sub/*`. Plain or aliased module imports and selective use forms
+such as `use module/sub/Name` do not make extension methods available.
+
+Module aliases change only the local qualifier. They do not rename the module,
+alter visibility or initialization, re-export its symbols, or activate its
+extensions. Distinct modules may share a final path component when imported
+under different aliases:
+
+```txt
+use customers/storage as customerStore
+use audit/storage as auditStore
+
+customer = try customerStore.load(id)
+try auditStore.recordAccess(id)
+```
 
 The standard spec helper module is brought in explicitly by test files. It is
 not part of the prelude; specs are executed by the test runner:
@@ -879,7 +912,7 @@ not part of the prelude; specs are executed by the test runner:
 use spec/*
 
 class PrimitiveSpec with Spec {
-    def it() Unit {
+    fn it() Unit {
         5.shouldBe(5)
         "ok".shouldBe("ok")
     }
@@ -927,16 +960,16 @@ object Routes {
 }
 
 @Route { path: ROUTE_PATH }
-def status() Str = "ok"
+fn status() Str = "ok"
 
 @Route { path: "/health" }
-def health() Str = "ok"
+fn health() Str = "ok"
 
 @Route { path: Routes.HEALTH }
-def healthFromObject() Str = "ok"
+fn healthFromObject() Str = "ok"
 
 @Route { path: "/health", method: "POST" }
-def health2() Str = "ok"
+fn health2() Str = "ok"
 
 @Metadata {
     text: "literal",
@@ -948,7 +981,7 @@ def health2() Str = "ok"
     tags: ["a", "b"],
     nested: { name: Routes.HEALTH, value: 1 }
 }
-def richMetadata() Str = "ok"
+fn richMetadata() Str = "ok"
 ```
 
 `object Routes { ... }` declares one shared value named `Routes`, so `Routes.HEALTH`
@@ -999,7 +1032,7 @@ module app
 
 Top-level forms:
 
-- `def`
+- `fn`
 - `annotation`
 - `interface`
 - `mixin`
@@ -1009,8 +1042,8 @@ Top-level forms:
 - `type`
 - `ext TypeName`
 - `name Type = expr`
-- `private def`
-- `internal def`
+- `private fn`
+- `internal fn`
 - `private name Type = expr`
 - `internal name Type = expr`
 - `private annotation`
@@ -1031,10 +1064,10 @@ Top-level forms:
 Examples:
 
 ```txt
-def greet(name Str) Str = "hello, " + name
+fn greet(name Str) Str = "hello, " + name
 
 interface Named {
-    def label() Str
+    fn label() Str
 }
 
 annotation Route {
@@ -1075,7 +1108,7 @@ type OptionX[T] =
 Named `class`, `shape`, `interface`, `mixin`, `object`, and `annotation`
 declarations, as well as `type` aliases and declared unions, may appear inside
 named classes, shapes, objects, or annotations. Interfaces contain only `get`
-and `def` signatures; mixin bodies contain only getter and method implementations.
+and `fn` signatures; mixin bodies contain only getter and method implementations.
 Neither supports nested declarations:
 
 ```txt
@@ -1090,7 +1123,7 @@ class Parser {
     }
 
     interface Input {
-        def read() Str?
+        fn read() Str?
     }
 
     object Defaults {
@@ -1129,7 +1162,7 @@ allowed in functions, methods, constructors, getters, lambdas, or nested
 executable blocks:
 
 ```txt
-def process() Unit {
+fn process() Unit {
     shape Entry { value Int } # invalid
 }
 ```
@@ -1137,11 +1170,11 @@ def process() Unit {
 Anonymous shape construction, anonymous `object` expressions, and lambdas
 remain valid in executable blocks because they construct values without
 introducing named declarations. Local functions are allowed only directly in a
-function, method, constructor, getter, or lambda body. A `def` inside an `if`,
+function, method, constructor, getter, or lambda body. A `fn` inside an `if`,
 `while`, `for`, `match` arm, or another nested block is invalid; move it to the
 direct callable body.
 
-Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `def main() Unit { ... }`.
+Arbitrary statements such as `if`, `for`, `match`, `defer`, or expression statements are not valid at top level. Put executable code inside a function such as `fn main() Unit { ... }`.
 
 ## Variable Declarations
 
@@ -1413,8 +1446,8 @@ before the braces and the first entry inside them:
 Type { field: value }            # named field construction or union payload
 Type { field }                   # named construction with field punning
 call { x => ... }                # trailing lambda
-object { field Type = value; def method() Type = value }
-object with Interface { field Type = value; def method() Type = value }
+object { field Type = value; fn method() Type = value }
+object with Interface { field Type = value; fn method() Type = value }
 new(value, other)                # contextual positional construction
 new { field: value }             # forced named-field construction
 new { field }                    # forced construction with field punning
@@ -1428,10 +1461,10 @@ delimiters:
 
 ```txt
 class Marker {}
-def noop() Unit {}
-def noop2() = ()
-def invalid() Unit = {}       # error: construction, not Unit
-def make() EmptyUser = new {} # contextual class construction
+fn noop() Unit {}
+fn noop2() = ()
+fn invalid() Unit = {}       # error: construction, not Unit
+fn make() EmptyUser = new {} # contextual class construction
 ```
 
 A leading labeled field or spread selects construction; otherwise bare braces
@@ -1454,7 +1487,7 @@ The same rule applies after a callable-body `=`, lambda `=>`, match-case `=>`,
 and `yield`:
 
 ```txt
-def origin() Point = { x: 0, y: 0 }
+fn origin() Point = { x: 0, y: 0 }
 mapper = value => { x: value, y: 0 }
 
 point Point = match ready {
@@ -1512,7 +1545,6 @@ unknown Any = {}       # error: Any is not a concrete target
 nothing Unit = {}      # error: write () for Unit
 empty {} = {}          # explicit empty structural target
 forced {} = new {}     # same target, explicit construction spelling
-defaults {} = default {} # default construction of the same empty schema
 point { x Int } = {}   # error: required field x is missing
 ```
 
@@ -1521,24 +1553,24 @@ the callable body rather than an expression. An `=` body must use `()` when it
 produces Unit:
 
 ```txt
-def noop() {}
-def noop2() = ()
-def invalid() = {} # error: empty construction has no target
+fn noop() {}
+fn noop2() = ()
+fn invalid() = {} # error: empty construction has no target
 ```
 
 An explicit return type remains an expected construction target, so these are
 different:
 
 ```txt
-def createCache() Cache = new {} # construct Cache
-def createCache() Cache {}   # error: empty Unit body does not return Cache
+fn createCache() Cache = new {} # construct Cache
+fn createCache() Cache {}   # error: empty Unit body does not return Cache
 ```
 
 Context can flow from a typed binding, return type, indexed assignment, or a
 single known function parameter:
 
 ```txt
-def makePoint(x Int, y Int) Point = {
+fn makePoint(x Int, y Int) Point = {
     x: x
     y: y
 }
@@ -1620,62 +1652,20 @@ point Point = { x: 1, y: 2 }
 point Point = new { x: 1, y: 2 }
 ```
 
-### Default initialization
-
-`default { ... }` explicitly fills omitted immediate construction fields. A
-declared field initializer is preserved. Otherwise, `Bool`, `Int`, `Float`,
-`Decimal`, `Str`, and `Rune` receive their primitive defaults (`Decimal` uses `0d`), `Option[T]` receives
-`None`, and another concrete field type is constructed only when its ordinary
-accessible constructor accepts zero supplied arguments:
-
-`default` is a reserved keyword. It cannot be used as a binding, member,
-callable, or type name.
+Omitted construction inputs use their declared field or parameter defaults.
+Otherwise the input must be supplied explicitly; a primitive, optional, or
+collection field type does not implicitly supply a value:
 
 ```txt
-class RetrySettings {
-    attempts Int = 3
-}
-
 shape Person {
     name Str = "Alex"
     family Str
-    active Bool
     nickname Str?
-    tags [Str]
-    retries RetrySettings
 }
 
-person Person = default {}
-# name == "Alex", family == "", active == false
-# nickname == None, tags is empty, retries.attempts == 3
-
-renamed Person = default { name: "Jordan" }
+person Person = { family: "", nickname: None } # preserves name == "Alex"
+missing Person = {} # invalid: family and nickname must be supplied
 ```
-
-Default initialization is deliberately nonrecursive. It does not inspect a
-nested type's fields and invent constructor arguments:
-
-```txt
-shape Point {
-    x Int
-    y Int
-}
-
-shape State {
-    origin Point
-    files [Str]
-}
-
-state State = default {} # invalid: Point requires construction inputs
-state State = default { origin: Point(0, 0) } # valid
-```
-
-Empty collections qualify through their existing zero-argument constructors;
-their element types do not need defaults. Explicit fields are evaluated once in
-source order. Remaining automatic values are created once in declaration order.
-`default { ... }` requires one concrete class, named shape, or anonymous-shape
-schema from context; it does not select an interface implementation or a union
-alternative.
 
 Overload resolution first uses argument count, argument names, and the ordinary
 types of independently typed argument expressions. Contextual construction may
@@ -1684,8 +1674,8 @@ remaining tie between concrete targets:
 
 ```txt
 class Saver {
-    def save(user User) Unit = ()
-    def save(admin Admin) Unit = ()
+    fn save(user User) Unit = ()
+    fn save(admin Admin) Unit = ()
 }
 
 saver.save(new { name: "Ada" }) # invalid: ambiguous target
@@ -1696,8 +1686,8 @@ Other arguments can make the target unique before construction is checked:
 
 ```txt
 class Saver {
-    def save(tag Int, user User) Unit = ()
-    def save(tag Str, admin Admin) Unit = ()
+    fn save(tag Int, user User) Unit = ()
+    fn save(tag Str, admin Admin) Unit = ()
 }
 
 saver.save(1, new { name: "Ada" }) # valid: the Int argument selects User
@@ -1735,11 +1725,11 @@ construction and ordinary block expressions continue through normal postfix and
 infix parsing:
 
 ```txt
-def readX() Int = { x: 1 }.x
-def answer() Int = { 40 } + 2
-def render() Str = { 42 }.toStr()
+fn readX() Int = { x: 1 }.x
+fn answer() Int = { 40 } + 2
+fn render() Str = { 42 }.toStr()
 
-def choose(flag Bool) Int = match flag {
+fn choose(flag Bool) Int = match flag {
     case true => { 40 } + 2
     case false => 0
 }
@@ -1749,9 +1739,9 @@ A bare block with no following operation remains a block body, and a direct
 callable body without `=` remains unchanged:
 
 ```txt
-def calculation() Int = { 40 }
+fn calculation() Int = { 40 }
 
-def procedure() {
+fn procedure() {
     println("done")
 }
 ```
@@ -1822,9 +1812,9 @@ expected types flowing through generic callbacks such as `Option.map`. Given
 construct the same narrower `Rollup` value:
 
 ```txt
-def named() Rollup? = source().map(r => Rollup { ...r })
-def fieldBraces() Rollup? = source().map(r => { ...r })
-def contextualNew() Rollup? = source().map(r => new { ...r })
+fn named() Rollup? = source().map(r => Rollup { ...r })
+fn fieldBraces() Rollup? = source().map(r => { ...r })
+fn contextualNew() Rollup? = source().map(r => new { ...r })
 ```
 
 `Rollup { ...r }` names the target directly. Bare field braces and contextual
@@ -1914,7 +1904,7 @@ wider shape or supplying it through a spread remains a valid projection.
 A member expression in a construction entry must have an explicit field label:
 
 ```txt
-def selected() Rollup? = source().map(r => Rollup {
+fn selected() Rollup? = source().map(r => Rollup {
     total: r.total
     label: r.label
 })
@@ -1932,7 +1922,7 @@ Anonymous behavior uses `object with`:
 value = object with Printable {
     x Int = 10
 
-    def print() Unit = println(x)
+    fn print() Unit = println(x)
 }
 ```
 
@@ -1960,10 +1950,10 @@ user = { name: "Ada",
 Anonymous shape type:
 
 ```txt
-def describe(user { name Str, age Int }) Str =
+fn describe(user { name Str, age Int }) Str =
     user.name + " is " + user.age
 
-def project(user { name Str, age Int }) { name Str } =
+fn project(user { name Str, age Int }) { name Str } =
     { name: user.name }
 ```
 
@@ -1985,7 +1975,7 @@ shape Session {
     start Int
     end Int
 
-    def duration() Int = this.end - this.start
+    fn duration() Int = this.end - this.start
 }
 
 session = Session(10, 20)
@@ -2076,17 +2066,17 @@ batch.items.add(42)        # valid: Vector remains mutable
 shape Point {
     x Int
     y Int
-    def sum() Int = this.x + this.y
+    fn sum() Int = this.x + this.y
 }
 
 interface Named {
-    def label() Str
+    fn label() Str
 }
 
 shape NamedPoint with Named {
     x Int
     y Int
-    def label() Str = this.x + "," + this.y
+    fn label() Str = this.x + "," + this.y
 }
 
 origin = Point(0, 0)
@@ -2172,11 +2162,11 @@ hash might not match its custom equality:
 
 ```txt
 interface Eq[T] {
-    def equals(other T) Bool
+    fn equals(other T) Bool
 }
 
 interface Hashed[T] with Eq[T] {
-    def hash() Int
+    fn hash() Int
 }
 
 class Map[K with Hashed[K], V] {
@@ -2202,8 +2192,8 @@ objects retain the same hash after mutation.
 class StableId with Hashed[StableId] {
     value Int
 
-    def equals(other StableId) Bool = this.value == other.value
-    def hash() Int = this.value
+    fn equals(other StableId) Bool = this.value == other.value
+    fn hash() Int = this.value
 }
 
 shape CacheKey {
@@ -2211,7 +2201,7 @@ shape CacheKey {
     version Int
 }
 
-def cache[T with Hashed[T]](key T) Unit = ()
+fn cache[T with Hashed[T]](key T) Unit = ()
 
 cache(CacheKey(StableId(1), 2))
 
@@ -2275,7 +2265,6 @@ empty = {}                             # invalid: no construction target
 explicitEmpty = new {}                 # invalid: no construction target
 emptyShape {} = {}                     # explicit empty anonymous shape
 forcedEmpty {} = new {}                # same explicit target
-defaultEmpty {} = default {}           # same target with default initialization
 nothing Unit = ()                      # explicit Unit value
 ```
 
@@ -2295,11 +2284,23 @@ return value, or introduce a named `shape` declaration.
 
 ## Functions and Methods
 
-`def` declares top-level functions, local functions, and methods. `get` declares
+`fn` declares top-level functions, local functions, and methods. `get` declares
 getters, and `new` declares constructors.
 
+After `fn`, a callable name or operator introduces a declaration; `(` introduces
+a function type. Consecutive interface signatures remain separate declarations,
+including when a signature omits its `Unit` return type:
+
 ```txt
-def greet(name Str) Str = "hello, " + name
+interface Worker {
+    fn start()
+    fn status() Str
+    fn createCallback() fn() Str
+}
+```
+
+```txt
+fn greet(name Str) Str = "hello, " + name
 ```
 
 Function-valued bindings carry the explicit `fn` type marker, as in
@@ -2310,17 +2311,17 @@ spelling.
 Expression-bodied function:
 
 ```txt
-def greet(name Str) Str = "hello, " + name
+fn greet(name Str) Str = "hello, " + name
 ```
 
 Block-bodied function:
 
 ```txt
-def add(left Int, right Int) Int {
+fn add(left Int, right Int) Int {
     return left + right
 }
 
-def addWithEquals(left Int, right Int) Int = {
+fn addWithEquals(left Int, right Int) Int = {
     return left + right
 }
 ```
@@ -2332,19 +2333,19 @@ When the return type is omitted, the callable returns `Unit` regardless of its
 body spelling:
 
 ```txt
-def reset() {
+fn reset() {
     this.value := 0
 }
 
-private def addEmbeddingLine(lines [Str], label Str, value Str?) {
+private fn addEmbeddingLine(lines [Str], label Str, value Str?) {
     if let text <- value {
         lines.add(label + ": " + text)
     }
 }
 
-def announce() = println("ready")
+fn announce() = println("ready")
 
-def isMissing(value Int?) Bool = value is None
+fn isMissing(value Int?) Bool = value is None
 ```
 
 The compiler does not infer a named function or method's return type from its
@@ -2355,17 +2356,17 @@ does not enable return-type inference.
 
 ### Getters
 
-Methods use `def` and getters use `get`. A method always has a parameter list,
+Methods use `fn` and getters use `get`. A method always has a parameter list,
 including an empty `()`, while a getter has no parameter list:
 
 ```txt
-def coordinates() (Int, Int) = (x, y)  # method returning a tuple
+fn coordinates() (Int, Int) = (x, y)  # method returning a tuple
 get coordinates (Int, Int) = (x, y)    # getter returning a tuple
 
-def values() [Int] = items             # method returning a vector
+fn values() [Int] = items             # method returning a vector
 get values [Int] = items               # getter returning a vector
 
-def callback() fn() Int = action       # method returning a function
+fn callback() fn() Int = action       # method returning a function
 get callback fn() Int = action         # getter returning a function
 ```
 
@@ -2373,12 +2374,12 @@ get callback fn() Int = action         # getter returning a function
 
 - At the start of a member declaration inside a class, interface, object, or
   `ext` block, `get` always starts a getter.
-- `def get(...)` remains a method named `get`, because the declaration starts
-  with `def`.
+- `fn get(...)` remains a method named `get`, because the declaration starts
+  with `fn`.
 - A field cannot be named `get`. A field-shaped declaration such as
   `get Int = 1` reports `get starts a getter; a field cannot be named get`.
 - Everywhere else, including locals, parameters, named argument labels, method
-  names after `def`, member access after `.`, and pattern bindings, `get` is an
+  names after `fn`, member access after `.`, and pattern bindings, `get` is an
   ordinary identifier.
 
 Getters use the ordinary type grammar, including bracket collection shorthand
@@ -2400,7 +2401,7 @@ a method name begins a generic clause; after a getter name it is the return
 type:
 
 ```txt
-def map[T](value T) T = value          # generic method
+fn map[T](value T) T = value          # generic method
 get values [Int] = items               # getter returning Vector[Int]
 ```
 
@@ -2409,11 +2410,11 @@ insignificant. The formatter removes it and uses the touching form as canonical
 style:
 
 ```txt
-def calculate(input Int) Int = input
-def convert[T](input T) T = input
+fn calculate(input Int) Int = input
+fn convert[T](input T) T = input
 
-def calculate (input Int) Int = input  # valid; formats as calculate(...)
-def convert[T] (input T) T = input     # valid; formats as convert[T](...)
+fn calculate (input Int) Int = input  # valid; formats as calculate(...)
+fn convert[T] (input T) T = input     # valid; formats as convert[T](...)
 ```
 
 Getters are read through ordinary member access and still lower to
@@ -2445,7 +2446,7 @@ get summary Str = displayName + ": " + this.balance.toStr()
 
 Getter rules:
 
-- getters are declared with `get`; `def` always declares a method
+- getters are declared with `get`; `fn` always declares a method
 - getters require an explicit return type
 - getters cannot return `Unit`; use a method for behavior that does not produce
   a value
@@ -2480,24 +2481,24 @@ answer = Factory().creator() # read `creator`, then call the returned function
 Generic function:
 
 ```txt
-def id[T](value T) T = value
+fn id[T](value T) T = value
 ```
 
 Generic clauses:
 
 ```txt
-def identity[T](value T) T = value
+fn identity[T](value T) T = value
 
-def invoke[T with Callable](value T) Unit =
+fn invoke[T with Callable](value T) Unit =
     value.call()
 
 class Merger[L, R] {
-    def merge[when L = R]() L =
+    fn merge[when L = R]() L =
         ...
 }
 
 class Context[GlobalT, GlobalR] {
-    def something[
+    fn something[
         LocalT with Callable,
         LocalR
         when GlobalT with Callable,
@@ -2548,10 +2549,10 @@ value Str = left.merge()
 Reified generic functions and methods:
 
 ```txt
-def typeName[reified A](value A) Str =
+fn typeName[reified A](value A) Str =
     typeOf[A].name !
 
-def metadata[reified A]() Type[A] =
+fn metadata[reified A]() Type[A] =
     typeOf[A]
 
 name = typeName(User { name: "Ada" }) # A inferred from value
@@ -2719,7 +2720,7 @@ If every parameter has a default, the minimum is zero:
 | `(default, default)` | 0, 1, 2 |
 
 ```txt
-def connect(protocol Str = "https", host Str, port Int = 443) Connection = ...
+fn connect(protocol Str = "https", host Str, port Int = 443) Connection = ...
 
 connect("https", "example.com")
 connect("https", "example.com", 8443)
@@ -2750,23 +2751,31 @@ cannot supply fixed-arity inputs.
 A statically known shape can instead expand into named arguments:
 
 ```txt
-def report(value Str, error Int, amount Decimal) Unit
+fn report(value Str, error Int, amount Decimal) Unit
 
 options = { error: 6, amount: 11d }
 report(...{ value: "ready", error: 5, amount: 10d })
 report("ready", ...options)
 report("ready", 5, ...options)          # explicit error wins
 report("ready", error = 5, ...options)  # explicit named error wins
+report("ready", ...options, error = 5)  # same winner, different evaluation order
 ```
 
 For calls containing shape spreads:
 
-- Write positional inputs first, then explicit named inputs, then shape spreads.
+- Write positional inputs first. After the first named input or shape spread, explicit named inputs and shape spreads may be interleaved; no further positional inputs are allowed.
 - Explicit inputs take precedence over fields supplied by any spread. Duplicate explicit inputs are errors.
 - Two spreads supplying the same input conflict unless an explicit input chooses its value. Spread order never chooses a winner.
 - Every expanded field must name an accepted parameter. Ordinary defaults fill omitted parameters; missing required inputs remain errors.
 - Only named and anonymous shapes expand into named inputs, not classes, maps, `Any`, or unions. A function value without parameter names cannot accept named expansion.
 - Known parameter types supply context to fresh inline shape fields, including empty collections and contextual constructors.
+
+An explicit input resolves overlapping spreads regardless of where it appears:
+
+```txt
+report("ready", ...options, ...{ error: 8 }, error = 5)
+# Without the explicit error argument, the overlapping spreads are an error.
+```
 
 This expands function and method arguments, not positional constructor inputs.
 Named construction retains its existing spread syntax, such as `User { ...data }`.
@@ -2783,7 +2792,7 @@ Deferred work uses ordinary zero-argument function parameters. The caller
 explicitly supplies a function; the implementation explicitly invokes it:
 
 ```txt
-def twice(value fn() Int) Int =
+fn twice(value fn() Int) Int =
     value() + value()
 
 twice { => calculate() }
@@ -2796,9 +2805,9 @@ Reading a function parameter obtains the function itself; forwarding it does
 not invoke it:
 
 ```txt
-def inner(value fn() Int) Int = value()
+fn inner(value fn() Int) Int = value()
 
-def outer(value fn() Int) Int =
+fn outer(value fn() Int) Int =
     inner(value)
 ```
 
@@ -2806,7 +2815,7 @@ Callbacks are not memoized: invoking one twice executes its body twice. To
 evaluate it once, bind its result explicitly:
 
 ```txt
-def cached(value fn() Int) Int {
+fn cached(value fn() Int) Int {
     item = value()
     item + item
 }
@@ -2842,7 +2851,7 @@ extension block:
 ```txt
 class Counter {
     value Int
-    def inc() Int = this.value + 1
+    fn inc() Int = this.value + 1
 }
 ```
 
@@ -2851,7 +2860,7 @@ own implementation:
 
 ```txt
 ext Counter {
-    def doubled() Int = this.value * 2
+    fn doubled() Int = this.value * 2
 }
 
 counter = Counter { value: 3 }
@@ -2860,7 +2869,7 @@ println(counter.doubled())
 
 Extension rules:
 
-- extension blocks use `ext TypeName { def method(...) ... }`
+- extension blocks use `ext TypeName { fn method(...) ... }`
 - extension targets may be classes, shapes, declared unions, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
 - extension targets cannot be named objects, annotations, or individual union alternatives
 - extension blocks cannot declare constructors
@@ -2892,7 +2901,7 @@ interface Sized {
 mixin CollectionParts with Sized {
     get nonEmpty Bool = this.size > 0
 
-    def describe() Str =
+    fn describe() Str =
         if this.nonEmpty { "has elements" } else { "empty" }
 }
 
@@ -2937,7 +2946,7 @@ class Bag with Sized {
   chain. A mixin has no instance identity or runtime type metadata, and mixin
   declarations cannot be annotated.
 
-Interfaces contain only public `get` and `def` signatures, not stored fields,
+Interfaces contain only public `get` and `fn` signatures, not stored fields,
 constructors, nested declarations, or mixin adoption. Shared implementations
 belong in explicitly adopted mixins, or in extensions for helpers that do not
 supply class members.
@@ -3175,7 +3184,7 @@ Callable references can be passed where a function value is expected. They are
 eta-expanded to the same forwarding lambda you would otherwise write:
 
 ```txt
-def mapUser(user User) UserDto =
+fn mapUser(user User) UserDto =
     UserDto { id: user.id, name: user.name }
 
 dtos = users.map(mapUser)
@@ -3208,7 +3217,7 @@ field-versus-method precedence:
 class Amount {
     label Str
 
-    def label() Str = this.label  # invalid: field/method collision
+    fn label() Str = this.label  # invalid: field/method collision
 }
 ```
 
@@ -3228,8 +3237,8 @@ must remain. Missing context or multiple compatible overloads are ambiguous:
 
 ```txt
 class Formatter {
-    def render(value Int) Str = value.toStr()
-    def render(value Str) Str = value
+    fn render(value Int) Str = value.toStr()
+    fn render(value Str) Str = value
 }
 
 formatter = Formatter()
@@ -3390,7 +3399,7 @@ Rules:
 - block expressions evaluate to the value of their last statement
 - successive statements in a braced block must be separated by a newline; a
   closing `}` may immediately follow the final statement
-- named function and method block bodies may be written as `def name(...) { ... }` or `def name(...) = { ... }`; without an explicit return type, either form returns `Unit`
+- named function and method block bodies may be written as `fn name(...) { ... }` or `fn name(...) = { ... }`; without an explicit return type, either form returns `Unit`
 - if you want a block value, the last statement must be value-producing
 - value-producing tail forms include ordinary expressions, `if / else`, `match`, and `for ... yield`
 - blocks can nest arbitrarily
@@ -3402,12 +3411,12 @@ Class:
 ```txt
 class Box[T] with Named {
     value T
-    def label() Str = "box"
+    fn label() Str = "box"
 }
 ```
 
 When a class, shape, or named object implements an interface method inside
-its body, it uses an ordinary `def` method declaration.
+its body, it uses an ordinary `fn` method declaration.
 
 Named object:
 
@@ -3415,8 +3424,8 @@ Named object:
 object MathBox {
     value Int = 5
 
-    def valuePlusOne() Int = this.value + 1
-    def double(value Int) Int = value * 2
+    fn valuePlusOne() Int = this.value + 1
+    fn double(value Int) Int = value * 2
 }
 
 box = MathBox
@@ -3434,7 +3443,7 @@ value = object {
     count Int = 4
     label Str = "items"
 
-    def describe() Str = this.label + ": " + this.count.toStr()
+    fn describe() Str = this.label + ": " + this.count.toStr()
 }
 ```
 
@@ -3453,7 +3462,7 @@ To create an anonymous nominal interface implementation, use `object with`:
 greeter Greeter = object with Greeter {
     greeting Str = "hello"
 
-    def greet() Str = greeting
+    fn greet() Str = greeting
 }
 ```
 
@@ -3478,7 +3487,7 @@ class Amount with Named {
     value Int
     labelText Str
 
-    def label() Str = this.labelText
+    fn label() Str = this.labelText
 }
 ```
 
@@ -3487,14 +3496,14 @@ member-name namespace described in [Functions and Methods](#functions-and-method
 
 Interfaces:
 
-Interface instance members are method (`def`) and read-only getter (`get`)
+Interface instance members are method (`fn`) and read-only getter (`get`)
 signatures only. Interfaces cannot declare stored fields, field initializers,
 constructors, or member bodies. Nested type declarations remain declaration-scope
 organization, not instance storage.
 
 ```txt
 interface Named {
-    def label() Str
+    fn label() Str
 }
 ```
 
@@ -3517,10 +3526,10 @@ No forwarding `get id Int = this.id` declaration is required. The interface
 exposes only read access, even when the backing field is mutable. Mutating the
 field through its concrete type is visible through existing interface views.
 Private and internal fields do not satisfy the contract, and an ordinary
-zero-argument method such as `def id() Int` is not a getter implementation.
+zero-argument method such as `fn id() Int` is not a getter implementation.
 Classes, shapes, and named or anonymous objects may instead compute the value
 with an explicit getter. This choice belongs to the implementation, not the
-interface. A getter or stored field does not implement an ordinary `def` method.
+interface. A getter or stored field does not implement an ordinary `fn` method.
 See `examples/features/interface_getter_implementations.lum` for all three
 concrete declaration kinds and both implementation styles.
 
@@ -3532,8 +3541,8 @@ class Service with Readable, Writable {
 }
 
 value = object with Readable, Writable {
-    def read() Str = "value"
-    def write(value Str) Unit = ()
+    fn read() Str = "value"
+    fn write(value Str) Unit = ()
 }
 ```
 
@@ -3546,18 +3555,18 @@ and getter bodies in a mixin and adopt it explicitly:
 
 ```txt
 interface Named {
-    def label() Str
-    def greeting() Str
+    fn label() Str
+    fn greeting() Str
 }
 
 mixin Greetings with Named {
-    def greeting() Str = "Hello " + this.label()
+    fn greeting() Str = "Hello " + this.label()
 }
 
 class Box with Named {
     use Greetings
 
-    def label() Str = "box"
+    fn label() Str = "box"
 }
 ```
 
@@ -3565,8 +3574,8 @@ Anonymous interface implementation expressions:
 
 ```txt
 handler = object with Reader, Closer {
-    def read() Str = "x"
-    def close() Unit = ()
+    fn read() Str = "x"
+    fn close() Unit = ()
 }
 ```
 
@@ -3578,7 +3587,7 @@ type OptionX[T] =
     | object NoneX {}
 
 ext OptionX[T] {
-    def isSet() Bool = match this {
+    fn isSet() Bool = match this {
         case SomeX { value: _ } => true
         case NoneX => false
     }
@@ -3868,7 +3877,7 @@ point = {
     y: 20,
 }
 
-def process(
+fn process(
     name Str,
     amount Int,
 ) Unit {}
@@ -3892,8 +3901,8 @@ type:
 names [Str] = []                 # empty vector
 counts [Str: Int] = []          # empty map
 
-def emptyNames() [Str] = []
-def emptyCounts() [Str: Int] = []
+fn emptyNames() [Str] = []
+fn emptyCounts() [Str: Int] = []
 
 consumeNames([])                  # valid when the parameter is [Str]
 consumeCounts([])                 # valid when the parameter is [Str: Int]
@@ -4085,7 +4094,7 @@ are recognized. When the opposite branch exits, the positive narrowing remains
 available afterward:
 
 ```txt
-def size(value Any) Int {
+fn size(value Any) Int {
     if value is not Str {
         return 0
     }
@@ -4831,7 +4840,7 @@ The short form is an ordinary expression in initializers, expression-bodied
 callables, and block-tail positions:
 
 ```txt
-def names(users [User]) [Str] {
+fn names(users [User]) [Str] {
     for let { name } <- users yield name
 }
 ```
@@ -5742,8 +5751,6 @@ trailing zeroes; it does not recover decimal digits already lost in a float.
 `Decimal.toFloat()` may lose precision, underflow to zero, or overflow to infinity.
 Mixed arithmetic, ordering, equality, and assignments involving `Decimal` and
 `Int` or `Float` require explicit conversion. `Decimal(0.1)` is not a conversion.
-The mechanical default for a `Decimal` field in `default {}` is `0d`; a declared
-field initializer still takes precedence.
 
 `Json.decode[Decimal](text)` and `Json.stringify(value)` preserve decimal digits
 without an intermediate binary float, including decimal fields in models.
@@ -5870,13 +5877,13 @@ merged = {
 }
 ```
 
-Operator declarations use symbolic `def` forms on interfaces and classes. Shared
+Operator declarations use symbolic `fn` forms on interfaces and classes. Shared
 declared-union behavior belongs in an extension block on the union:
 
 ```txt
-def +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
-def -() Vec = Vec(-this[0], -this[1])
-def [](index Int) Int = this.items[index]
+fn +(other Vec) Vec = Vec(this[0] + other[0], this[1] + other[1])
+fn -() Vec = Vec(-this[0], -this[1])
+fn [](index Int) Int = this.items[index]
 ```
 
 Current operator overloading constraints:
@@ -5911,10 +5918,10 @@ Newline continuation:
 - Operators that require a right-hand expression may start that expression on
   the same line or the next indented line: `=`, `:=`, `+=`, `-=`, `*=`, `/=`,
   `%=`, and `<-`.
-- Named function and method declarations require `def` and have three accepted body forms:
-  - `def name(...) { ... }` for direct block bodies
-  - `def name(...) = { ... }` for expression-style block bodies
-  - `def name(...) = expr` for expression bodies
+- Named function and method declarations require `fn` and have three accepted body forms:
+  - `fn name(...) { ... }` for direct block bodies
+  - `fn name(...) = { ... }` for expression-style block bodies
+  - `fn name(...) = expr` for expression bodies
 - A named function or method without an explicit return type returns `Unit` in all three forms. Non-`Unit` return types are never inferred from named callable bodies.
 - Getter declarations begin with `get`, omit a parameter list, require a return type, and use the same block or expression body forms.
 - Constructor declarations begin with `new` and use the constructor body forms documented above.
@@ -5940,8 +5947,10 @@ else return
 a = 1 +
     2
 
-updated = user with
-    { age: 42 }
+updated = User {
+    ...user
+    age: 42
+}
 ```
 
 - but this is invalid:
@@ -5954,7 +5963,7 @@ a = 1
 - and this also stays valid:
 
 ```txt
-def value() Int =
+fn value() Int =
     1 + 2
 
 if flag {
@@ -5979,9 +5988,9 @@ external API and `internal` for declarations shared by files with the same
 `module` name:
 
 ```txt
-def normalize(value Str) Str = value.trim()       # source-file private
-internal def normalizeRecord(value Str) Str = ... # visible in this module
-public def parse(value Str) Result[Data, Str] = ...
+fn normalize(value Str) Str = value.trim()       # source-file private
+internal fn normalizeRecord(value Str) Str = ... # visible in this module
+public fn parse(value Str) Result[Data, Str] = ...
 ```
 
 This default applies to top-level functions, immutable bindings, annotations,
@@ -5999,8 +6008,8 @@ contains it.
 public class Client {
     private endpoint Str = "local"
 
-    def send(message Str) Unit = ...       # public
-    private def normalize(value Str) Str = ...
+    fn send(message Str) Unit = ...       # public
+    private fn normalize(value Str) Str = ...
 }
 ```
 

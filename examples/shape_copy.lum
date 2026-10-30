@@ -28,7 +28,7 @@ shape Batch {
     position Point
 }
 
-def main() Unit {
+fn main() Unit {
     value = Amount(10, "x")
     updated Amount = {
         ...value

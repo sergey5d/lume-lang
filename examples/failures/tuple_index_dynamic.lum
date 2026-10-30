@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*tuple index must be a compile-time integer literal.*
 
-def main() Unit {
+fn main() Unit {
     pair (Int, Str) = (1, "one")
     index Int = 0
     println(pair[index])

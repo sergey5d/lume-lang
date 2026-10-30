@@ -13,12 +13,12 @@ class User {
     name Str
 }
 
-def nestedTuple(pair (Int?, Str)) Int {
+fn nestedTuple(pair (Int?, Str)) Int {
     let (Some { value }, label) = pair else return -1
     value + label.size
 }
 
-def main() Unit {
+fn main() Unit {
     unknown Any = User("Ada")
 
     let User { name as letName } as letUser = unknown else return

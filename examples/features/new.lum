@@ -16,15 +16,15 @@ class Worker {
     age Int
 }
 
-def origin() Point = new {
+fn origin() Point = new {
     x: 0
     y: 0
 }
 
-def describe(worker Worker) Str =
+fn describe(worker Worker) Str =
     "${worker.name} ${worker.age}"
 
-def main() Unit {
+fn main() Unit {
     x = 1
     y = 2
     point Point = new { x, y }

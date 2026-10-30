@@ -20,7 +20,7 @@ class Profile {
     age Int
     city Str = "NYC"
 
-    def scoreValue() Int = this.score
+    fn scoreValue() Int = this.score
 }
 
 
@@ -29,7 +29,7 @@ class PrivateTail {
     level Int
     private bonus Int = 7
 
-    def bonusValue() Int = this.bonus
+    fn bonusValue() Int = this.bonus
 }
 
 
@@ -46,9 +46,9 @@ class A {
 
     new(maturity Int) = this(maturity - 15, "5")
 
-    def trueAge() Int = this.age
+    fn trueAge() Int = this.age
 
-    def trueName() Str = this.name
+    fn trueName() Str = this.name
 }
 
 
@@ -66,13 +66,13 @@ class B {
         this.questionable = 1
     }
 
-    def trueAge() Int = this.age
+    fn trueAge() Int = this.age
 
-    def trueName() Str = this.name
+    fn trueName() Str = this.name
 }
 
 
-def main() Unit {
+fn main() Unit {
     named Profile = Profile {
         name: "Sammy"
         age: 15

@@ -8,7 +8,7 @@
 class Person with Eq[Person] {
     name Str
 
-    def equals(other Person) Bool = this.name == other.name
+    fn equals(other Person) Bool = this.name == other.name
 }
 
 type Light =
@@ -19,7 +19,7 @@ object Marker {
     label Str = "marker"
 }
 
-def main() Unit {
+fn main() Unit {
     person = Person { name: "Ada" }
     otherPerson = Person { name: "Ada" }
     println("class", person.equals(otherPerson), person.toStr())

@@ -20,14 +20,14 @@ class Worker {
 }
 
 interface Printable {
-    def print() Str
+    fn print() Str
 }
 
 interface Reader {
-    def read() Str
+    fn read() Str
 }
 
-def main() Unit {
+fn main() Unit {
     point Point = {
         x: 10
         y: 20
@@ -40,10 +40,10 @@ def main() Unit {
     printable Printable = object with Printable {
         x Int = 10
 
-        def print() Str = "x=${this.x}"
+        fn print() Str = "x=${this.x}"
     }
     reader Reader = object with Reader {
-        def read() Str = "hello"
+        fn read() Str = "hello"
     }
     anonymous = new { x, y }
     empty {} = new {}

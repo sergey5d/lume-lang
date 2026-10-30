@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*function declarations require 'fn'.*
+
+main() Unit = ()

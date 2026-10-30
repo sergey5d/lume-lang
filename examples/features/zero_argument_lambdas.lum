@@ -6,35 +6,35 @@ module examples/zerolambdas
 class Counter {
     var calls Int = 0
 
-    def next() Int {
+    fn next() Int {
         calls += 1
         calls
     }
 
-    def tick() {
+    fn tick() {
         calls += 1
     }
 }
 
-def invoke(work fn() Int) Int = work()
+fn invoke(work fn() Int) Int = work()
 
-def twice(work fn() Int) Int = work() + work()
+fn twice(work fn() Int) Int = work() + work()
 
-def forward(work fn() Int) fn() Int = work
+fn forward(work fn() Int) fn() Int = work
 
-def factory(counter Counter) fn() Int = { => counter.next() }
+fn factory(counter Counter) fn() Int = { => counter.next() }
 
-def prepareFallback(counter Counter) fn() Int? {
+fn prepareFallback(counter Counter) fn() Int? {
     counter.tick()
     { => Some(counter.next()) }
 }
 
-def callbackReturn() Int {
+fn callbackReturn() Int {
     value = invoke { => return 40 }
     value + 2
 }
 
-def main() {
+fn main() {
     counter = Counter()
     work fn() Int = { => counter.next() }
     forwarded = forward(work)

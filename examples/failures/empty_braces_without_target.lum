@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*empty construction '\{\}' requires an expected concrete type.*
 
-def main() Unit {
+fn main() Unit {
     value = {}
 }

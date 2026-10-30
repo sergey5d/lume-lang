@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*cannot assign value of type 'Vector\[Int\]' to binding 'arbitrary' of type 'Vector\[Any\]'.*
 
-def main() Unit {
+fn main() Unit {
     integers [Int] = [1]
     arbitrary [Any] = integers
     arbitrary.add("wrong type")

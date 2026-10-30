@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*method declarations require 'def'.*
+# .*method declarations require 'fn'.*
 
 class Counter {
     value Int

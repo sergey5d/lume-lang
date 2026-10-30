@@ -16,7 +16,7 @@ shape Box {
     value Any
 }
 
-def main() Int {
+fn main() Int {
     user = User("Ada", 18)
     if let { age: 18 } = user {
         println("if record")

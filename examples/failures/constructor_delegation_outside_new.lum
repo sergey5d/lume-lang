@@ -8,10 +8,10 @@ class User {
         this.name = name
     }
 
-    def copy() User = this {
+    fn copy() User = this {
         name: this.name
     }
 }
 
 
-def main() Unit = ()
+fn main() Unit = ()

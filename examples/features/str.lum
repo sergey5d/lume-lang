@@ -6,7 +6,7 @@
 # 1 true
 # a# b22 a# b#
 
-def main() Unit {
+fn main() Unit {
     parts Vector[Str] = "  alpha, beta  ".trim().splitRegex("\s*,\s*")
     parts.add("gamma")
     println(parts[0], parts[1], parts[2])

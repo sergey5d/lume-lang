@@ -5,7 +5,7 @@
 # 4
 # 0
 
-def main() Int {
+fn main() Int {
     explicit Vector[Int] = Vector(1, 2, 3)
     shorthand [Int] = explicit
     explicitAgain Vector[Int] = shorthand

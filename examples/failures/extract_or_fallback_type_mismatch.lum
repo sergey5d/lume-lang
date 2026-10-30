@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*'\?\?' fallback has type 'Str' but extracted success value has type 'Int'.*
 
-def main() Int {
+fn main() Int {
     maybe Int? = None
     maybe ?? "missing"
 }

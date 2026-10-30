@@ -9,7 +9,7 @@ impl<'a> Parser<'a> {
             }
             match self.current_kind() {
                 TokenKind::Keyword(Keyword::Annotation)
-                | TokenKind::Keyword(Keyword::Def)
+                | TokenKind::Keyword(Keyword::Fn)
                 | TokenKind::Keyword(Keyword::Get)
                 | TokenKind::Keyword(Keyword::Type)
                 | TokenKind::Keyword(Keyword::Class)
@@ -701,9 +701,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Yield) => "YIELD",
             TokenKind::Keyword(Keyword::Continue) => "CONTINUE",
             TokenKind::Keyword(Keyword::Annotation) => "ANNOTATION",
-            TokenKind::Keyword(Keyword::Def) => "DEF",
             TokenKind::Keyword(Keyword::Get) => "GET",
-            TokenKind::Keyword(Keyword::Default) => "DEFAULT",
             TokenKind::Keyword(Keyword::Class) => "CLASS",
             TokenKind::Keyword(Keyword::Shape) => "SHAPE",
             TokenKind::Keyword(Keyword::Object) => "OBJECT",

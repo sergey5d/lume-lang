@@ -75,14 +75,14 @@ type Tagged =
     class Named { value Int }
     | object Unnamed {}
 
-def showSome(value Int?) Unit {
+fn showSome(value Int?) Unit {
     match value {
         case Some { value as item } => println("some", item)
         case None => ()
     }
 }
 
-def showResult(ok Result[Str, Str], err Result[Str, Str]) Unit {
+fn showResult(ok Result[Str, Str], err Result[Str, Str]) Unit {
     match ok {
         case Ok { value } => println("ok", value)
         case Err { error: _ } => ()
@@ -93,7 +93,7 @@ def showResult(ok Result[Str, Str], err Result[Str, Str]) Unit {
     }
 }
 
-def main() Int {
+fn main() Int {
     showSome(Some(5))
     showResult(Ok("ready"), Err("failed"))
 

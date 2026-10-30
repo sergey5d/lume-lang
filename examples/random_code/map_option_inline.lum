@@ -7,7 +7,7 @@ type MaybeInt =
     class SomeX { value Int }
     | object NoneX {}
 
-def main() Unit {
+fn main() Unit {
     values [MaybeInt] = [
         MaybeInt.SomeX(2),
         MaybeInt.NoneX,

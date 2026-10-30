@@ -29,27 +29,27 @@ share a name, so every result below is unspecified behaviour.
 
 ```txt
 interface Shape {
-    def area() Float
+    fn area() Float
 }
 
 ext Shape {
-    def describe() Str = "shape with area ${this.area()}"
-    def report() Str = "report: ${this.describe()}"
+    fn describe() Str = "shape with area ${this.area()}"
+    fn report() Str = "report: ${this.describe()}"
 }
 
 class Square with Shape {
     side Float
-    def area() Float = this.side * this.side
-    def describe() Str = "square"          # same name as the ext method
+    fn area() Float = this.side * this.side
+    fn describe() Str = "square"          # same name as the ext method
 }
 
 class Circle with Shape {
     radius Float
-    def area() Float = 3.0 * this.radius * this.radius
+    fn area() Float = 3.0 * this.radius * this.radius
 }
 
-def viaInterface(s Shape) Str = s.describe()
-def reportOf(s Shape) Str = s.report()
+fn viaInterface(s Shape) Str = s.describe()
+fn reportOf(s Shape) Str = s.report()
 ```
 
 Interpreter output:
@@ -73,20 +73,20 @@ marker, which is behaviour inheritance in all but name.
 
 ```txt
 interface Shape {
-    def area() Float
+    fn area() Float
 }
 
 ext Shape {
-    def describe() Str = "shape"
+    fn describe() Str = "shape"
 }
 
 class Square with Shape {
     side Float
-    def area() Float = this.side * this.side
-    def describe() Int = 42                # different return type
+    fn area() Float = this.side * this.side
+    fn describe() Int = 42                # different return type
 }
 
-def main() Unit {
+fn main() Unit {
     s Shape = Square { side: 1.0 }
     text Str = s.describe()                # typechecks as Str
     println(text.toUpper())
@@ -108,7 +108,7 @@ Using the same `Shape` and `ext Shape`:
 Circle { radius: 1.0 }.describe()
 # error[unknown_member]: type 'Circle' has no field or method 'describe'
 
-def viaGeneric[T with Shape](s T) Str = s.describe()
+fn viaGeneric[T with Shape](s T) Str = s.describe()
 # error[unknown_member]: type 'T' has no field or method 'describe'
 ```
 

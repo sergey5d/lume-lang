@@ -542,6 +542,7 @@ fn java_library_imports(
             names.dedup();
             ImportDecl {
                 path,
+                alias: None,
                 object_name: None,
                 wildcard: false,
                 symbols: names
@@ -2521,11 +2522,11 @@ class RuntimeBox {
 object Routes {
     health Str = "/health"
 
-    def healthPath() Str = this.health
+    fn healthPath() Str = this.health
 }
 
 interface Named {
-    def name() Str
+    fn name() Str
 }
 
 type Maybe[T] =
@@ -2536,7 +2537,7 @@ annotation Route {
     path Str
 }
 
-def main() Unit {
+fn main() Unit {
     println("hello")
 }
 "#,
@@ -2663,7 +2664,7 @@ def main() Unit {
             r#"
 module demo/args
 
-def main() Unit {
+fn main() Unit {
     received = OS.args
     received.add("local-only")
     fresh = OS.args
@@ -2738,7 +2739,7 @@ def main() Unit {
             r#"
 module demo/files
 
-def main() Unit {
+fn main() Unit {
     path = OS.args[0]
     println(File.readText(path)!.size)
 
@@ -2845,7 +2846,7 @@ module demo/app
 use common/{Shared}
 use feature/repo/{FeatureRepo}
 
-def main() Unit {
+fn main() Unit {
     repo FeatureRepo = FeatureRepo(Shared("ok"))
     println(repo.shared.name)
 }
@@ -2909,12 +2910,12 @@ public class FeatureRepo {
             r#"
 module demo/lazyoption
 
-def fail() Str {
+fn fail() Str {
     println("eager")
     "bad"
 }
 
-def main() Unit {
+fn main() Unit {
     maybe Option[Int] = Some(5)
     result Result[Int, Str] = maybe.toResult { => fail() }
     parsed Result[Int, Str] = Int.parse("7").toResult { => fail() }
@@ -2984,7 +2985,7 @@ def main() Unit {
             r#"
 module demo/predefparse
 
-def main() Unit {
+fn main() Unit {
     parsedInt Option[Int] = Int.parse("41")
     parsedFloat Option[Float] = Float.parse("1.5")
 
@@ -3040,7 +3041,7 @@ def main() Unit {
             r#"
 module demo/mapliteral
 
-def main() Unit {
+fn main() Unit {
     entries [Str: Int] = ["one": 1, "two": 2]
     copy [Str: Int] = [...entries]
     merged [Str: Int] = [...copy, "three": 3]
@@ -3085,14 +3086,14 @@ def main() Unit {
             r#"
 module demo/tupledestructuring
 
-def pick(flag Bool) (Int, Int) =
+fn pick(flag Bool) (Int, Int) =
     if flag {
         (1, 2)
     } else {
         (3, 4)
     }
 
-def main() Unit {
+fn main() Unit {
     let (left Int, right Int) = pick(true)
     println(left + right)
 
@@ -3162,7 +3163,7 @@ shape User {
     age Int
 }
 
-def main() Unit {
+fn main() Unit {
     user User = User { name: "Ada", age: 3 }
     let User { name as userName, age } as wholeUser = user
     var total Int = age + wholeUser.age
@@ -3234,7 +3235,7 @@ def main() Unit {
             r#"
 module demo/zipwithindex
 
-def main() Unit {
+fn main() Unit {
     values [Str] = ["first", "second"]
     for let (value Str, index Int) <- values.zipWithIndex() {
         println(index, value)
@@ -3304,7 +3305,7 @@ class Candidate {
     get name Str = label
 }
 
-def orderedCandidates(candidates [Candidate]) [Candidate] {
+fn orderedCandidates(candidates [Candidate]) [Candidate] {
     ordered [Candidate] = candidates.slice()
     ordered.sort((left, right) => right.confidence.compareTo(left.confidence))
     println(ordered[0].label, ordered[1].label, ordered[2].label)
@@ -3314,7 +3315,7 @@ def orderedCandidates(candidates [Candidate]) [Candidate] {
     ordered
 }
 
-def main() {
+fn main() {
     ordered = orderedCandidates([
         Candidate(0.5, 2, "low"),
         Candidate(0.9, 1, "high"),
@@ -3369,7 +3370,7 @@ def main() {
             r#"
 module demo/negativecomparison
 
-def main() Unit {
+fn main() Unit {
     value Float = -0.005
     println(value < 0.0)
 }
@@ -3420,7 +3421,7 @@ def main() Unit {
             r#"
 module demo/floatrendering
 
-def main() {
+fn main() {
     values [Float] = [
         0.0, -0.0, 1.0, -1.25,
         0.001, 0.0001, -0.0001,
@@ -3516,7 +3517,7 @@ def main() {
             r#"
 module demo/numericliterals
 
-def main() Unit {
+fn main() Unit {
     integer = 5_000_000_000
     fraction = 12.345_678
     tolerance = 1e-9
@@ -3589,21 +3590,21 @@ shape Point {
     y Int
 }
 
-def optionValue() Option[Int] = ^5
-def resultValue() Result[Str, Str] = Ok("ready")
-def eitherValue() Either[Str, Int] = Right(9)
-def nestedValue() Option[Option[Int]] = ^^11
-def pointValue() Point? = ^new(2, 3)
-def choose(flag Bool) Option[Int] = if flag { ^12 } else { ^0 }
-def consume(value Option[Int]) Int = value ?? 0
-def read(value Option[Int]) Int {
+fn optionValue() Option[Int] = ^5
+fn resultValue() Result[Str, Str] = Ok("ready")
+fn eitherValue() Either[Str, Int] = Right(9)
+fn nestedValue() Option[Option[Int]] = ^^11
+fn pointValue() Point? = ^new(2, 3)
+fn choose(flag Bool) Option[Int] = if flag { ^12 } else { ^0 }
+fn consume(value Option[Int]) Int = value ?? 0
+fn read(value Option[Int]) Int {
     let {
         ^item = value
     } else return 0
     item
 }
 
-def main() Unit {
+fn main() Unit {
     inferred = ^6
     println(optionValue()!)
     println(inferred!)
@@ -3668,11 +3669,11 @@ def main() Unit {
             r#"
 module demo/implicitunit
 
-def announce() = {
+fn announce() = {
     println("ok")
 }
 
-def main() Unit {
+fn main() Unit {
     announce()
 }
 "#,
@@ -3725,12 +3726,12 @@ type Maybe[T] =
     | class Some { value T }
 
 ext Maybe[T] {
-    def isDefined() Bool = match this {
+    fn isDefined() Bool = match this {
         case Some { value: _ } => true
         case None => false
     }
 
-    def unsafeValue() T = match this {
+    fn unsafeValue() T = match this {
         case Some { value } => value
         case None => panic("expected Maybe.Some")
     }
@@ -3766,20 +3767,20 @@ ext Maybe[T] {
             r#"
 module demo/readable
 
-def add(left Int, right Int) Int {
+fn add(left Int, right Int) Int {
     total Int = left + right
     total
 }
 
-def twice(value Int) Int = add(value, value)
+fn twice(value Int) Int = add(value, value)
 
-def choose(flag Bool) Int = if flag {
+fn choose(flag Bool) Int = if flag {
     10
 } else {
     20
 }
 
-def sumEven(limit Int) Int {
+fn sumEven(limit Int) Int {
     var total Int = 0
     var index Int = 0
     while index < limit {
@@ -3793,9 +3794,9 @@ def sumEven(limit Int) Int {
     total
 }
 
-def incrementer() fn(Int) Int = (value Int) => value + 1
+fn incrementer() fn(Int) Int = (value Int) => value + 1
 
-def classify(value Int) Int {
+fn classify(value Int) Int {
     var result Int = 0
     match value {
         case 1 => { result := 10 }
@@ -3804,7 +3805,7 @@ def classify(value Int) Int {
     result
 }
 
-def main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
+fn main() Int = twice(3) + choose(true) + sumEven(4) + classify(1)
 "#,
         )
         .expect("write source");
@@ -3882,9 +3883,9 @@ class Factory {
     get creator fn(Int) Int = (value Int) => value + 1
 }
 
-def read(item Item) Str = item.repeated
+fn read(item Item) Str = item.repeated
 
-def main() Unit {
+fn main() Unit {
     println(read(Item("Ada")))
     println(Factory().creator(5))
 }
@@ -3959,10 +3960,10 @@ class LabeledUser with Labeled {
     label Str
 }
 
-def readId(value Identified[Int]) Int = value.id
-def readLabel(value Labeled) Str = value.label
+fn readId(value Identified[Int]) Int = value.id
+fn readLabel(value Labeled) Str = value.label
 
-def main() Unit {
+fn main() Unit {
     println(readId(User(7, "Ada")))
     println(readId(Snapshot(8)))
     println(readLabel(LabeledUser("stored")))
@@ -4110,6 +4111,55 @@ def main() Unit {
     }
 
     #[test]
+    fn declared_defaults_and_default_identifiers_match_backends() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for (file, main_class) in [
+            ("declared_field_defaults.lum", "Declared_field_defaultsMain"),
+            ("default_identifier.lum", "Default_identifierMain"),
+        ] {
+            let source = root.join("examples/features").join(file);
+            let interpreted = run_path(&source, None).expect("run ordinary construction");
+            assert!(
+                interpreted.diagnostics.is_empty(),
+                "{file}: {:?}",
+                interpreted.diagnostics
+            );
+            if !command_available("javac") || !command_available("java") {
+                continue;
+            }
+            let temp = temp_path("lume-java-declared-defaults");
+            let out = temp.join("out");
+            let classes = temp.join("classes");
+            let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+            assert!(
+                generated.diagnostics.is_empty(),
+                "{file}: {:?}",
+                generated.diagnostics
+            );
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).unwrap();
+            fs::create_dir_all(&classes).unwrap();
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac ordinary construction",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg(main_class),
+                "java ordinary construction",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                interpreted.output,
+                "{file}"
+            );
+            let _ = fs::remove_dir_all(temp);
+        }
+    }
+
+    #[test]
     fn runs_shape_argument_spreads_on_java_and_interpreter() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let source = root.join("examples/features/shape_argument_spreads.lum");
@@ -4164,7 +4214,7 @@ def main() Unit {
             r#"
 module demo/for_loop
 
-def sum(items [Int]) Int {
+fn sum(items [Int]) Int {
     var total Int = 0
     for item <- items {
         total += item
@@ -4200,7 +4250,7 @@ def sum(items [Int]) Int {
             r#"
 module demo/grouped_for_loop
 
-def products(left [Int], right [Int]) [Int] {
+fn products(left [Int], right [Int]) [Int] {
     result [Int] = []
     for {
         x <- left
@@ -4244,7 +4294,7 @@ def products(left [Int], right [Int]) [Int] {
             r#"
 module demo/range_direction
 
-def main() Unit {
+fn main() Unit {
     var emptyCount = 0
     for _ <- Range(0, -1) {
         emptyCount += 1
@@ -4339,7 +4389,7 @@ class Account {
     private cache Int = 7
 }
 
-def account() Account = Account("Ada", 10)
+fn account() Account = Account("Ada", 10)
 "#,
         )
         .expect("write source");
@@ -4374,17 +4424,17 @@ module demo/calls
 
 use java/lang/StringBuilder
 
-def collect(values [Int] vararg) [Int] = values
+fn collect(values [Int] vararg) [Int] = values
 
-def forwarded(values [Int]) Int = collect(...values).size
+fn forwarded(values [Int]) Int = collect(...values).size
 
-def direct() Int = collect(1, 2, 3).size
+fn direct() Int = collect(1, 2, 3).size
 
-def typeName[reified T]() Str = typeOf[T].name ?? "?"
+fn typeName[reified T]() Str = typeOf[T].name ?? "?"
 
-def concreteTypeName() Str = typeName[Int]()
+fn concreteTypeName() Str = typeName[Int]()
 
-def inserted() Str {
+fn inserted() Str {
     builder StringBuilder = StringBuilder("bc")
     builder.insert(0, "a")
     builder.toStr()
@@ -4428,14 +4478,14 @@ def inserted() Str {
             r#"
 module demo/early
 
-def valueOrZero(value Option[Int]) Int {
+fn valueOrZero(value Option[Int]) Int {
     if let Some { value as item } = value {
         return item
     }
     0
 }
 
-def firstPositive(values [Int]) Int {
+fn firstPositive(values [Int]) Int {
     for value <- values {
         if value <= 0 {
             continue
@@ -4445,7 +4495,7 @@ def firstPositive(values [Int]) Int {
     0
 }
 
-def cached(values Map[Str, Int], key Str) Int {
+fn cached(values Map[Str, Int], key Str) Int {
     if let Some { value } = values.get(key) {
         return value
     }
@@ -4482,13 +4532,13 @@ def cached(values Map[Str, Int], key Str) Int {
 module demo/anonymousinterface
 
 interface Handler {
-    def handle(value Int) Int
+    fn handle(value Int) Int
 }
 
-def handler(offset Int) Handler = object with Handler {
+fn handler(offset Int) Handler = object with Handler {
     source Int = offset
 
-    def handle(value Int) Int {
+    fn handle(value Int) Int {
         if value > 0 {
             return value + source
         }
@@ -4609,10 +4659,10 @@ shape DefaultShape {
 }
 
 interface Printable {
-    def print() Str
+    fn print() Str
 }
 
-def main() Unit {
+fn main() Unit {
     point Point = { x: 10, y: 20 }
     x = 3
     y = 4
@@ -4623,7 +4673,6 @@ def main() Unit {
     anonymous = new { x, y }
     empty {} = new {}
     structural {} = {}
-    defaultedStructural {} = default {}
     positional { x Int, y Int } = new(1, 2)
     reversed { y Int, x Int } = new(3, 4)
     emptyWorker EmptyWorker = new {}
@@ -4634,16 +4683,23 @@ def main() Unit {
     callbackResult = { ...shapeCallback(), value: 4 }
     callback()
     widened Any = new { x, y }
-    defaults DefaultConfig = default {}
-    changed DefaultConfig = default { label: "changed" }
-    person DefaultShape = default {}
-    flags { enabled Bool, files [Str] } = default {}
+    defaults DefaultConfig = new {
+        enabled: false
+        retries: RetrySettings()
+        explicit: ExplicitSettings()
+        nested: NestedDefaults()
+        note: None
+        files: []
+    }
+    changed DefaultConfig = new { ...defaults, label: "changed" }
+    person DefaultShape = { family: "" }
+    flags { enabled Bool, files [Str] } = { enabled: false, files: [] }
     base = 10
     printable Printable = object with Printable {
         x Int = base
         y Int = 12
 
-        def print() Str = "${this.x}:${this.y}"
+        fn print() Str = "${this.x}:${this.y}"
     }
 
     println(point.x + point.y)
@@ -4715,8 +4771,6 @@ def main() Unit {
             module.contains("private final Long __field_y = 12L"),
             "{module}"
         );
-        assert!(module.contains("__LumeDefaultMarker.INSTANCE"), "{module}");
-
         let mut sources = core_runtime_sources();
         collect_java_sources(&out, &mut sources).expect("collect generated Java");
         fs::create_dir_all(&classes).expect("create classes dir");
@@ -4751,9 +4805,9 @@ def main() Unit {
             r#"
 module demo/block_lambda
 
-def apply(value Int, mapper fn(Int) Int) Int = mapper(value)
+fn apply(value Int, mapper fn(Int) Int) Int = mapper(value)
 
-def withOffset(offset Int) Int {
+fn withOffset(offset Int) Int {
     mapper fn(Int) Int = (value Int) => {
         doubled Int = value * 2
         doubled + offset
@@ -4761,7 +4815,7 @@ def withOffset(offset Int) Int {
     apply(3, mapper)
 }
 
-def main() Int = withOffset(4)
+fn main() Int = withOffset(4)
 "#,
         )
         .expect("write source");
@@ -4821,12 +4875,12 @@ def main() Int = withOffset(4)
             r#"
 module demo/nested_lambda_temporaries
 
-def succeed(value Int) Result[Int, Str] = Ok(value)
+fn succeed(value Int) Result[Int, Str] = Ok(value)
 
-def apply(value Int, mapper fn(Int) Result[Int, Str]) Result[Int, Str] =
+fn apply(value Int, mapper fn(Int) Result[Int, Str]) Result[Int, Str] =
     mapper(value)
 
-def calculate(value Int) Result[Int, Str] = {
+fn calculate(value Int) Result[Int, Str] = {
     outer Int = try succeed(value)
     apply(outer, current => {
         inner Int = try succeed(current + 1)
@@ -4834,7 +4888,7 @@ def calculate(value Int) Result[Int, Str] = {
     })
 }
 
-def main() Int = calculate(4) ?? 0
+fn main() Int = calculate(4) ?? 0
 "#,
         )
         .expect("write source");
@@ -4887,14 +4941,14 @@ def main() Int = calculate(4) ?? 0
             r#"
 module demo/let_conditions
 
-def positive(ready Bool, value Int?) Int {
+fn positive(ready Bool, value Int?) Int {
     if ready && let Some { value as item } = value && item > 0 {
         return item
     }
     0
 }
 
-def sum(items [Int]) Int {
+fn sum(items [Int]) Int {
     var index Int = 0
     var total Int = 0
     while let item <- items.at(index) && item < 4 {
@@ -4904,7 +4958,7 @@ def sum(items [Int]) Int {
     total
 }
 
-def main() Int = positive(true, Some(2)) + sum([1, 2, 5])
+fn main() Int = positive(true, Some(2)) + sum([1, 2, 5])
 "#,
         )
         .expect("write source");
@@ -4958,26 +5012,26 @@ def main() Int = positive(true, Some(2)) + sum([1, 2, 5])
             r#"
 module demo/callbacks
 
-def fallback() Int {
+fn fallback() Int {
     println("fallback")
     9
 }
 
-def choose(useFallback Bool, value fn() Int) Int =
+fn choose(useFallback Bool, value fn() Int) Int =
     if useFallback { value() } else { 5 }
 
-def forward(useFallback Bool, value fn() Int) Int =
+fn forward(useFallback Bool, value fn() Int) Int =
     choose(useFallback, value)
 
-def direct(useFallback Bool) Int =
+fn direct(useFallback Bool) Int =
     forward(useFallback, { => fallback() })
 
-def optionValue() Int {
+fn optionValue() Int {
     present Int? = Some(3)
     present ?? fallback()
 }
 
-def main() Unit {
+fn main() Unit {
     println(direct(false))
     println(direct(true))
     println(optionValue())
@@ -5038,12 +5092,12 @@ def main() Unit {
             r#"
 module demo/let_else
 
-def explicit(value Int?) Int {
+fn explicit(value Int?) Int {
     let Some { value as item } = value else return 0
     item
 }
 
-def pair(left Int?, right Int?) Int {
+fn pair(left Int?, right Int?) Int {
     let {
         a <- left
         b <- right
@@ -5051,7 +5105,7 @@ def pair(left Int?, right Int?) Int {
     a + b
 }
 
-def prefix(values [Int?]) Int {
+fn prefix(values [Int?]) Int {
     var total Int = 0
     for value <- values {
         let item <- value else break
@@ -5060,17 +5114,17 @@ def prefix(values [Int?]) Int {
     total
 }
 
-def scalarFallback(value Int?) Int {
+fn scalarFallback(value Int?) Int {
     let item <- value else 7
     item
 }
 
-def tupleFallback(value Option[(Int, Int)]) Int {
+fn tupleFallback(value Option[(Int, Int)]) Int {
     let Some { value as pair } = value else (5, 6)
     pair[0] + pair[1]
 }
 
-def shapeFallback(left Int?, right Int?) Int {
+fn shapeFallback(left Int?, right Int?) Int {
     let {
         a <- left
         b <- right
@@ -5081,7 +5135,7 @@ def shapeFallback(left Int?, right Int?) Int {
     a + b
 }
 
-def main() Int =
+fn main() Int =
     explicit(Some(4)) + pair(Some(2), Some(3)) + pair(Some(2), None) +
         prefix([Some(1), Some(2), None, Some(9)]) + scalarFallback(None) +
         tupleFallback(None) + shapeFallback(Some(99), None)
@@ -5138,17 +5192,17 @@ def main() Int =
             r#"
 module demo/extract_or
 
-def fallback(label Str, value Int) Int {
+fn fallback(label Str, value Int) Int {
     println(label)
     value
 }
 
-def increment(value Int?) Int? {
+fn increment(value Int?) Int? {
     present = value ?? return None
     Some(present + 1)
 }
 
-def main() Unit {
+fn main() Unit {
     some Int? = Some(5)
     none Int? = None
     ok Result[Int, Str] = Ok(7)
@@ -5212,15 +5266,15 @@ def main() Unit {
             r#"
 module demo/try_binding
 
-def parse(value Str) Result[Int, Str] =
+fn parse(value Str) Result[Int, Str] =
     if value == "4" { Ok(4) } else { Err("invalid Int: " + value) }
 
-def increment(value Str) Result[Int, Str] {
+fn increment(value Str) Result[Int, Str] {
     number Int = try parse(value)
     Ok(number + 1)
 }
 
-def main() Unit {
+fn main() Unit {
     println(increment("4") ?? 0)
     println(increment("bad").expectErr())
 }
@@ -5294,31 +5348,31 @@ type Choice =
     class First { value Int }
     | class Second { value Int }
 
-def succeed(value Int) Result[Int, Str] = Ok(value)
+fn succeed(value Int) Result[Int, Str] = Ok(value)
 
-def checked(value Int) Result[Bool, Str] = Ok(value > 0)
+fn checked(value Int) Result[Bool, Str] = Ok(value > 0)
 
-def choiceValue(choice Choice) Int = match choice {
+fn choiceValue(choice Choice) Int = match choice {
     case Choice.First { value } if value > 0 => value
     case Choice.First { value } => -value
     case Choice.Second { value } => value
 }
 
-def observe(value Option[Int]) Unit = {
+fn observe(value Option[Int]) Unit = {
     match value {
         case Some { value: _ } => ()
         case None => ()
     }
 }
 
-def captured(flag Bool, value Option[Int]) Int = {
+fn captured(flag Bool, value Option[Int]) Int = {
     let Some { value as item } = value else return 0
     selected Int = if flag { item } else if item > 0 { item + 1 } else { item - 1 }
     result Option[Int] = Some(0).map(_ => selected + item)
     result ?? 0
 }
 
-def compute(flag Bool) Result[Int, Str] = {
+fn compute(flag Bool) Result[Int, Str] = {
     box Box = Box(try succeed(4))
     let (left Int, right Int) = if flag { (box.value, 2) } else { (1, 3) }
     selected Int = if flag {
@@ -5337,7 +5391,7 @@ def compute(flag Bool) Result[Int, Str] = {
     if positive { Ok(total) } else { Ok(total + 10) }
 }
 
-def main() Unit = {
+fn main() Unit = {
     observe(None)
     println(compute(true) ?? 0)
     println(compute(false) ?? 0)
@@ -5399,10 +5453,10 @@ def main() Unit = {
 module demo/member_call
 
 interface Calculator {
-    def addOne(value Int) Int
+    fn addOne(value Int) Int
 }
 
-def through(calc Calculator, value Int) Int = calc.addOne(value)
+fn through(calc Calculator, value Int) Int = calc.addOne(value)
 "#,
         )
         .expect("write source");
@@ -5430,9 +5484,9 @@ def through(calc Calculator, value Int) Int = calc.addOne(value)
             r#"
 module demo/intrinsics
 
-def echo(value Int) Int = identity(value)
+fn echo(value Int) Int = identity(value)
 
-def report(value Int) Unit {
+fn report(value Int) Unit {
     println("value", value)
 }
 "#,
@@ -5467,7 +5521,7 @@ def report(value Int) Unit {
             r#"
 module demo/math
 
-def main() Unit {
+fn main() Unit {
     println(Math.min(-3, 8), Math.max(-3, 8))
     println(Math.min(1.25, 7.5), Math.max(1.25, 7.5))
     whole Int = 9
@@ -5653,7 +5707,7 @@ class Regex { value Str }
 class RegexMatch { value Int }
 shape RegexError { message Str }
 
-def main() {
+fn main() {
     pattern = Regex("local")
     hit = RegexMatch(3)
     error = RegexError("local")
@@ -5957,25 +6011,25 @@ class Dog {
 
 type Pet = Cat | Dog
 
-def pointX(point Point) Int = point.x
-def makePoint() Point = Point { y: 2, x: 1 }
-def at(values [Int], index Int) Int = values[index]
-def isText(value Any) Bool = value is Str
-def pair() (Int, Str) = (1, "one")
-def mapping() [Str: Int] = ["one": 1]
-def required(value Int?) Int = value!
-def text(value Int) Str = value.toStr()
-def widen(value Int) Any = Any(value)
-def describe(value Int) Str = match value {
+fn pointX(point Point) Int = point.x
+fn makePoint() Point = Point { y: 2, x: 1 }
+fn at(values [Int], index Int) Int = values[index]
+fn isText(value Any) Bool = value is Str
+fn pair() (Int, Str) = (1, "one")
+fn mapping() [Str: Int] = ["one": 1]
+fn required(value Int?) Int = value!
+fn text(value Int) Str = value.toStr()
+fn widen(value Int) Any = Any(value)
+fn describe(value Int) Str = match value {
     case -1 => "missing"
     case 0 => "zero"
     case _ as other => other.toStr()
 }
-def optionValue(value Int?) Int = match value {
+fn optionValue(value Int?) Int = match value {
     case Some { value as item } => item
     case None => 0
 }
-def petName(value Pet) Str = match value {
+fn petName(value Pet) Str = match value {
     case Cat { name } => name
     case Dog { name } => name
 }
@@ -6047,12 +6101,12 @@ def petName(value Pet) Str = match value {
             r#"
 module demo/extract
 
-def length(maybe Option[Str]) Int {
+fn length(maybe Option[Str]) Int {
     let Some { value as text } = maybe else return 0
     text.size
 }
 
-def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
+fn keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
     let Ok { value } = result else return result
     Ok(value)
 }
@@ -6153,7 +6207,7 @@ def keepUnit(result Result[Unit, Str]) Result[Unit, Str] {
         let source = temp.join("broken.lum");
         let out = temp.join("out");
         fs::create_dir_all(&temp).expect("create temp dir");
-        fs::write(&source, "def main() { missing() }").expect("write source");
+        fs::write(&source, "fn main() { missing() }").expect("write source");
 
         let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
 
@@ -6183,7 +6237,7 @@ class Event {
     duration JDuration
 }
 
-def main() Unit {
+fn main() Unit {
 }
 "#,
         )
@@ -6217,9 +6271,9 @@ module demo/builder
 
 use java/lang/StringBuilder
 
-def text() Str = "value"
+fn text() Str = "value"
 
-def main() Unit {
+fn main() Unit {
     builder StringBuilder = StringBuilder()
     builder.append(text())
     println(builder.toStr())
@@ -6270,7 +6324,7 @@ class Holder {
     list ArrayList[Str]
 }
 
-def main() Unit {
+fn main() Unit {
 }
 "#,
         )
@@ -6345,7 +6399,7 @@ module demo/javasigs
 
 use third/party/{Widget, GenericBox}
 
-def main() Unit {
+fn main() Unit {
     widget Widget = Widget("Ada", 7)
     label Str = widget.label()
     count Int = widget.count()
@@ -6429,7 +6483,7 @@ def main() Unit {
 module demo/lib
 
 public interface Binder {
-    def queryRow(sql Str, values [Any] vararg) Int
+    fn queryRow(sql Str, values [Any] vararg) Int
 }
 "#,
         )
@@ -6468,7 +6522,7 @@ use demo/lib/{Binder}
 class Client {
     binder Binder
 
-    def run(sub Str) Int {
+    fn run(sub Str) Int {
         this.binder.queryRow("select ?", sub)
     }
 }
@@ -6527,7 +6581,7 @@ module demo/javainherit
 
 use third/party/Router
 
-def main() Unit {
+fn main() Unit {
     router Router = Router()
     again Router = router.ping()
 }
@@ -6595,7 +6649,7 @@ module demo/javamismatch
 
 use third/party/Widget
 
-def main() Unit {
+fn main() Unit {
     widget Widget = Widget(5, "bad")
 }
 "#,
@@ -6641,7 +6695,7 @@ module demo/javamissingmethod
 
 use third/party/Widget
 
-def main() Unit {
+fn main() Unit {
     widget Widget = Widget("Ada", 7)
     widget.nope()
 }
@@ -6691,7 +6745,7 @@ class Holder {
     missing Missing
 }
 
-def main() Unit {
+fn main() Unit {
 }
 "#,
         )
@@ -6736,24 +6790,24 @@ module demo/typenarrowing
 class Worker {
     name Str
 
-    def label() Str = this.name
+    fn label() Str = this.name
 }
 
-def workerLabel(value Any) Str {
+fn workerLabel(value Any) Str {
     if value is not Worker {
         return "other"
     }
     value.label()
 }
 
-def directWorkerLabel(value Any) Str {
+fn directWorkerLabel(value Any) Str {
     if value is Worker {
         return value.label()
     }
     "other"
 }
 
-def main() Unit {
+fn main() Unit {
     println(workerLabel(Worker("Ada")))
     println(workerLabel("text"))
     println(directWorkerLabel(Worker("Bob")))
@@ -6829,7 +6883,7 @@ type Payload =
     class Item { value Int }
     | object Empty {}
 
-def describe(value Any) Str = match value {
+fn describe(value Any) Str = match value {
     case User {
         location as home
         age: 18
@@ -6838,60 +6892,60 @@ def describe(value Any) Str = match value {
     case _ => "other"
 }
 
-def describeSingleton(value Any) Str = match value {
+fn describeSingleton(value Any) Str = match value {
     case Ready => "ready"
     case _ as other => "other " + other.toStr()
 }
 
-def describeReview(value ReviewState) Str = match value {
+fn describeReview(value ReviewState) Str = match value {
     case Approved { label } => label
     case Rejected { label } => label
 }
 
-def describeMaybe(value Option[Int]) Str = match value {
+fn describeMaybe(value Option[Int]) Str = match value {
     case Some { value as item } as some => some.value.toStr() + " " + item.toStr()
     case None => "none"
 }
 
-def describeNoneAlias(value Option[Int]) Str = match value {
+fn describeNoneAlias(value Option[Int]) Str = match value {
     case Some { value: _ } => "error"
     case None as none => none.toStr()
 }
 
-def describePayload(value Payload) Str = match value {
+fn describePayload(value Payload) Str = match value {
     case Payload.Item { value as item } as whole => whole.value.toStr() + " " + item.toStr()
     case Payload.Empty => "empty"
 }
 
-def describeList(values [Int]) Str = match values {
+fn describeList(values [Int]) Str = match values {
     case [first, second, ...rest] as list =>
         first.toStr() + " " + second.toStr() + " " + rest.size.toStr() + " " + list.size.toStr()
     case _ => "short"
 }
 
-def describeArray(values Array[Int]) Str = match values {
+fn describeArray(values Array[Int]) Str = match values {
     case [first, second, ...rest] =>
         "array " + first + " " + second + " " + rest.size + " " + values[2]
     case _ => "short"
 }
 
-def leadingPair(values [Int]) Int {
+fn leadingPair(values [Int]) Int {
     let [first, second, ...] = values else return -1
     first + second
 }
 
-def leadingArrayPair(values Array[Int]) Int {
+fn leadingArrayPair(values Array[Int]) Int {
     let [first, second, ...] = values else return -1
     first + second
 }
 
-def arrayTail(values Array[Int]) [Int] {
+fn arrayTail(values Array[Int]) [Int] {
     let [_, ...rest] = values else return []
     rest.add(99)
     rest
 }
 
-def main() Unit {
+fn main() Unit {
     println(describe(User { name: "Ada", location: Location { city: "Tampa" }, age: 18 }))
     println(describe(User { name: "Bob", location: Location { city: "Miami" }, age: 19 }))
     println(describe("not a user"))
@@ -6988,10 +7042,10 @@ module demo/equality
 class Box with Eq[Box] {
     value Int
 
-    def equals(other Box) Bool = this.value == other.value
+    fn equals(other Box) Bool = this.value == other.value
 }
 
-def main() Unit {
+fn main() Unit {
     first = Box(1)
     alias = first
     separate = Box(1)
@@ -7044,6 +7098,138 @@ def main() Unit {
     }
 
     #[test]
+    fn runs_fn_declarations_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = root.join("examples/features/function_declarations.lum");
+        let interpreted = run_path(&source, None).expect("run fn declarations");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "fn declarations ok\n");
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let temp = temp_path("lume-java-fn-declarations");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:?}",
+            generated.diagnostics
+        );
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac fn declarations",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("Function_declarationsMain"),
+            "java fn declarations",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            interpreted.output
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn runs_module_aliases_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = root.join("examples/features/module_aliases.lum");
+        let interpreted = run_path(&source, None).expect("run module aliases");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "module aliases ok\n");
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let temp = temp_path("lume-java-module-aliases");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:?}",
+            generated.diagnostics
+        );
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac module aliases",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("Module_aliasesMain"),
+            "java module aliases",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            interpreted.output
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn runs_generic_transparent_aliases_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = root.join("examples/features/generic_type_aliases.lum");
+        let interpreted = run_path(&source, None).expect("run generic aliases");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "generic aliases ok\n");
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let temp = temp_path("lume-java-generic-aliases");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:?}",
+            generated.diagnostics
+        );
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac generic aliases",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("Generic_type_aliasesMain"),
+            "java generic aliases",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            interpreted.output
+        );
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn generated_java_runs_transparent_aliases_and_union_widening() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java union test because javac/java is not available");
@@ -7081,17 +7267,17 @@ shape Span {
     end Int
 }
 
-def describe(value Companion) Str = match value {
+fn describe(value Companion) Str = match value {
     case Cat { name } => "cat " + name
     case Dog { name } => "dog " + name
 }
 
-def widen(value Pet) Bird | Dog | Cat = value
+fn widen(value Pet) Bird | Dog | Cat = value
 
-def view() { name Str } = { name: "Milo" }
-def copyView(value { name Str }) { name Str } = value
+fn view() { name Str } = { name: "Milo" }
+fn copyView(value { name Str }) { name Str } = value
 
-def main() Unit {
+fn main() Unit {
     pet Companion = Cat("Milo")
     reordered Dog | Cat = pet
     widened Bird | Dog | Cat = reordered
@@ -7172,14 +7358,14 @@ type Outcome =
     | object Cancelled {}
 
 ext Outcome {
-    def result() Str = match this {
+    fn result() Str = match this {
         case Success { value } => value
         case Failure { message } => "Failed: " + message
         case Cancelled => "Cancelled"
     }
 }
 
-def main() Unit {
+fn main() Unit {
     success Outcome = Success { value: "Great" }
     failure Outcome = Failure { message: "nope" }
     cancelled Outcome = Cancelled
@@ -7259,32 +7445,32 @@ shape ReorderedPoint {
 class StableReference with Hashed[StableReference] {
     value Int
 
-    def equals(other StableReference) Bool = this.value == other.value
-    def hash() Int = this.value
+    fn equals(other StableReference) Bool = this.value == other.value
+    fn hash() Int = this.value
 }
 
 class Account with Eq[Account] {
     id Int
 
-    def equals(other Account) Bool = this.id == other.id
+    fn equals(other Account) Bool = this.id == other.id
 }
 
 interface Identified with Eq[Identified] {
-    def code() Int
+    fn code() Int
 }
 
 class Entry with Identified {
     value Int
 
-    def code() Int = this.value
-    def equals(other Identified) Bool = this.value == other.code()
+    fn code() Int = this.value
+    fn equals(other Identified) Bool = this.value == other.code()
 }
 
 class AlternateEntry with Identified {
     value Int
 
-    def code() Int = this.value
-    def equals(other Identified) Bool = this.value == other.code()
+    fn code() Int = this.value
+    fn equals(other Identified) Bool = this.value == other.code()
 }
 
 shape Box[T] {
@@ -7298,7 +7484,7 @@ shape PrivateEntry with Eq[PrivateEntry] {
     id Int
     private note Str = "hidden"
 
-    def equals(other PrivateEntry) Bool = this.id == other.id
+    fn equals(other PrivateEntry) Bool = this.id == other.id
 }
 
 shape PrivateHashKey with Hashed[PrivateHashKey] {
@@ -7306,11 +7492,11 @@ shape PrivateHashKey with Hashed[PrivateHashKey] {
     note Str
     private marker Int = 0
 
-    def equals(other PrivateHashKey) Bool = this.id == other.id
-    def hash() Int = this.id
+    fn equals(other PrivateHashKey) Bool = this.id == other.id
+    fn hash() Int = this.id
 }
 
-def main() Unit {
+fn main() Unit {
     x = 1
     label = "one"
     first = Point { x, label }
@@ -7468,7 +7654,7 @@ type LookupKey =
     class Number { value Int }
     | object Default {}
 
-def main() Unit {
+fn main() Unit {
     positions [(Int, Int): Str] = [(10, 20): "start"]
     println(positions[(10, 20)]!)
 
@@ -7535,7 +7721,7 @@ def main() Unit {
             r#"
 module demo/runarray
 
-def main() Int {
+fn main() Int {
     nul Rune = "\0".runeAt(0)!
     runes Array[Rune] = Array.fill(2, nul)
     0
@@ -7593,12 +7779,12 @@ def main() Int {
             r#"
 module demo/body
 
-def add(left Int, right Int) Int {
+fn add(left Int, right Int) Int {
     result Int = left + right
     result
 }
 
-def choose(flag Bool) Int {
+fn choose(flag Bool) Int {
     if flag {
         10
     } else {
@@ -7606,7 +7792,7 @@ def choose(flag Bool) Int {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     value Int = add(2, 3)
     println(value)
 }
@@ -7642,11 +7828,11 @@ def main() Unit {
             r#"
 module demo/tail_if_let_lambda
 
-def applyMaybe(work fn(Option[Int]) Result[Int, Str]) Result[Int, Str] {
+fn applyMaybe(work fn(Option[Int]) Result[Int, Str]) Result[Int, Str] {
     work(Some(5))
 }
 
-def main() Unit {
+fn main() Unit {
     result Result[Int, Str] = applyMaybe((existing Option[Int]) => {
         if let None = existing {
             Ok(0)
@@ -7702,13 +7888,13 @@ type Status =
     object Pending {}
     | object Complete {}
 
-def ok() Result[HttpResponse, HttpError] =
+fn ok() Result[HttpResponse, HttpError] =
     Ok({ body: "ok" })
 
-def err() Result[HttpResponse, HttpError] =
+fn err() Result[HttpResponse, HttpError] =
     Err({ status: 400, body: "bad" })
 
-def pending() Option[Status] =
+fn pending() Option[Status] =
     Some(Status.Pending)
 "#,
         )
@@ -7742,22 +7928,22 @@ module demo/object_reified
 
 object Cache {
 
-    def label(targetType Type[_]) Str =
+    fn label(targetType Type[_]) Str =
         targetType.name ?? "?"
 
-    def reifiedLabel[reified T]() Str =
+    fn reifiedLabel[reified T]() Str =
         typeOf[T].name ?? "?"
 }
 
 
 class Reader {
 
-    def read[reified T]() Str {
+    fn read[reified T]() Str {
         Cache.label(typeOf[T])
     }
 }
 
-def concrete() Str = Cache.reifiedLabel[Int]()
+fn concrete() Str = Cache.reifiedLabel[Int]()
 
 "#,
         )
@@ -7797,7 +7983,7 @@ module demo/object_field_init
 object Cache {
     private var values Map[Str, Str] = Map()
 
-    def remember(key Str, value Str) Unit {
+    fn remember(key Str, value Str) Unit {
         updated Map[Str, Str] = this.values.put(key, value)
         this.values := updated
     }
@@ -7838,7 +8024,7 @@ module demo/callbacks
 
 class Runner {
 
-    def call(value Int, mapper fn(Int) Result[Int, Str]) Result[Int, Str] {
+    fn call(value Int, mapper fn(Int) Result[Int, Str]) Result[Int, Str] {
         mapped Result[Int, Str] = mapper(value)
         match mapped {
             case Ok { value as item } => Ok(item)
@@ -7846,7 +8032,7 @@ class Runner {
         }
     }
 
-    def maybe(flag Bool) Result[Option[Int], Str] {
+    fn maybe(flag Bool) Result[Option[Int], Str] {
         if flag {
             Ok(Some(5))
         } else {
@@ -7894,10 +8080,10 @@ class Runner {
 module demo/constructors
 
 class Greeter {
-    def hello() Str = "hi"
+    fn hello() Str = "hi"
 }
 
-def main() Unit {
+fn main() Unit {
     greeter Greeter = Greeter()
     println(greeter.hello())
 }
@@ -7932,7 +8118,7 @@ module demo/nested
 class Namespace {
     shape Point { x Int }
     class Worker { name Str }
-    interface Reader { def read() Str }
+    interface Reader { fn read() Str }
     object Defaults { prefix Str = "worker:" }
     annotation Label { value Str }
     type Name = Str
@@ -7940,16 +8126,16 @@ class Namespace {
         class Present { value Name }
         | object Missing {}
 
-    def worker(name Str) Worker = Worker(name)
-    def outcome(name Name) Outcome = Outcome.Present(name)
+    fn worker(name Str) Worker = Worker(name)
+    fn outcome(name Name) Outcome = Outcome.Present(name)
 }
 
 class TextReader with Namespace.Reader {
-    def read() Str = "!"
+    fn read() Str = "!"
 }
 
 @Namespace.Label { value: "entry" }
-def run() Str {
+fn run() Str {
     namespace = Namespace()
     worker Namespace.Worker = namespace.worker("Ada")
     point Namespace.Point = Namespace.Point(7)
@@ -8010,7 +8196,7 @@ type Status =
     object Pending {}
     | class Done { label Str }
 
-def main() Unit {
+fn main() Unit {
     user User = User("Ada", 42)
 
     declared Type[User] = typeOf[User]
@@ -8108,7 +8294,7 @@ class Box[T] {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     set Set[Str] = new {}
     map Map[Str, Int] = Map[Str, Int]()
     inferred = Box("hello")
@@ -8185,7 +8371,7 @@ def main() Unit {
             r#"
 module demo/collectionflatmap
 
-def main() Unit {
+fn main() Unit {
     vector [Int] = [1, 2].flatMap(value => Some(value))
     setSource Set[Int] = Set()
     setSource.add(1)
@@ -8263,21 +8449,21 @@ shape Rollup {
     label Str
 }
 
-def source() StoredRollup? = Some(StoredRollup {
+fn source() StoredRollup? = Some(StoredRollup {
     total: 7
     label: "week"
     internalId: 99
 })
 
-def named() Rollup? = source().map(r => Rollup { ...r })
-def bareFields() Rollup? = source().map(r => { ...r })
-def implicitShape() Rollup? = source().map(r => { ...r })
-def contextualNew() Rollup? = source().map(r => new { ...r })
-def namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
-def bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
-def contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
+fn named() Rollup? = source().map(r => Rollup { ...r })
+fn bareFields() Rollup? = source().map(r => { ...r })
+fn implicitShape() Rollup? = source().map(r => { ...r })
+fn contextualNew() Rollup? = source().map(r => new { ...r })
+fn namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
+fn bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
+fn contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
 
-def main() Unit {
+fn main() Unit {
     println(named()!.total)
     println(bareFields()!.total)
     println(implicitShape()!.total)
@@ -8386,10 +8572,10 @@ shape Label {
     label Str
 }
 
-def view(point Point) Point = point
-def project(value Point3D | Label) Point | Label = value
+fn view(point Point) Point = point
+fn project(value Point3D | Label) Point | Label = value
 
-def main() Unit {
+fn main() Unit {
     first3d = Point3D(1, 2, 3)
     second3d = Point3D(1, 2, 99)
     first Point = view(first3d)
@@ -8500,7 +8686,7 @@ def main() Unit {
             r#"
 module demo/genericadd
 
-def mapItems[T](items [T], mapper fn(T) T) [T] {
+fn mapItems[T](items [T], mapper fn(T) T) [T] {
     out [T] = []
 
     for item <- items {
@@ -8510,7 +8696,7 @@ def mapItems[T](items [T], mapper fn(T) T) [T] {
     out
 }
 
-def main() Unit {
+fn main() Unit {
 }
 "#,
         )
@@ -8554,7 +8740,7 @@ def main() Unit {
             r#"
 module demo/vectorvocabulary
 
-def main() Unit {
+fn main() Unit {
     values = Vector(3, 1, 2)
     mapped = values.map(value => value * 10)
     filtered = values.filter(value => value > 1)
@@ -8626,12 +8812,12 @@ class HandlerService {
 
     get handlers [fn() Int] = stored
 
-    def echo[T](value T) T = value
+    fn echo[T](value T) T = value
 }
 
-def metadata[reified T]() Type[T] = typeOf[T]
+fn metadata[reified T]() Type[T] = typeOf[T]
 
-def main() Unit {
+fn main() Unit {
     handlers [fn() Int] = [() => 26]
     index = 0
     service = HandlerService(handlers)
@@ -8701,7 +8887,7 @@ shape User {
     cost Int
 }
 
-def main() Unit {
+fn main() Unit {
     users LinkedList[User] = LinkedList {}
     users.add(User { name: "Ada", cost: 3 })
     inserted Unit = users.insertAt(0, User { name: "Bob", cost: 2 }) !
@@ -8809,7 +8995,7 @@ def main() Unit {
             r##"
 module demo/stringmethods
 
-def main() Unit {
+fn main() Unit {
     literal Vector[Str] = "a.b".split(".")
     parts Vector[Str] = "  alpha, beta  ".trim().splitRegex("\s*,\s*")
     parts.add("gamma")
@@ -8926,35 +9112,35 @@ def main() Unit {
             r#"
 module demo/mapassignment
 
-def emptyMap() [Str: Int] = []
-def mapSize(values [Str: Int]) Int = values.size
+fn emptyMap() [Str: Int] = []
+fn mapSize(values [Str: Int]) Int = values.size
 
 class Cache {
     private var values [Str: Int] = []
 
     new() {}
 
-    def currentValue() Int = 7
+    fn currentValue() Int = 7
 
-    def empty() [Str: Int] = []
+    fn empty() [Str: Int] = []
 
-    def store(key Str) Unit {
+    fn store(key Str) Unit {
         values[key] := currentValue()
     }
 
-    def adjust(key Str) Unit {
+    fn adjust(key Str) Unit {
         values[key] += 5
         values[key] -= 2
     }
 
-    def reset() Unit {
+    fn reset() Unit {
         this.values := empty()
     }
 
-    def lookup(key Str) Int = values[key] ?? -1
+    fn lookup(key Str) Int = values[key] ?? -1
 }
 
-def main() Unit {
+fn main() Unit {
     cache = Cache()
     cache.store("answer")
     cache.adjust("answer")
@@ -9016,11 +9202,11 @@ def main() Unit {
             r#"
 module demo/higharity
 
-def apply7(f fn(Int, Int, Int, Int, Int, Int, Int) Int) Int {
+fn apply7(f fn(Int, Int, Int, Int, Int, Int, Int) Int) Int {
     f(1, 2, 3, 4, 5, 6, 7)
 }
 
-def main() Unit {
+fn main() Unit {
     total Int = apply7((a, b, c, d, e, g, h) => a + b + c + d + e + g + h)
     println(total)
 }
@@ -9111,14 +9297,14 @@ class Article {
 }
 
 class Client {
-    def connect(protocol Str = "https", host Str, port Int = 443) Str =
+    fn connect(protocol Str = "https", host Str, port Int = 443) Str =
         protocol + "://" + host + ":" + port.toStr()
 }
 
-def connect(protocol Str = "https", host Str, port Int = 443) Str =
+fn connect(protocol Str = "https", host Str, port Int = 443) Str =
     protocol + "://" + host + ":" + port.toStr()
 
-def main() Int {
+fn main() Int {
     x1 X1 = X1 { b: "one" }
     x2 X2 = X2("two")
     x3 X3 = X3 { a: "three", c: "four" }
@@ -9197,7 +9383,7 @@ module demo/argumentorder
 class Recorder {
     values [Int] = []
 
-    def mark(value Int) Int {
+    fn mark(value Int) Int {
         this.values.add(value)
         value
     }
@@ -9221,12 +9407,12 @@ class ExplicitPair {
 class Service {
     recorder Recorder
 
-    def send(request Int) Int {
+    fn send(request Int) Int {
         this.recorder.mark(3)
         request
     }
 
-    def combine(first Int, second Int) Int {
+    fn combine(first Int, second Int) Int {
         this.recorder.mark(4)
         first * 10 + second
     }
@@ -9235,22 +9421,22 @@ class Service {
 class Harness {
     recorder Recorder
 
-    def makeService() Service {
+    fn makeService() Service {
         this.recorder.mark(1)
         Service(this.recorder)
     }
 
-    def makeRequest() Int = this.recorder.mark(2)
+    fn makeRequest() Int = this.recorder.mark(2)
 }
 
-def combine(first Int, second Int) Int = first * 10 + second
+fn combine(first Int, second Int) Int = first * 10 + second
 
-def collect(prefix Int, values [Int] vararg) Int =
+fn collect(prefix Int, values [Int] vararg) Int =
     prefix + values.fold(0, (sum, value) => sum + value)
 
-def keep(first Int, second fn() Int) Int = first
+fn keep(first Int, second fn() Int) Int = first
 
-def main() Int {
+fn main() Int {
     callRecorder = Recorder {}
     combined = combine(
         second = callRecorder.mark(2),
@@ -9375,29 +9561,29 @@ class Holder {
 class Rank with Comparable[Rank] {
     value Int
 
-    def compareTo(other Rank) Int = value.compareTo(other.value)
+    fn compareTo(other Rank) Int = value.compareTo(other.value)
 }
 
 class GuardTracker {
     var calls Int = 0
 
-    def allowed() Bool {
+    fn allowed() Bool {
         this.calls += 1
         false
     }
 }
 
-def add(left Int, right Int) Int {
+fn add(left Int, right Int) Int {
     result Int = left + right
     result
 }
 
-def choose(tracker GuardTracker) Str = match (0, 0) {
+fn choose(tracker GuardTracker) Str = match (0, 0) {
     case (0, _) | (_, 0) if tracker.allowed() => "accepted"
     case _ => "rejected"
 }
 
-def main() Int {
+fn main() Int {
     value Int = add(2, 3)
     println(value)
 

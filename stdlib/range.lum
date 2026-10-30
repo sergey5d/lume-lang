@@ -2,7 +2,7 @@
 # JAVA_SKIP
 # INTERPRETER
 
-public def Range(start Int, end Int, step Int = 1) IntRange =
+public fn Range(start Int, end Int, step Int = 1) IntRange =
     panic("Range construction is provided by the active runtime")
 
 public class IntRange with Iterable[Int] {
@@ -10,9 +10,9 @@ public class IntRange with Iterable[Int] {
     end Int
     step Int
 
-    def iterator() Iterator[Int] = RangeIterator { start: this.start, end: this.end, step: this.step }
+    fn iterator() Iterator[Int] = RangeIterator { start: this.start, end: this.end, step: this.step }
 
-    def zip[X](other [X]) [(Int, X)] {
+    fn zip[X](other [X]) [(Int, X)] {
         out [(Int, X)] = []
         right Iterator[X] = other.iterator()
         for left <- this {
@@ -24,7 +24,7 @@ public class IntRange with Iterable[Int] {
         return out
     }
 
-    def zipWithIndex() [(Int, Int)] {
+    fn zipWithIndex() [(Int, Int)] {
         out [(Int, Int)] = []
         var index = 0
         for item <- this {
@@ -53,7 +53,7 @@ private class RangeIterator with Iterator[Int] {
         return this.current > this.end
     }
 
-    def next() Int {
+    fn next() Int {
         value Int = this.current
         this.current := this.current + this.step
         value

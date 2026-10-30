@@ -3,5 +3,5 @@
 # INTERPRETER
 
 public interface Comparable[T] {
-    def compareTo(other T) Int
+    fn compareTo(other T) Int
 }

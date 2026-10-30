@@ -4,10 +4,10 @@ public interface Counted {
     get count Int
 }
 
-def suffix() Str = " imported"
+fn suffix() Str = " imported"
 
 public mixin CountParts with Counted {
-    def summary() Str = this.count.toStr() + suffix()
+    fn summary() Str = this.count.toStr() + suffix()
 }
 
 private mixin PrivateParts {
@@ -15,7 +15,7 @@ private mixin PrivateParts {
 }
 
 internal mixin InternalParts with Counted {
-    def doubled() Int = this.count * 2
+    fn doubled() Int = this.count * 2
 }
 
 public class HiddenCounter with Counted {

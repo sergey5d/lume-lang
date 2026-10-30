@@ -8,66 +8,66 @@ interface Identified[T] {
 }
 
 interface Described[T] with Identified[T] {
-    def describe() Str
+    fn describe() Str
 }
 
 class FieldClass[T] with Described[T] {
     var id T
 
-    def describe() Str = "class field"
+    fn describe() Str = "class field"
 }
 
 class ImmutableFieldClass[T] with Described[T] {
     id T
 
-    def describe() Str = "immutable class field"
+    fn describe() Str = "immutable class field"
 }
 
 class ComputedClass with Described[Int] {
     value Int
 
     get id Int = this.value + 1
-    def describe() Str = "class getter"
+    fn describe() Str = "class getter"
 }
 
 shape FieldShape with Described[Int] {
     id Int
 
-    def describe() Str = "shape field"
+    fn describe() Str = "shape field"
 }
 
 shape ComputedShape with Described[Int] {
     value Int
 
     get id Int = this.value + 1
-    def describe() Str = "shape getter"
+    fn describe() Str = "shape getter"
 }
 
 object FieldObject with Described[Int] {
     id Int = 5
 
-    def describe() Str = "object field"
+    fn describe() Str = "object field"
 }
 
 object MutableFieldObject with Described[Int] {
     var id Int = 10
 
-    def describe() Str = "mutable object field"
+    fn describe() Str = "mutable object field"
 }
 
 object ComputedObject with Described[Int] {
     private value Int = 5
 
     get id Int = this.value + 1
-    def describe() Str = "object getter"
+    fn describe() Str = "object getter"
 }
 
-def verify(value Described[Int], expected Int) {
+fn verify(value Described[Int], expected Int) {
     assert(value.id == expected)
     assert(value.describe().nonEmpty)
 }
 
-def main() {
+fn main() {
     mutable = FieldClass(1)
     view Described[Int] = mutable
     verify(view, 1)
@@ -87,11 +87,11 @@ def main() {
     fieldObject Described[Int] = object with Described[Int] {
         id Int = 8
 
-        def describe() Str = "anonymous field"
+        fn describe() Str = "anonymous field"
     }
     computedObject Described[Int] = object with Described[Int] {
         get id Int = 9
-        def describe() Str = "anonymous getter"
+        fn describe() Str = "anonymous getter"
     }
     verify(fieldObject, 8)
     verify(computedObject, 9)

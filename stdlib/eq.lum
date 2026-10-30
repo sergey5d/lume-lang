@@ -3,10 +3,10 @@
 # INTERPRETER
 
 public interface Eq[T] {
-    def equals(other T) Bool
+    fn equals(other T) Bool
 }
 
 # Values whose equality is compatible with stable hashing.
 public interface Hashed[T] with Eq[T] {
-    def hash() Int
+    fn hash() Int
 }

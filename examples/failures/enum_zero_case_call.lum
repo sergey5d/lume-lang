@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*union variant 'None' does not accept call syntax; use 'None'.*
 
-def main() Unit {
+fn main() Unit {
     value Int? = None()
 }

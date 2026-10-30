@@ -10,7 +10,7 @@ public class Person {
 }
 
 
-def main() Unit {
+fn main() Unit {
     person = Person { name: "Ada", age: 36 }
     println(person.name)
     println(person.age)

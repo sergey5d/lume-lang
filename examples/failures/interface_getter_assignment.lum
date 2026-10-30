@@ -9,7 +9,7 @@ class User with Identified {
     var id Int
 }
 
-def main() {
+fn main() {
     user Identified = User(1)
     user.id := 2
 }

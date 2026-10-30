@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*cannot assign value of type.*y Int.*to binding 'point'.*z Int.*
 
-def main() Unit {
+fn main() Unit {
     x = 1
     y = 2
     point { x Int, z Int } = new { x, y }

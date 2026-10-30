@@ -12,7 +12,7 @@
 # tuple index 41 indexed
 # 0
 
-def main() Int {
+fn main() Int {
     let (a Int, b Str) = (5, "hehe")
     println("tuple", a, b)
 

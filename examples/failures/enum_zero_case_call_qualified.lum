@@ -5,6 +5,6 @@ type Signal =
     class Start { code Int }
     | object Stop {}
 
-def main() Unit {
+fn main() Unit {
     value Signal = Signal.Stop()
 }

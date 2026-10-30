@@ -10,7 +10,7 @@ shape User {
     name Str
 }
 
-def main() Unit {
+fn main() Unit {
     maybeUser User? = Some(User { name: "Ada" })
     println(maybeUser!.name)
 

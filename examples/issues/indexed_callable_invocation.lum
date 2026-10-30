@@ -14,13 +14,13 @@ class HandlerService {
 
     get handlers [fn() Int] = stored
 
-    def echo[T](value T) T = value
+    fn echo[T](value T) T = value
 }
 
-def metadata[reified T]() Type[T] =
+fn metadata[reified T]() Type[T] =
     typeOf[T]
 
-def main() Unit {
+fn main() Unit {
     handlers [fn() Int] = [() => 26]
     index = 0
     service = HandlerService(handlers)

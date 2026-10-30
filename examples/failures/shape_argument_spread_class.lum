@@ -2,7 +2,7 @@
 # .*call argument spread requires a statically known shape or a vector vararg value, got 'Options'.*
 
 class Options { value Int }
-def consume(value Int) {}
-def main() {
+fn consume(value Int) {}
+fn main() {
     consume(...Options(1))
 }

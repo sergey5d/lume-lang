@@ -111,16 +111,16 @@ Code that needs to recover uses the checked methods below.
 New `Int` members:
 
 ```txt
-def wrappingAdd(other Int) Int
-def wrappingSub(other Int) Int
-def wrappingMul(other Int) Int
-def wrappingNeg() Int
+fn wrappingAdd(other Int) Int
+fn wrappingSub(other Int) Int
+fn wrappingMul(other Int) Int
+fn wrappingNeg() Int
 ```
 
 Example:
 
 ```txt
-def hash() Int = this.name.hash().wrappingMul(31).wrappingAdd(this.age)
+fn hash() Int = this.name.hash().wrappingMul(31).wrappingAdd(this.age)
 ```
 
 The method name tells the reader that wrapping is intended. This is the same
@@ -130,10 +130,10 @@ implied.
 ### 3. Explicit checking, for recoverable overflow
 
 ```txt
-def checkedAdd(other Int) Option[Int]
-def checkedSub(other Int) Option[Int]
-def checkedMul(other Int) Option[Int]
-def checkedPow(exponent Int) Option[Int]
+fn checkedAdd(other Int) Option[Int]
+fn checkedSub(other Int) Option[Int]
+fn checkedMul(other Int) Option[Int]
+fn checkedPow(exponent Int) Option[Int]
 ```
 
 These return `None` on overflow, and also on a negative exponent for
@@ -231,14 +231,14 @@ handler that converts the exception. Routing `/` and `%` through
 Add the declarations to `interface Int`:
 
 ```txt
-def wrappingAdd(other Int) Int
-def wrappingSub(other Int) Int
-def wrappingMul(other Int) Int
-def wrappingNeg() Int
-def checkedAdd(other Int) Option[Int]
-def checkedSub(other Int) Option[Int]
-def checkedMul(other Int) Option[Int]
-def checkedPow(exponent Int) Option[Int]
+fn wrappingAdd(other Int) Int
+fn wrappingSub(other Int) Int
+fn wrappingMul(other Int) Int
+fn wrappingNeg() Int
+fn checkedAdd(other Int) Option[Int]
+fn checkedSub(other Int) Option[Int]
+fn checkedMul(other Int) Option[Int]
+fn checkedPow(exponent Int) Option[Int]
 ```
 
 Audit existing code for intentional wrapping. Only `stdlib/reference_id.lum:12`

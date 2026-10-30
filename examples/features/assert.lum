@@ -1,7 +1,7 @@
 # EXPECT:
 # ok
 
-def main() Unit {
+fn main() Unit {
     assert(true)
     assert(true, "positional message")
     assert(condition = true)

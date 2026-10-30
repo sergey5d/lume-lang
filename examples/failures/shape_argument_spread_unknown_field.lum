@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*callable has no parameter named 'typo'.*
 
-def consume(value Int) {}
-def main() {
+fn consume(value Int) {}
+fn main() {
     consume(...{ value: 1, typo: 2 })
 }

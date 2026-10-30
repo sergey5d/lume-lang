@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*top-level statements are not allowed.*
+
+def main() {}

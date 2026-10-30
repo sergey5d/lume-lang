@@ -20,27 +20,27 @@ private class Person with Named, Aged {
         this.archived = false
     }
 
-    private def calc() Int {
+    private fn calc() Int {
         this.firstName.size + this.lastName.size
     }
 
-    def fullName() Str = this.firstName + " " + this.lastName
+    fn fullName() Str = this.firstName + " " + this.lastName
 
-    def isAdult() Bool = this.age >= 18
+    fn isAdult() Bool = this.age >= 18
 
-    def moveTo(newCity Str) Unit {
+    fn moveTo(newCity Str) Unit {
         this.city := newCity
     }
 
-    def celebrateBirthday() Unit {
+    fn celebrateBirthday() Unit {
         this.age += 1
         this.internalScore += 10
     }
 
-    def archive() Unit {
+    fn archive() Unit {
         this.archived := true
     }
 
-    def debugLabel() Str =
+    fn debugLabel() Str =
         fullName() + "@" + this.city + ":" + this.age + ":" + this.internalScore + ":" + this.archived
 }

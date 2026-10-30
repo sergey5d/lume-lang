@@ -4,5 +4,5 @@ module use_support
 
 public class A {
 
-    def label() Str = "A"
+    fn label() Str = "A"
 }

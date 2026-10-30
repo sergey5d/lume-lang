@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*argument has type '.*' but parameter expects 'fn\(\).*
 
-def main() {
+fn main() {
     value Int? = None
     value.orElse(Some(1))
     value.toResult("missing")

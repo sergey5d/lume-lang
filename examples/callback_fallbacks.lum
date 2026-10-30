@@ -31,32 +31,32 @@
 # mapLeft left mapped
 
 # Callback factories are evaluated only on the missing/failure branch.
-def fallbackInt(label Str, value Int) Int {
+fn fallbackInt(label Str, value Int) Int {
     println(label)
     value
 }
 
-def fallbackStr(label Str, value Str) Str {
+fn fallbackStr(label Str, value Str) Str {
     println(label)
     value
 }
 
-def fallbackOption(label Str, value Int) Int? {
+fn fallbackOption(label Str, value Int) Int? {
     println(label)
     Some(value)
 }
 
-def fallbackResult(label Str, value Int) Result[Int, Str] {
+fn fallbackResult(label Str, value Int) Result[Int, Str] {
     println(label)
     Ok(value)
 }
 
-def fallbackEither(label Str, value Int) Either[Str, Int] {
+fn fallbackEither(label Str, value Int) Either[Str, Int] {
     println(label)
     Right(value)
 }
 
-def main() {
+fn main() {
     some Int? = Some(5)
     none Int? = None
     ok Result[Int, Str] = Ok(7)

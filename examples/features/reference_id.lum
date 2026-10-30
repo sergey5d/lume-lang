@@ -11,10 +11,10 @@
 class User with Eq[User] {
     id Int
 
-    def equals(other User) Bool = this.id == other.id
+    fn equals(other User) Bool = this.id == other.id
 }
 
-def main() Unit {
+fn main() Unit {
     first = User(7)
     second = User(7)
     alias = first

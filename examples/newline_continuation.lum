@@ -4,9 +4,9 @@
 # size 4
 # leading size 4
 # match 20
-# def 7
+# fn 7
 # split 5
-# split def 5
+# split fn 5
 # if 11
 # for 5
 # match stmt 9
@@ -22,14 +22,14 @@
 # lambda continuation 8 9
 # total 80
 
-def helper() Int =
+fn helper() Int =
     3 +
         4
 
-def splitValue() Int =
+fn splitValue() Int =
     5
 
-def main() Unit {
+fn main() Unit {
     split =
         5
 
@@ -169,9 +169,9 @@ def main() Unit {
     println("size", size)
     println("leading size", leadingSize)
     println("match", matched)
-    println("def", helperValue)
+    println("fn", helperValue)
     println("split", split)
-    println("split def", splitValue())
+    println("split fn", splitValue())
     println("if", fromIf)
     println("for", fromFor)
     println("match stmt", fromMatchStmt)

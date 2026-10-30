@@ -9,7 +9,7 @@ type UnsafeKey =
     class Wrapped { value MutableReference }
     | object Missing {}
 
-def main() Unit {
+fn main() Unit {
     key UnsafeKey = UnsafeKey.Wrapped(MutableReference(1))
     _ = [key: "value"]
 }

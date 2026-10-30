@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*expected expression.*
 
-def main() Unit {
+fn main() Unit {
     value Int = 1
         + 2
 }

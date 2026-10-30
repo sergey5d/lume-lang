@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # unknown_member at .*: type 'Int' has no field or method 'log'
 
-def main() Unit {
+fn main() Unit {
     value Int = 2
     println(value.log())
 }

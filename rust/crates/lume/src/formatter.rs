@@ -376,6 +376,12 @@ fn collect_program_rewrites(
                     rewrites,
                 );
                 collect_type_rewrites(&alias.target, tokens, rewrites);
+                collect_generic_rewrites(
+                    &alias.type_params,
+                    &alias.type_conditions,
+                    tokens,
+                    rewrites,
+                );
             }
         }
     }
@@ -1175,12 +1181,17 @@ fn should_write_horizontal_space(
         return false;
     };
 
-    if is_selective_import_line(tokens) {
-        if matches!(previous.kind, TokenKind::Slash | TokenKind::LBrace)
-            || matches!(current.kind, TokenKind::Slash | TokenKind::RBrace)
-        {
-            return false;
-        }
+    if tokens
+        .first()
+        .is_some_and(|token| token.kind == TokenKind::Keyword(Keyword::Use))
+        && (previous.kind == TokenKind::Slash || current.kind == TokenKind::Slash)
+    {
+        return false;
+    }
+    if is_selective_import_line(tokens)
+        && (previous.kind == TokenKind::LBrace || current.kind == TokenKind::RBrace)
+    {
+        return false;
     }
 
     if matches!(
@@ -1194,6 +1205,10 @@ fn should_write_horizontal_space(
         previous.kind,
         TokenKind::LParen | TokenKind::LBracket | TokenKind::Dot | TokenKind::Caret
     ) {
+        return false;
+    }
+
+    if current.kind == TokenKind::LParen && previous.kind == TokenKind::Keyword(Keyword::Fn) {
         return false;
     }
 
@@ -1455,46 +1470,46 @@ mod tests {
     #[test]
     fn canonicalizes_option_type_annotations() {
         assert_formatted(
-            "type MaybeId = Option[Int]\nshape Envelope {\nvalue Option[Str]\nget optionalValue Option[Str] = value\ndef echo(input Option[Int]) Option[Int] = input\n}\ndef keep[T](value T) T = value\ndef main() {\nvalues [Option[Int]] = [None]\nlocal Option[Int] = keep[Option[Int]](values[0])\nreader fn(Option[Int]) Option[Str] =\n(item Option[Int]) => None\nprintln(typeOf[Option[Int]])\n}\n",
-            "type MaybeId = Int?\nshape Envelope {\n    value Str?\n    get optionalValue Str? = value\n    def echo(input Int?) Int? = input\n}\ndef keep[T](value T) T = value\ndef main() {\n    values [Int?] = [None]\n    local Int? = keep[Int?](values[0])\n    reader fn(Int?) Str? =\n        (item Int?) => None\n    println(typeOf[Int?])\n}\n",
+            "type MaybeId = Option[Int]\nshape Envelope {\nvalue Option[Str]\nget optionalValue Option[Str] = value\nfn echo(input Option[Int]) Option[Int] = input\n}\nfn keep[T](value T) T = value\nfn main() {\nvalues [Option[Int]] = [None]\nlocal Option[Int] = keep[Option[Int]](values[0])\nreader fn(Option[Int]) Option[Str] =\n(item Option[Int]) => None\nprintln(typeOf[Option[Int]])\n}\n",
+            "type MaybeId = Int?\nshape Envelope {\n    value Str?\n    get optionalValue Str? = value\n    fn echo(input Int?) Int? = input\n}\nfn keep[T](value T) T = value\nfn main() {\n    values [Int?] = [None]\n    local Int? = keep[Int?](values[0])\n    reader fn(Int?) Str? =\n        (item Int?) => None\n    println(typeOf[Int?])\n}\n",
         );
     }
 
     #[test]
     fn canonicalizes_simple_extraction_bindings_to_extract_or() {
         assert_formatted(
-            "def parse(minutesText Str) Int? {\nlet minutes <- Int.parse(minutesText) else return None\nSome(minutes)\n}\ndef fallback(value Int?) Int {\nlet item <- value else 42\nitem\n}\ndef main() {\nfor value <- [Some(1), None] {\nlet item <- value else continue\nlet next <- value else break\nprintln(item, next)\n}\n}\n",
-            "def parse(minutesText Str) Int? {\n    minutes = Int.parse(minutesText) ?? return None\n    Some(minutes)\n}\ndef fallback(value Int?) Int {\n    item = value ?? 42\n    item\n}\ndef main() {\n    for value <- [Some(1), None] {\n        item = value ?? continue\n        next = value ?? break\n        println(item, next)\n    }\n}\n",
+            "fn parse(minutesText Str) Int? {\nlet minutes <- Int.parse(minutesText) else return None\nSome(minutes)\n}\nfn fallback(value Int?) Int {\nlet item <- value else 42\nitem\n}\nfn main() {\nfor value <- [Some(1), None] {\nlet item <- value else continue\nlet next <- value else break\nprintln(item, next)\n}\n}\n",
+            "fn parse(minutesText Str) Int? {\n    minutes = Int.parse(minutesText) ?? return None\n    Some(minutes)\n}\nfn fallback(value Int?) Int {\n    item = value ?? 42\n    item\n}\nfn main() {\n    for value <- [Some(1), None] {\n        item = value ?? continue\n        next = value ?? break\n        println(item, next)\n    }\n}\n",
         );
     }
 
     #[test]
     fn extraction_rewrites_preserve_comments_and_fallback_blocks() {
         assert_formatted(
-            "def parse(text Str) Int? {\nlet minutes <-\nInt.parse(text) # source comment\n# fallback comment\nelse return None # exit comment\nlet next <- Int.parse(text) else {\nprintln(\"missing\")\nreturn None\n}\nSome(minutes + next)\n}\n",
-            "def parse(text Str) Int? {\n    minutes =\n        Int.parse(text) ?? # source comment\n        # fallback comment\n        return None # exit comment\n    next = Int.parse(text) ?? {\n        println(\"missing\")\n        return None\n    }\n    Some(minutes + next)\n}\n",
+            "fn parse(text Str) Int? {\nlet minutes <-\nInt.parse(text) # source comment\n# fallback comment\nelse return None # exit comment\nlet next <- Int.parse(text) else {\nprintln(\"missing\")\nreturn None\n}\nSome(minutes + next)\n}\n",
+            "fn parse(text Str) Int? {\n    minutes =\n        Int.parse(text) ?? # source comment\n        # fallback comment\n        return None # exit comment\n    next = Int.parse(text) ?? {\n        println(\"missing\")\n        return None\n    }\n    Some(minutes + next)\n}\n",
         );
     }
 
     #[test]
     fn extraction_rewrites_keep_the_complete_source_expression() {
         assert_formatted(
-            "def nested(left Option[Int?], right Int?, ready Bool) Int {\nlet first <- left ?? right else return -1\nlet second <- if ready { right } else right else 2\nlet third <- for value <- right yield value + 1 else 3\nfirst + second + third\n}\n",
-            "def nested(left Option[Int?], right Int?, ready Bool) Int {\n    first = (left ?? right) ?? return -1\n    second = (if ready { right } else right) ?? 2\n    third = (for value <- right yield value + 1) ?? 3\n    first + second + third\n}\n",
+            "fn nested(left Option[Int?], right Int?, ready Bool) Int {\nlet first <- left ?? right else return -1\nlet second <- if ready { right } else right else 2\nlet third <- for value <- right yield value + 1 else 3\nfirst + second + third\n}\n",
+            "fn nested(left Option[Int?], right Int?, ready Bool) Int {\n    first = (left ?? right) ?? return -1\n    second = (if ready { right } else right) ?? 2\n    third = (for value <- right yield value + 1) ?? 3\n    first + second + third\n}\n",
         );
     }
 
     #[test]
     fn keeps_destructuring_typed_and_grouped_extractions_as_patterns() {
         assert_formatted(
-            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\nlet item Int <- value else return\nlet Some { value as item } = left else return\nlet (a, b) <- pair else return\nlet _ <- left else return\nlet {\nx <- left\ny <- right\n} else return\n}\n",
-            "type Pair = (Int, Int)\ndef patterns(value Int?, pair Pair?, left Int?, right Int?) {\n    let item Int <- value else return\n    let Some { value as item } = left else return\n    let (a, b) <- pair else return\n    let _ <- left else return\n    let {\n        x <- left\n        y <- right\n    } else return\n}\n",
+            "type Pair = (Int, Int)\nfn patterns(value Int?, pair Pair?, left Int?, right Int?) {\nlet item Int <- value else return\nlet Some { value as item } = left else return\nlet (a, b) <- pair else return\nlet _ <- left else return\nlet {\nx <- left\ny <- right\n} else return\n}\n",
+            "type Pair = (Int, Int)\nfn patterns(value Int?, pair Pair?, left Int?, right Int?) {\n    let item Int <- value else return\n    let Some { value as item } = left else return\n    let (a, b) <- pair else return\n    let _ <- left else return\n    let {\n        x <- left\n        y <- right\n    } else return\n}\n",
         );
     }
 
     #[test]
     fn rejects_parenthesized_unpacking_without_overwriting_source() {
-        let source = "def run(result Result[Int, Str]) {\nlet Ok(value) = result else return\nprintln(value)\n}\n";
+        let source = "fn run(result Result[Int, Str]) {\nlet Ok(value) = result else return\nprintln(value)\n}\n";
         let result = format(source);
         assert_eq!(result.text, source);
         assert!(
@@ -1504,39 +1519,39 @@ mod tests {
                 .any(|diagnostic| diagnostic.code == "parenthesized_pattern")
         );
         assert_formatted(
-            "def run(result Result[Int, Str]) {\nlet Ok { value } = result else return\nprintln(value)\n}\n",
-            "def run(result Result[Int, Str]) {\n    let Ok { value } = result else return\n    println(value)\n}\n",
+            "fn run(result Result[Int, Str]) {\nlet Ok { value } = result else return\nprintln(value)\n}\n",
+            "fn run(result Result[Int, Str]) {\n    let Ok { value } = result else return\n    println(value)\n}\n",
         );
     }
 
     #[test]
     fn extraction_rewrites_preserve_runtime_behavior() {
         let source = r#"
-def early(value Int?) Int {
+fn early(value Int?) Int {
     let item <- value else return -1
     item
 }
-def resultValue(value Result[Int, Str]) Int {
+fn resultValue(value Result[Int, Str]) Int {
     let item <- value else 42
     item
 }
-def eitherValue(value Either[Str, Int]) Int {
+fn eitherValue(value Either[Str, Int]) Int {
     let item <- value else 0
     item
 }
-def nested(left Option[Int?], right Int?) Int {
+fn nested(left Option[Int?], right Int?) Int {
     let item <- left ?? right else return -1
     item
 }
-def conditional(ready Bool, left Int?, right Int?) Int {
+fn conditional(ready Bool, left Int?, right Int?) Int {
     let item <- if ready { left } else right else 7
     item
 }
-def yielded(value Int?) Int {
+fn yielded(value Int?) Int {
     let item <- for number <- value yield number + 1 else 0
     item
 }
-def loops(values [Int?]) Int {
+fn loops(values [Int?]) Int {
     var total = 0
     for value <- values {
         let item <- value else continue
@@ -1548,7 +1563,7 @@ def loops(values [Int?]) Int {
     }
     total
 }
-def main() {
+fn main() {
     println(
         early(None), early(Some(5)), resultValue(Err("missing")),
         eitherValue(Right(3)), nested(Some(None), Some(9)),
@@ -1608,104 +1623,112 @@ def main() {
     #[test]
     fn optional_shorthand_preserves_comments_and_literal_text() {
         assert_formatted(
-            "# Option[Int] stays in this comment\ntype Multiline = Option[\nInt,\n]\ntype Commented = Option[\n# payload comment\nInt,\n]\ndef text() Str = \"Option[Int]\"\n",
-            "# Option[Int] stays in this comment\ntype Multiline = Int?\ntype Commented = Option[\n    # payload comment\n    Int,\n]\ndef text() Str = \"Option[Int]\"\n",
+            "# Option[Int] stays in this comment\ntype Multiline = Option[\nInt,\n]\ntype Commented = Option[\n# payload comment\nInt,\n]\nfn text() Str = \"Option[Int]\"\n",
+            "# Option[Int] stays in this comment\ntype Multiline = Int?\ntype Commented = Option[\n    # payload comment\n    Int,\n]\nfn text() Str = \"Option[Int]\"\n",
         );
     }
 
     #[test]
     fn optional_shorthand_does_not_rewrite_value_indexing() {
         assert_formatted(
-            "def main() {\nOption = [0]\nInt = 0\nhandlers = [() => 5]\nvalue Option[Str] = None\nprintln(handlers[Option[Int]]())\n}\n",
-            "def main() {\n    Option = [0]\n    Int = 0\n    handlers = [() => 5]\n    value Str? = None\n    println(handlers[Option[Int]]())\n}\n",
+            "fn main() {\nOption = [0]\nInt = 0\nhandlers = [() => 5]\nvalue Option[Str] = None\nprintln(handlers[Option[Int]]())\n}\n",
+            "fn main() {\n    Option = [0]\n    Int = 0\n    handlers = [() => 5]\n    value Str? = None\n    println(handlers[Option[Int]]())\n}\n",
         );
     }
 
     #[test]
     fn formats_blocks_continuations_and_trailing_whitespace() {
         let result = format(
-            "def main() Unit {\nprintln(\"start\")  \nvalue = 1 +\n2\nif true {\nprintln(value)\n}\n}\n",
+            "fn main() Unit {\nprintln(\"start\")  \nvalue = 1 +\n2\nif true {\nprintln(value)\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() {\n    println(\"start\")\n    value = 1 +\n        2\n    if true {\n        println(value)\n    }\n}\n"
+            "fn main() {\n    println(\"start\")\n    value = 1 +\n        2\n    if true {\n        println(value)\n    }\n}\n"
         );
     }
 
     #[test]
     fn canonicalizes_spaces_before_callable_parameter_lists() {
         let result = format(
-            "def calculate (input Int) Int = input\ndef identity[T] (input T) T = input\nclass Calculator {\ndef calculate (input Int) Int = input\ndef convert[T] () T = panic(\"missing\")\n}\n",
+            "fn calculate (input Int) Int = input\nfn identity[T] (input T) T = input\nclass Calculator {\nfn calculate (input Int) Int = input\nfn convert[T] () T = panic(\"missing\")\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def calculate(input Int) Int = input\ndef identity[T](input T) T = input\nclass Calculator {\n    def calculate(input Int) Int = input\n    def convert[T]() T = panic(\"missing\")\n}\n"
+            "fn calculate(input Int) Int = input\nfn identity[T](input T) T = input\nclass Calculator {\n    fn calculate(input Int) Int = input\n    fn convert[T]() T = panic(\"missing\")\n}\n"
+        );
+    }
+
+    #[test]
+    fn formats_fn_declarations_and_function_types() {
+        assert_formatted(
+            "interface Worker {\nfn start()\nfn status() Str\nfn callback() fn () Str\n}\nfn normalize (value Str) Str=value.trim()\nfn main() {\ncallback fn (Str) Str=normalize\n}\n",
+            "interface Worker {\n    fn start()\n    fn status() Str\n    fn callback() fn() Str\n}\nfn normalize(value Str) Str = value.trim()\nfn main() {\n    callback fn(Str) Str = normalize\n}\n",
         );
     }
 
     #[test]
     fn indentation_does_not_extend_an_unbraced_lambda() {
         let result = format(
-            "def main() Unit {\nmapper fn(Int) Int = value =>\n        value + 1\n        next = 2\nprintln(mapper(next))\n}\n",
+            "fn main() Unit {\nmapper fn(Int) Int = value =>\n        value + 1\n        next = 2\nprintln(mapper(next))\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() {\n    mapper fn(Int) Int = value =>\n        value + 1\n    next = 2\n    println(mapper(next))\n}\n"
+            "fn main() {\n    mapper fn(Int) Int = value =>\n        value + 1\n    next = 2\n    println(mapper(next))\n}\n"
         );
     }
 
     #[test]
     fn preserves_multiline_string_contents() {
         let result = format(
-            "def main() Unit {\n    text = \"\"\"first\n  second   \nthird\"\"\"\nprintln(text)\n}",
+            "fn main() Unit {\n    text = \"\"\"first\n  second   \nthird\"\"\"\nprintln(text)\n}",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() {\n    text = \"\"\"first\n  second   \nthird\"\"\"\n    println(text)\n}\n"
+            "fn main() {\n    text = \"\"\"first\n  second   \nthird\"\"\"\n    println(text)\n}\n"
         );
     }
 
     #[test]
     fn aligns_comma_separated_entries_and_closing_delimiters() {
         let result =
-            format("def main() Unit {\nvalues = [\n1,\n2\n]\npoint = {\nx: 1,\ny: 2\n}\n}\n");
+            format("fn main() Unit {\nvalues = [\n1,\n2\n]\npoint = {\nx: 1,\ny: 2\n}\n}\n");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() {\n    values = [\n        1,\n        2\n    ]\n    point = {\n        x: 1,\n        y: 2\n    }\n}\n"
+            "fn main() {\n    values = [\n        1,\n        2\n    ]\n    point = {\n        x: 1,\n        y: 2\n    }\n}\n"
         );
     }
 
     #[test]
     fn preserves_trailing_commas_in_multiline_lists() {
         let result = format(
-            "def combine(\nleft Int,\nright Int,\n) Int {\npair = (\nleft,\nright,\n)\npair[0] + pair[1]\n}\n",
+            "fn combine(\nleft Int,\nright Int,\n) Int {\npair = (\nleft,\nright,\n)\npair[0] + pair[1]\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def combine(\n    left Int,\n    right Int,\n) Int {\n    pair = (\n        left,\n        right,\n    )\n    pair[0] + pair[1]\n}\n"
+            "fn combine(\n    left Int,\n    right Int,\n) Int {\n    pair = (\n        left,\n        right,\n    )\n    pair[0] + pair[1]\n}\n"
         );
     }
 
     #[test]
     fn normalizes_map_type_colon_spacing() {
         let result =
-            format("def main() Unit {\nspaced [Str : Int] = []\ncompact [Str:Int] = []\n}\n");
+            format("fn main() Unit {\nspaced [Str : Int] = []\ncompact [Str:Int] = []\n}\n");
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() {\n    spaced [Str: Int] = []\n    compact [Str: Int] = []\n}\n"
+            "fn main() {\n    spaced [Str: Int] = []\n    compact [Str: Int] = []\n}\n"
         );
     }
 
     #[test]
     fn formats_mixin_adoption_and_generic_type_arguments() {
-        let source = "private mixin Parts[T] {\ndef keep(value Option[T]) Option[T] = value\n}\nclass Box {\nuse Parts[Option[Int]]\n}\n";
+        let source = "private mixin Parts[T] {\nfn keep(value Option[T]) Option[T] = value\n}\nclass Box {\nuse Parts[Option[Int]]\n}\n";
         let result = format(source);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert!(result.text.contains("mixin Parts[T]"));
@@ -1715,14 +1738,30 @@ def main() {
     }
 
     #[test]
+    fn formats_generic_transparent_aliases() {
+        assert_formatted(
+            "type Lookup[K with Hashed[K],V]=Map[K,Option[V]]\ntype Transform[A,B]=fn(A) Option[B]\n",
+            "type Lookup[K with Hashed[K], V] = Map[K, V?]\ntype Transform[A, B] = fn(A) B?\n",
+        );
+    }
+
+    #[test]
+    fn preserves_interleaved_named_argument_and_shape_spread_order() {
+        assert_formatted(
+            "fn main() {\nreport(\"ready\",...options(),error=mark(5),...more())\nreport(\n\"ready\",\n...options(),\nerror=mark(5),\n...more(),\namount=mark(11)\n)\n}\n",
+            "fn main() {\n    report(\"ready\", ...options(), error = mark(5), ...more())\n    report(\n        \"ready\",\n        ...options(),\n        error = mark(5),\n        ...more(),\n        amount = mark(11)\n    )\n}\n",
+        );
+    }
+
+    #[test]
     fn formats_zero_argument_braced_lambdas() {
         let result = format(
-            "def invoke(work fn() Int) Int = work()\ndef main() {\nwork fn() Int={=>\nfirst=1\nfirst + 2\n}\ninvoke {=>\nwork()\n}\ninvoke({=>4})\n}\n",
+            "fn invoke(work fn() Int) Int = work()\nfn main() {\nwork fn() Int={=>\nfirst=1\nfirst + 2\n}\ninvoke {=>\nwork()\n}\ninvoke({=>4})\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def invoke(work fn() Int) Int = work()\ndef main() {\n    work fn() Int = { =>\n        first = 1\n        first + 2\n    }\n    invoke { =>\n        work()\n    }\n    invoke({ => 4 })\n}\n"
+            "fn invoke(work fn() Int) Int = work()\nfn main() {\n    work fn() Int = { =>\n        first = 1\n        first + 2\n    }\n    invoke { =>\n        work()\n    }\n    invoke({ => 4 })\n}\n"
         );
         assert_eq!(format(&result.text).text, result.text);
     }
@@ -1730,60 +1769,68 @@ def main() {
     #[test]
     fn formats_nested_trailing_lambdas_inside_calls() {
         let result = format(
-            "class Aggregator {\nprivate def get_rollup(key Str, range IntRange?) Rollup? = {\ndef notInRange(record Record) = {\nlet r <- range else return false\nrecord.timestamp < r.start || record.timestamp >= r.end\n}\nmaybeRollup = rollupMap[key].map { records =>\nrecords.fold(Rollup(0, 0), (acc, record) => {\nif record.void || notInRange(record) {\nreturn acc\n}\nRollup {\ntotal: record.amount + acc.total\ncount: acc.count + 1\n}\n})\n}\nif let rollup <- maybeRollup && rollup.count == 0 {\nreturn None\n}\nreturn maybeRollup\n}\n}\n",
+            "class Aggregator {\nprivate fn get_rollup(key Str, range IntRange?) Rollup? = {\nfn notInRange(record Record) = {\nlet r <- range else return false\nrecord.timestamp < r.start || record.timestamp >= r.end\n}\nmaybeRollup = rollupMap[key].map { records =>\nrecords.fold(Rollup(0, 0), (acc, record) => {\nif record.void || notInRange(record) {\nreturn acc\n}\nRollup {\ntotal: record.amount + acc.total\ncount: acc.count + 1\n}\n})\n}\nif let rollup <- maybeRollup && rollup.count == 0 {\nreturn None\n}\nreturn maybeRollup\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "class Aggregator {\n    private def get_rollup(key Str, range IntRange?) Rollup? {\n        def notInRange(record Record) {\n            r = range ?? return false\n            record.timestamp < r.start || record.timestamp >= r.end\n        }\n        maybeRollup = rollupMap[key].map { records =>\n            records.fold(Rollup(0, 0), (acc, record) => {\n                if record.void || notInRange(record) {\n                    return acc\n                }\n                Rollup {\n                    total: record.amount + acc.total\n                    count: acc.count + 1\n                }\n            })\n        }\n        if let rollup <- maybeRollup && rollup.count == 0 {\n            return None\n        }\n        return maybeRollup\n    }\n}\n"
+            "class Aggregator {\n    private fn get_rollup(key Str, range IntRange?) Rollup? {\n        fn notInRange(record Record) {\n            r = range ?? return false\n            record.timestamp < r.start || record.timestamp >= r.end\n        }\n        maybeRollup = rollupMap[key].map { records =>\n            records.fold(Rollup(0, 0), (acc, record) => {\n                if record.void || notInRange(record) {\n                    return acc\n                }\n                Rollup {\n                    total: record.amount + acc.total\n                    count: acc.count + 1\n                }\n            })\n        }\n        if let rollup <- maybeRollup && rollup.count == 0 {\n            return None\n        }\n        return maybeRollup\n    }\n}\n"
         );
     }
 
     #[test]
     fn formats_braced_lambda_arguments_without_extra_call_indentation() {
         let result = format(
-            "class Aggregator {\ndef all_rollups(range IntRange? = None) [Str] {\nrollups = this.rollups(range)\nrollups.sort((x, y) => {\nxRollup = x[1]\nyRollup = y[1]\nif xRollup.total == yRollup.total {\nreturn x[0].compareTo(y[0])\n}\nreturn yRollup.total.compareTo(xRollup.total)\n})\nrollups.map(x => \"${x[0]}(${x[1].count},${x[1].total})\")\n}\n}\n",
+            "class Aggregator {\nfn all_rollups(range IntRange? = None) [Str] {\nrollups = this.rollups(range)\nrollups.sort((x, y) => {\nxRollup = x[1]\nyRollup = y[1]\nif xRollup.total == yRollup.total {\nreturn x[0].compareTo(y[0])\n}\nreturn yRollup.total.compareTo(xRollup.total)\n})\nrollups.map(x => \"${x[0]}(${x[1].count},${x[1].total})\")\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "class Aggregator {\n    def all_rollups(range IntRange? = None) [Str] {\n        rollups = this.rollups(range)\n        rollups.sort((x, y) => {\n            xRollup = x[1]\n            yRollup = y[1]\n            if xRollup.total == yRollup.total {\n                return x[0].compareTo(y[0])\n            }\n            return yRollup.total.compareTo(xRollup.total)\n        })\n        rollups.map(x => \"${x[0]}(${x[1].count},${x[1].total})\")\n    }\n}\n"
+            "class Aggregator {\n    fn all_rollups(range IntRange? = None) [Str] {\n        rollups = this.rollups(range)\n        rollups.sort((x, y) => {\n            xRollup = x[1]\n            yRollup = y[1]\n            if xRollup.total == yRollup.total {\n                return x[0].compareTo(y[0])\n            }\n            return yRollup.total.compareTo(xRollup.total)\n        })\n        rollups.map(x => \"${x[0]}(${x[1].count},${x[1].total})\")\n    }\n}\n"
         );
     }
 
     #[test]
     fn carries_expression_continuation_through_a_trailing_lambda() {
         let result = format(
-            "def readString(path Str) Result[Str, Str] =\nFile.readText(path).mapError { err =>\nfileErrorMessage(err)\n}\n",
+            "fn readString(path Str) Result[Str, Str] =\nFile.readText(path).mapError { err =>\nfileErrorMessage(err)\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def readString(path Str) Result[Str, Str] =\n    File.readText(path).mapError { err =>\n        fileErrorMessage(err)\n    }\n"
+            "fn readString(path Str) Result[Str, Str] =\n    File.readText(path).mapError { err =>\n        fileErrorMessage(err)\n    }\n"
         );
     }
 
     #[test]
     fn formats_import_wildcards_multiline_calls_and_grouped_for() {
         let result = format(
-            "use Models/*\nuse runtime/EventRuntime\n\nprivate def category(value Str?) Bool =\nEventRuntime.containsRegex(\nvalue ?? \"\",\nraw\"(?i)crypto\"\n)\n\ndef pairs(left [Int], right [Int]) Unit {\nfor {\nitem <- left\nother <- right\n} do {\nprintln(item, other)\n}\n}\n",
+            "use Models/*\nuse runtime/EventRuntime\n\nprivate fn category(value Str?) Bool =\nEventRuntime.containsRegex(\nvalue ?? \"\",\nraw\"(?i)crypto\"\n)\n\nfn pairs(left [Int], right [Int]) Unit {\nfor {\nitem <- left\nother <- right\n} do {\nprintln(item, other)\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "use Models/*\nuse runtime/EventRuntime\n\ndef category(value Str?) Bool =\n    EventRuntime.containsRegex(\n        value ?? \"\",\n        raw\"(?i)crypto\"\n    )\n\ndef pairs(left [Int], right [Int]) {\n    for {\n        item <- left\n        other <- right\n    } do {\n        println(item, other)\n    }\n}\n"
+            "use Models/*\nuse runtime/EventRuntime\n\nfn category(value Str?) Bool =\n    EventRuntime.containsRegex(\n        value ?? \"\",\n        raw\"(?i)crypto\"\n    )\n\nfn pairs(left [Int], right [Int]) {\n    for {\n        item <- left\n        other <- right\n    } do {\n        println(item, other)\n    }\n}\n"
         );
     }
 
     #[test]
     fn removes_only_visibility_modifiers_that_match_the_scope_default() {
         let result = format(
-            "private def helper() Unit {}\npublic def api() Unit {}\nprivate type Name = Str\nprivate class Hidden {\npublic value Int\nprivate secret Int\npublic get visible Int = value\npublic def read() Int = value\n}\n",
+            "private fn helper() Unit {}\npublic fn api() Unit {}\nprivate type Name = Str\nprivate class Hidden {\npublic value Int\nprivate secret Int\npublic get visible Int = value\npublic fn read() Int = value\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def helper() {}\npublic def api() {}\ntype Name = Str\nclass Hidden {\n    value Int\n    private secret Int\n    get visible Int = value\n    def read() Int = value\n}\n"
+            "fn helper() {}\npublic fn api() {}\ntype Name = Str\nclass Hidden {\n    value Int\n    private secret Int\n    get visible Int = value\n    fn read() Int = value\n}\n"
+        );
+    }
+
+    #[test]
+    fn preserves_whole_module_aliases() {
+        assert_formatted(
+            "use customers / storage  as  customerStore\nuse audit/storage as auditStore\nuse models/User as Customer\nfn main() {\ncustomerStore.load(1)\n}\n",
+            "use customers/storage as customerStore\nuse audit/storage as auditStore\nuse models/User as Customer\nfn main() {\n    customerStore.load(1)\n}\n",
         );
     }
 
@@ -1819,60 +1866,60 @@ def main() {
     #[test]
     fn formats_single_statement_grouped_for_body_without_extending_its_scope() {
         let result = format(
-            "def pairs(left [Int], right [Int]) Unit {\nfor {\nsource <- left\ntarget <- right\n} do\nif source != target {\nprintln(source, target)\n}\nprintln(\"done\")\n}\n",
+            "fn pairs(left [Int], right [Int]) Unit {\nfor {\nsource <- left\ntarget <- right\n} do\nif source != target {\nprintln(source, target)\n}\nprintln(\"done\")\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def pairs(left [Int], right [Int]) {\n    for {\n        source <- left\n        target <- right\n    } do\n        if source != target {\n            println(source, target)\n        }\n    println(\"done\")\n}\n"
+            "fn pairs(left [Int], right [Int]) {\n    for {\n        source <- left\n        target <- right\n    } do\n        if source != target {\n            println(source, target)\n        }\n    println(\"done\")\n}\n"
         );
     }
 
     #[test]
     fn formats_single_generator_do_bodies() {
         let result = format(
-            "def visit(values [Int]) Unit {\nfor value <- values do\nprintln(value)\nfor value <- values do {\nprintln(value)\n}\n}\n",
+            "fn visit(values [Int]) Unit {\nfor value <- values do\nprintln(value)\nfor value <- values do {\nprintln(value)\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def visit(values [Int]) {\n    for value <- values do\n        println(value)\n    for value <- values do {\n        println(value)\n    }\n}\n"
+            "fn visit(values [Int]) {\n    for value <- values do\n        println(value)\n    for value <- values do {\n        println(value)\n    }\n}\n"
         );
     }
 
     #[test]
     fn inline_record_argument_does_not_consume_lambda_indentation() {
         let result = format(
-            "def main() Unit {\nargs { verbose Bool, help Bool }=\nOS.args.fold({verbose: false, help : false}, (acc, arg) => {\nif arg == \"--verbose\" {\n{...acc, verbose: true}\n} else if arg == \"--help\" {\n{...acc, help: true}\n} else {\nacc\n}\n})\n}\n",
+            "fn main() Unit {\nargs { verbose Bool, help Bool }=\nOS.args.fold({verbose: false, help : false}, (acc, arg) => {\nif arg == \"--verbose\" {\n{...acc, verbose: true}\n} else if arg == \"--help\" {\n{...acc, help: true}\n} else {\nacc\n}\n})\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "def main() {\n    args { verbose Bool, help Bool } =\n        OS.args.fold({ verbose: false, help: false }, (acc, arg) => {\n            if arg == \"--verbose\" {\n                { ...acc, verbose: true }\n            } else if arg == \"--help\" {\n                { ...acc, help: true }\n            } else {\n                acc\n            }\n        })\n}\n"
+            "fn main() {\n    args { verbose Bool, help Bool } =\n        OS.args.fold({ verbose: false, help: false }, (acc, arg) => {\n            if arg == \"--verbose\" {\n                { ...acc, verbose: true }\n            } else if arg == \"--help\" {\n                { ...acc, help: true }\n            } else {\n                acc\n            }\n        })\n}\n"
         );
     }
 
     #[test]
     fn normalizes_horizontal_spacing_without_changing_literals_or_comments() {
         let result = format(
-            "class Aggregator {\nprivate rollupMap [Str :  [Record]] = []\nprivate  recordMap [Str: Record] = []\nget coordinates  (Int, Int) = ( 1, 2 )\ndef label() Str {\nmessage  =  \"keep  spaces\" # keep  comment spacing\nprintln( \"kind\", message )\nmessage\n}\n}\n",
+            "class Aggregator {\nprivate rollupMap [Str :  [Record]] = []\nprivate  recordMap [Str: Record] = []\nget coordinates  (Int, Int) = ( 1, 2 )\nfn label() Str {\nmessage  =  \"keep  spaces\" # keep  comment spacing\nprintln( \"kind\", message )\nmessage\n}\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "class Aggregator {\n    private rollupMap [Str: [Record]] = []\n    private recordMap [Str: Record] = []\n    get coordinates (Int, Int) = (1, 2)\n    def label() Str {\n        message = \"keep  spaces\" # keep  comment spacing\n        println(\"kind\", message)\n        message\n    }\n}\n"
+            "class Aggregator {\n    private rollupMap [Str: [Record]] = []\n    private recordMap [Str: Record] = []\n    get coordinates (Int, Int) = (1, 2)\n    fn label() Str {\n        message = \"keep  spaces\" # keep  comment spacing\n        println(\"kind\", message)\n        message\n    }\n}\n"
         );
     }
 
     #[test]
     fn preserves_equals_before_assignment_style_callable_body() {
         let result = format(
-            "class Counter {\nprivate var value Int = 0\ndef reset() Unit =\nthis.value := 0\n}\n",
+            "class Counter {\nprivate var value Int = 0\nfn reset() Unit =\nthis.value := 0\n}\n",
         );
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "class Counter {\n    private var value Int = 0\n    def reset() =\n        this.value := 0\n}\n"
+            "class Counter {\n    private var value Int = 0\n    fn reset() =\n        this.value := 0\n}\n"
         );
         assert_eq!(format(&result.text).text, result.text);
         assert!(format(&result.text).diagnostics.is_empty());
@@ -1881,18 +1928,18 @@ def main() {
     #[test]
     fn canonicalizes_unit_returns_and_callable_block_bodies() {
         let result = format(
-            "interface Action {\ndef run() Unit\nget invalid Unit\n}\nclass Worker {\ndef run() Unit = {\nprintln(\"run\")\n}\ndef answer() Int = {\n42\n}\nget count Int = {\n1\n}\nnew() = {\nprintln(\"new\")\n}\n}\ndef callback() fn() Unit = () => ()\ndef make() { x Int } = { x: 1 }\n",
+            "interface Action {\nfn run() Unit\nget invalid Unit\n}\nclass Worker {\nfn run() Unit = {\nprintln(\"run\")\n}\nfn answer() Int = {\n42\n}\nget count Int = {\n1\n}\nnew() = {\nprintln(\"new\")\n}\n}\nfn callback() fn() Unit = () => ()\nfn make() { x Int } = { x: 1 }\n",
         );
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
         assert_eq!(
             result.text,
-            "interface Action {\n    def run()\n    get invalid Unit\n}\nclass Worker {\n    def run() {\n        println(\"run\")\n    }\n    def answer() Int {\n        42\n    }\n    get count Int {\n        1\n    }\n    new() {\n        println(\"new\")\n    }\n}\ndef callback() fn() Unit = () => ()\ndef make() { x Int } = { x: 1 }\n"
+            "interface Action {\n    fn run()\n    get invalid Unit\n}\nclass Worker {\n    fn run() {\n        println(\"run\")\n    }\n    fn answer() Int {\n        42\n    }\n    get count Int {\n        1\n    }\n    new() {\n        println(\"new\")\n    }\n}\nfn callback() fn() Unit = () => ()\nfn make() { x Int } = { x: 1 }\n"
         );
     }
 
     #[test]
     fn invalid_source_is_not_rewritten() {
-        let source = "def main( Unit {\n";
+        let source = "fn main( Unit {\n";
         let result = format(source);
         assert!(result.has_errors());
         assert_eq!(result.text, source);
@@ -1900,7 +1947,7 @@ def main() {
 
     #[test]
     fn formatting_is_idempotent() {
-        let first = format("def main() Unit {\nprintln(\"ok\")\n}");
+        let first = format("fn main() Unit {\nprintln(\"ok\")\n}");
         assert!(!first.has_errors());
         let second = format(&first.text);
         assert!(!second.has_errors());

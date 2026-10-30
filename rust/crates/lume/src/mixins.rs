@@ -30,7 +30,7 @@ pub(crate) fn method_key(method: &MethodDecl) -> String {
     )
 }
 
-fn composition_key(method: &MethodDecl, aliases: &HashMap<String, TypeRef>) -> String {
+fn composition_key(method: &MethodDecl, aliases: &HashMap<String, TypeAliasDecl>) -> String {
     let mut method = method.clone();
     let mut aliases = aliases.clone();
     for param in &method.type_params {
@@ -46,23 +46,29 @@ fn composition_key(method: &MethodDecl, aliases: &HashMap<String, TypeRef>) -> S
 
 fn expand_aliases(
     ty: &mut TypeRef,
-    aliases: &HashMap<String, TypeRef>,
+    aliases: &HashMap<String, TypeAliasDecl>,
     seen: &mut HashSet<String>,
 ) {
     match ty {
         TypeRef::Named { name, args, .. } => {
-            if args.is_empty()
-                && let Some(target) = aliases.get(name)
+            for arg in args.iter_mut() {
+                expand_aliases(arg, aliases, seen);
+            }
+            if let Some(alias) = aliases.get(name)
+                && args.len() == alias.type_params.len()
                 && seen.insert(name.clone())
             {
                 let name = name.clone();
-                *ty = target.clone();
+                let subst = alias
+                    .type_params
+                    .iter()
+                    .map(|param| param.name.clone())
+                    .zip(args.iter().cloned())
+                    .collect();
+                *ty = alias.target.clone();
+                substitute(ty, &subst);
                 expand_aliases(ty, aliases, seen);
                 seen.remove(&name);
-            } else {
-                for arg in args {
-                    expand_aliases(arg, aliases, seen);
-                }
             }
         }
         TypeRef::Tuple { fields, .. } => {
@@ -143,7 +149,7 @@ pub(crate) fn compose(program: &Program) -> Result<Program, Vec<Diagnostic>> {
         .items
         .iter()
         .filter_map(|item| match item {
-            Item::TypeAlias(alias) => Some((alias.name.clone(), alias.target.clone())),
+            Item::TypeAlias(alias) => Some((alias.name.clone(), alias.clone())),
             _ => None,
         })
         .collect::<HashMap<_, _>>();

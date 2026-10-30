@@ -6,33 +6,33 @@
 # either ok 7
 # either mapped left: nope
 
-def findUser(found Bool) Str? =
+fn findUser(found Bool) Str? =
     if found { Some("Ada") } else { None }
 
-def queryRow(ok Bool) Result[Str, Str] =
+fn queryRow(ok Bool) Result[Str, Str] =
     if ok { Ok("row-1") } else { Err("down") }
 
-def queryEither(ok Bool) Either[Str, Int] =
+fn queryEither(ok Bool) Either[Str, Int] =
     if ok { Right(7) } else { Left("nope") }
 
-def loadUser(found Bool) Result[Str, Str] {
+fn loadUser(found Bool) Result[Str, Str] {
     user = try findUser(found).toResult { => "missing user" }
     Ok(user)
 }
 
-def loadRow(ok Bool) Result[Str, Str] {
+fn loadRow(ok Bool) Result[Str, Str] {
     row = try queryRow(ok).mapError { err => "db: " + err }
     Ok(row)
 }
 
-def loadEither(ok Bool) Either[Str, Int] {
+fn loadEither(ok Bool) Either[Str, Int] {
     value = try queryEither(ok).mapLeft { left =>
         "left: " + left
     }
     Right(value)
 }
 
-def main() {
+fn main() {
     println("option result " + (loadUser(true) !))
     println("option mapped " + loadUser(false).expectErr())
     println("result ok " + (loadRow(true) !))

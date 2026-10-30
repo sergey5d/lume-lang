@@ -9,6 +9,6 @@ class Failure {
     message Str
 }
 
-def main() Unit {
+fn main() Unit {
     value Success | Failure = new { message: "unknown" }
 }

@@ -5,7 +5,7 @@ shape Amount {
     amount Int
 }
 
-def main() Unit {
+fn main() Unit {
     value = Amount(10)
     updated Amount = { ...value, amount: "bad" }
 }

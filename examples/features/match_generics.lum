@@ -9,15 +9,15 @@ class Box[T] {
     value T
 }
 
-def unwrapSome(value OptionX[Int]) Int = match value {
+fn unwrapSome(value OptionX[Int]) Int = match value {
     case SomeX { value as x } => x + 1
     case OptionX.NoneX => 0
 }
 
-def unwrapBox(value Box[Int]) Int = match value {
+fn unwrapBox(value Box[Int]) Int = match value {
     case Box { value as x } => x + 2
 }
 
-def main() Int {
+fn main() Int {
     0
 }

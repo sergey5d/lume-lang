@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*invalid_decimal_literal.*
 
-def main() {
+fn main() {
     println(1e2147483649d)
 }

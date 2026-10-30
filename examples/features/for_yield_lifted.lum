@@ -5,25 +5,25 @@
 # either 7
 # 0
 
-def optionAdd(left Int?, right Int?) Int? =
+fn optionAdd(left Int?, right Int?) Int? =
     for {
         x <- left
         y <- right
     } yield x + y
 
-def resultAdd(left Result[Int, Str], right Result[Int, Str]) Result[Int, Str] =
+fn resultAdd(left Result[Int, Str], right Result[Int, Str]) Result[Int, Str] =
     for {
         x <- left
         y <- right
     } yield x + y
 
-def eitherAdd(left Either[Str, Int], right Either[Str, Int]) Either[Str, Int] =
+fn eitherAdd(left Either[Str, Int], right Either[Str, Int]) Either[Str, Int] =
     for {
         x <- left
         y <- right
     } yield x + y
 
-def main() Int {
+fn main() Int {
     optionValue Int? = optionAdd(Some(2), Some(5))
     let Some { value as optionNumber } = optionValue else return 1
     println("option " + optionNumber)

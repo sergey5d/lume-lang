@@ -8,20 +8,19 @@ class Cache {
     value Int = 7
 }
 
-def noop() {}
+fn noop() {}
 
-def noop2() = ()
+fn noop2() = ()
 
-def createCache() Cache = new {}
+fn createCache() Cache = new {}
 
-def accept(cache Cache) Int = cache.value
+fn accept(cache Cache) Int = cache.value
 
-def main() Unit {
+fn main() Unit {
     cache Cache = new {}
     marker Marker = {}
     structural {} = {}
     forced {} = new {}
-    defaulted {} = default {}
     nothing Unit = ()
     explicitUnit = ()
     widened Any = forced

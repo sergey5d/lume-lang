@@ -5,7 +5,7 @@ type MaybeInt =
     object NoneX {}
     | class SomeX { value Int }
 
-def main() Int =
+fn main() Int =
     match MaybeInt.SomeX(5) {
         case SomeX { value as x } => x
     }

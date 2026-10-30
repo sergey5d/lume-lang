@@ -3,7 +3,7 @@
 
 class Counter { var value Int }
 
-def main() {
+fn main() {
     counter = Counter(Int.MIN)
     counter.value /= -1
 }

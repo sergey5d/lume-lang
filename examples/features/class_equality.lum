@@ -5,10 +5,10 @@
 class Account with Eq[Account] {
     id Int
 
-    def equals(other Account) Bool = this.id == other.id
+    fn equals(other Account) Bool = this.id == other.id
 }
 
-def main() Unit {
+fn main() Unit {
     println(Account(1) == Account(1))
     println(Account(1) != Account(2))
 }

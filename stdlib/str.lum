@@ -6,24 +6,24 @@ public interface Str with Comparable[Str] {
     get size Int
     get isEmpty Bool
     get nonEmpty Bool
-    def compareTo(other Str) Int
-    def runeAt(index Int) Option[Rune]
-    def slice() Str
-    def slice(start Int) Str
-    def slice(start Int, end Int) Str
-    def split(separator Str) Vector[Str]
-    def splitRegex(pattern Str) Vector[Str]
-    def trim() Str
-    def trimLeft() Str
-    def trimRight() Str
-    def toLower() Str
-    def toUpper() Str
-    def contains(part Str) Bool
-    def startsWith(prefix Str) Bool
-    def endsWith(suffix Str) Bool
-    def indexOf(part Str) Option[Int]
-    def replaceFirst(target Str, replacement Str) Str
-    def replaceAll(target Str, replacement Str) Str
-    def replaceFirstRegex(pattern Str, replacement Str) Str
-    def replaceAllRegex(pattern Str, replacement Str) Str
+    fn compareTo(other Str) Int
+    fn runeAt(index Int) Option[Rune]
+    fn slice() Str
+    fn slice(start Int) Str
+    fn slice(start Int, end Int) Str
+    fn split(separator Str) Vector[Str]
+    fn splitRegex(pattern Str) Vector[Str]
+    fn trim() Str
+    fn trimLeft() Str
+    fn trimRight() Str
+    fn toLower() Str
+    fn toUpper() Str
+    fn contains(part Str) Bool
+    fn startsWith(prefix Str) Bool
+    fn endsWith(suffix Str) Bool
+    fn indexOf(part Str) Option[Int]
+    fn replaceFirst(target Str, replacement Str) Str
+    fn replaceAll(target Str, replacement Str) Str
+    fn replaceFirstRegex(pattern Str, replacement Str) Str
+    fn replaceAllRegex(pattern Str, replacement Str) Str
 }

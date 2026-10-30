@@ -1,0 +1,15 @@
+# EXPECT:
+# fn function
+# fn block
+
+fn keywordFunction() Str =
+    "function"
+
+fn blockWithEquals() Str = {
+    "block"
+}
+
+fn main() Unit {
+    println("fn", keywordFunction())
+    println("fn", blockWithEquals())
+}

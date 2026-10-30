@@ -1,0 +1,43 @@
+# EXPECT:
+# fn declarations ok
+
+interface Worker {
+    fn start()
+    fn status() Str
+    fn createCallback() fn() Str
+    get callback fn() Int
+}
+
+class Processor with Worker {
+    action fn(Int) Int
+
+    fn start() {}
+    fn status() Str = "ready"
+    fn createCallback() fn() Str = { => "done" }
+    get callback fn() Int = { => 42 }
+    fn run(value Int) Int = action(value)
+}
+
+fn trimLower(value Str) Str = value.trim().toLower()
+fn transform(value Int, mapper fn(Int) Str) Str = mapper(value)
+fn makeAdder(base Int) fn(Int) Int = value => base + value
+fn keepValue[T](value T) T = value
+
+fn main() {
+    processor = Processor(value => value * 2)
+    worker Worker = processor
+    worker.start()
+    assert(worker.status() == "ready")
+    callback fn() Str = worker.createCallback()
+    assert(callback() == "done")
+    assert(worker.callback() == 42)
+    assert(processor.run(3) == 6)
+
+    normalize fn (Str) Str = trimLower
+    assert(normalize(" ADA ") == "ada")
+    assert(transform(7, value => value.toStr()) == "7")
+    add = makeAdder(5)
+    assert(add(3) == 8)
+    assert(keepValue[Int](5) == 5)
+    println("fn declarations ok")
+}

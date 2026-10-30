@@ -5,12 +5,12 @@ module examples/regex_captures
 
 use lume/regex/{Regex, RegexMatch}
 
-def checked(pattern Str) Result[Regex, Str] =
+fn checked(pattern Str) Result[Regex, Str] =
     Regex.compile(pattern).mapError(error => error.message)
 
-def capturedName(hit RegexMatch) Str? = hit.group("name")
+fn capturedName(hit RegexMatch) Str? = hit.group("name")
 
-def main() {
+fn main() {
     pattern = checked(raw"(?<name>[A-Za-z]+)(?:-(?<number>[0-9]+))?")!
     hit = pattern.fullMatch("Ada")!
     assert(hit.text == "Ada")

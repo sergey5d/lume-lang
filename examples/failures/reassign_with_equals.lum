@@ -4,12 +4,12 @@
 class Counter {
     private var count Int = 0
 
-    def bump() Unit {
+    fn bump() Unit {
         this.count = 1
     }
 }
 
 
-def main() Unit {
+fn main() Unit {
     Counter {}.bump()
 }

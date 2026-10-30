@@ -2,7 +2,7 @@
 # 3 3
 # 3 3
 
-def main() Unit {
+fn main() Unit {
     blockLengths = for item <- [1, 2] yield { "abc" }.size
     shapeLengths = for item <- [1, 2] yield { text: "abc" }.text.size
 

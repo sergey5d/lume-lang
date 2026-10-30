@@ -7,13 +7,13 @@ type MaybeValue[T] with Iterable[T] =
     | object Missing {}
 
 ext MaybeValue[T] {
-    def iterator() Iterator[T] = match this {
+    fn iterator() Iterator[T] = match this {
         case Present { value } => [value].iterator()
         case Missing => Vector[T]().iterator()
     }
 }
 
-def main() Unit {
+fn main() Unit {
     present MaybeValue[Int] = Present(7)
     missing MaybeValue[Int] = Missing
     var count = 0

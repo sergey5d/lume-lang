@@ -7,18 +7,18 @@
 object Settings {
     name Str = "settings"
 
-    def label() Str = this.name
+    fn label() Str = this.name
 }
 
 interface Greeter {
-    def greet() Str
+    fn greet() Str
 }
 
 interface Described {
-    def name() Str
+    fn name() Str
 }
 
-def main() Unit = {
+fn main() Unit = {
     println(Settings.label())
 
     prefix = "hello"
@@ -26,8 +26,8 @@ def main() Unit = {
         count Int = 4
         label Str = prefix
 
-        def describe() Str = this.label + " " + this.count.toStr()
-        def doubled() Int = count * 2
+        fn describe() Str = this.label + " " + this.count.toStr()
+        fn doubled() Int = count * 2
     }
     println(value.describe())
     println(value.doubled())
@@ -36,8 +36,8 @@ def main() Unit = {
         greeting Str = "welcome"
         description Str = "example"
 
-        def greet() Str = greeting
-        def name() Str = description
+        fn greet() Str = greeting
+        fn name() Str = description
     }
     println(greeter.greet())
 

@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*positional 'shape\(\.\.\.\)' construction has been removed.*
 
-def main() Unit {
+fn main() Unit {
     point { x Int, y Int } = shape(1)
 }

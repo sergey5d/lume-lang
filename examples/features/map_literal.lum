@@ -12,14 +12,14 @@
 # map keys 4
 # 0
 
-def makeKey() Str = "made"
+fn makeKey() Str = "made"
 
 shape PersonKey {
     name Str
     id Int
 }
 
-def main() Int {
+fn main() Int {
     dynamicKey = "dynamic"
 
     builtIn [Str: Int] = [

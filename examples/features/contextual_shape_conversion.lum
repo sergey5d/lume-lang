@@ -9,27 +9,27 @@ shape Rollup {
     label Str
 }
 
-def source() StoredRollup? = Some(StoredRollup {
+fn source() StoredRollup? = Some(StoredRollup {
     total: 7
     label: "week"
     internalId: 99
 })
 
-def named() Rollup? = source().map(r => Rollup { ...r })
+fn named() Rollup? = source().map(r => Rollup { ...r })
 
-def bareFields() Rollup? = source().map(r => { ...r })
+fn bareFields() Rollup? = source().map(r => { ...r })
 
-def inferredShape() Rollup? = source().map(r => { ...r })
+fn inferredShape() Rollup? = source().map(r => { ...r })
 
-def contextualNew() Rollup? = source().map(r => new { ...r })
+fn contextualNew() Rollup? = source().map(r => new { ...r })
 
-def namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
+fn namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
 
-def bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
+fn bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
 
-def contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
+fn contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
 
-def main() Unit {
+fn main() Unit {
     println(named()!.total)
     println(bareFields()!.total)
     println(inferredShape()!.total)

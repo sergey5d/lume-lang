@@ -12,7 +12,7 @@ type Outcome =
     class Success { value Str }
     | @Payload object Cancelled {}
 
-def main() Unit {
+fn main() Unit {
     outcome Outcome = Outcome.Success("ok")
     match outcome {
         case Outcome.Success { value } => println("annotations", value == "ok")

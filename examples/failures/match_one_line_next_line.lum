@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # expected end of expression, got CASE\("case" @ .*?\)
 
-def main() Int =
+fn main() Int =
     match Some(1)
         case Some { value as x } => x

@@ -7,12 +7,12 @@ type Either[L, R] =
     | class Right { value R }
 
 ext Either[L, R] {
-    def isLeft() Bool = match this {
+    fn isLeft() Bool = match this {
         case Left { value: _ } => true
         case Right { value: _ } => false
     }
 
-    def map[T](f fn(R) T) Either[L, T] = match this {
+    fn map[T](f fn(R) T) Either[L, T] = match this {
         case Left { value } => Left(value)
         case Right { value } => Right(f(value))
     }

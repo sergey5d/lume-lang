@@ -20,49 +20,49 @@ public type JsonValue =
     | class JsonObject { fields [JsonField] }
 
 ext JsonValue {
-    def stringify() Str = Json.stringify(this)
+    fn stringify() Str = Json.stringify(this)
 
-    def textContent() Str = Json.textContent(this)
+    fn textContent() Str = Json.textContent(this)
 }
 
 public object Json {
 
-    def str(value Str) JsonValue =
+    fn str(value Str) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def int(value Int) JsonValue =
+    fn int(value Int) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def float(value Float) JsonValue =
+    fn float(value Float) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def bool(value Bool) JsonValue =
+    fn bool(value Bool) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def nil() JsonValue =
+    fn nil() JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def field(name Str, value JsonValue) JsonField =
+    fn field(name Str, value JsonValue) JsonField =
         panic("Json is provided by the Rust runtime")
 
-    def array(values [JsonValue] vararg) JsonValue =
+    fn array(values [JsonValue] vararg) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def obj(fields [JsonField] vararg) JsonValue =
+    fn obj(fields [JsonField] vararg) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def obj(value Any) JsonValue =
+    fn obj(value Any) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def encode(value Any) JsonValue =
+    fn encode(value Any) JsonValue =
         panic("Json is provided by the Rust runtime")
 
-    def stringify(value Any) Str =
+    fn stringify(value Any) Str =
         panic("Json is provided by the Rust runtime")
 
-    def textContent(value JsonValue) Str =
+    fn textContent(value JsonValue) Str =
         panic("Json is provided by the Rust runtime")
 
-    def decode[reified T](text Str) Result[T, Str] =
+    fn decode[reified T](text Str) Result[T, Str] =
         panic("Json is provided by the Rust runtime")
 }

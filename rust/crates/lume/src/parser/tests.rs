@@ -29,7 +29,7 @@ fn parses_stateless_mixins_and_rejects_storage_and_nonclass_adoption() {
         ("shape S { use Parts }", "invalid_mixin_use"),
         ("interface I { use Parts }", "invalid_mixin_use"),
         (
-            "def f() { mixin Parts {} }",
+            "fn f() { mixin Parts {} }",
             "nested_declaration_in_callable",
         ),
     ] {
@@ -48,7 +48,7 @@ fn parses_stateless_mixins_and_rejects_storage_and_nonclass_adoption() {
 #[test]
 fn interfaces_are_signatures_only_and_mixins_accept_visibility() {
     let parsed = parse(
-        "private mixin Hidden { def answer() Int = 42 }\ninternal mixin Shared { get ready Bool = true }\npublic mixin Exported {}",
+        "private mixin Hidden { fn answer() Int = 42 }\ninternal mixin Shared { get ready Bool = true }\npublic mixin Exported {}",
     );
     assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
     let program = parsed.program.unwrap();
@@ -70,11 +70,11 @@ fn interfaces_are_signatures_only_and_mixins_accept_visibility() {
     );
 
     for source in [
-        "interface I { def answer() Int = 42 }",
-        "interface I { def answer() Int { 42 } }",
+        "interface I { fn answer() Int = 42 }",
+        "interface I { fn answer() Int { 42 } }",
         "interface I { get answer Int = 42 }",
         "interface I { get answer Int { 42 } }",
-        "class Outer { interface I { def run() {} } }",
+        "class Outer { interface I { fn run() {} } }",
     ] {
         let parsed = parse(source);
         let diagnostic = parsed
@@ -93,7 +93,7 @@ fn interfaces_are_signatures_only_and_mixins_accept_visibility() {
 
 #[test]
 fn interfaces_reject_storage_but_allow_getter_and_method_signatures() {
-    let accepted = parse("interface Contract {\nget id Int\ndef read() Str\n}");
+    let accepted = parse("interface Contract {\nget id Int\nfn read() Str\n}");
     assert!(
         accepted.diagnostics.is_empty(),
         "{:?}",
@@ -160,7 +160,7 @@ fn interfaces_reject_all_nested_declaration_kinds() {
                         parsed.diagnostics
                     )
                 });
-            assert!(diagnostic.message.contains("'get' and 'def' signatures"));
+            assert!(diagnostic.message.contains("'get' and 'fn' signatures"));
             assert!(
                 diagnostic
                     .helps
@@ -274,7 +274,7 @@ class Hidden {
     value Int
     private secret Int = 0
 
-    def read() Int = this.value
+    fn read() Int = this.value
 }
 
 public class Exposed {}
@@ -321,7 +321,7 @@ fn rejects_non_public_interface_members() {
     let result = parse(
         r#"
 interface Reader {
-    private def read() Str
+    private fn read() Str
     internal get closed Bool
 }
 "#,
@@ -342,7 +342,7 @@ internal seed Int = 1
 
 internal class Counter {
     internal var value Int = 0
-    internal def increment() Unit = this.value += 1
+    internal fn increment() Unit = this.value += 1
 }
 "#,
     );
@@ -394,7 +394,7 @@ if true {
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "unexpected_top_level_statement"
-                && diag.message.contains("def main() Unit { ... }")
+                && diag.message.contains("fn main() Unit { ... }")
         }),
         "{:#?}",
         result.diagnostics
@@ -422,7 +422,7 @@ println("nope")
 fn parses_function_with_range_loop() {
     let result = parse(
         r#"
-def run(limit Int) Int {
+fn run(limit Int) Int {
     var total Int = 0
     for i <- Range(0, limit) {
         total += i
@@ -453,7 +453,7 @@ def run(limit Int) Int {
 fn parses_grouped_imperative_for_generators() {
     let result = parse(
         r#"
-def run(leftValues [Int], rightValues [Int]) Int {
+fn run(leftValues [Int], rightValues [Int]) Int {
     var total Int = 0
     for {
         left <- leftValues
@@ -483,7 +483,7 @@ def run(leftValues [Int], rightValues [Int]) Int {
 fn rejects_grouped_imperative_for_without_do() {
     let result = parse(
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for {
         value <- values
     } {
@@ -506,12 +506,12 @@ def run(values [Int]) Unit {
 fn parses_single_generator_do_bodies_and_block_shorthand() {
     for source in [
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for value <- values do println(value)
 }
 "#,
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for value <- values do
         if value > 0 {
             println(value)
@@ -519,14 +519,14 @@ def run(values [Int]) Unit {
 }
 "#,
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for value <- values do {
         println(value)
     }
 }
 "#,
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for value <- values {
         println(value)
     }
@@ -554,14 +554,14 @@ def run(values [Int]) Unit {
 fn parses_grouped_for_with_single_statement_do_body() {
     for source in [
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for {
         value <- values
     } do println(value)
 }
 "#,
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     for {
         value <- values
     } do
@@ -593,7 +593,7 @@ def run(values [Int]) Unit {
 fn parses_while_let_extraction_condition() {
     let result = parse(
         r#"
-def consume(start Option[Int]) Unit {
+fn consume(start Option[Int]) Unit {
     var current = start
     while let value <- current && value > 0 {
         println(value)
@@ -632,7 +632,7 @@ def consume(start Option[Int]) Unit {
 fn freely_mixes_boolean_and_let_condition_clauses() {
     let result = parse(
         r#"
-def choose(ready Bool, maybe Int?) Int {
+fn choose(ready Bool, maybe Int?) Int {
     if ready &&
         let first <- maybe &&
         first > 0 {
@@ -733,7 +733,7 @@ def choose(ready Bool, maybe Int?) Int {
 fn parses_multiline_boolean_condition_after_operators() {
     let result = parse(
         r#"
-def valid(a Bool, b Bool, c Bool) Bool {
+fn valid(a Bool, b Bool, c Bool) Bool {
     if a &&
         b &&
         c {
@@ -750,7 +750,7 @@ def valid(a Bool, b Bool, c Bool) Bool {
 fn preserves_boolean_precedence_in_control_flow_headers() {
     let result = parse(
         r#"
-def choose(a Bool, b Bool, c Bool) Int {
+fn choose(a Bool, b Bool, c Bool) Int {
     if a || b && c {
         println("statement")
     }
@@ -822,10 +822,10 @@ def choose(a Bool, b Bool, c Bool) Int {
 #[test]
 fn requires_grouped_disjunctions_with_extraction_clauses() {
     let invalid = [
-        "def run(cached Bool, ready Bool, maybeUser User?) Unit { if cached || ready && let user <- maybeUser { println(user) } }",
-        "def run(ready Bool, overrideEnabled Bool, maybeUser User?) Unit { if let user <- maybeUser && user.active || overrideEnabled { println(user) } }",
-        "def run(cached Bool, ready Bool, maybeUser User?) Unit { while cached || ready && let user <- maybeUser { println(user) break } }",
-        "def run(cached Bool, ready Bool, maybeUser User?) Int = if cached || ready && let user <- maybeUser { 1 } else { 0 }",
+        "fn run(cached Bool, ready Bool, maybeUser User?) Unit { if cached || ready && let user <- maybeUser { println(user) } }",
+        "fn run(ready Bool, overrideEnabled Bool, maybeUser User?) Unit { if let user <- maybeUser && user.active || overrideEnabled { println(user) } }",
+        "fn run(cached Bool, ready Bool, maybeUser User?) Unit { while cached || ready && let user <- maybeUser { println(user) break } }",
+        "fn run(cached Bool, ready Bool, maybeUser User?) Int = if cached || ready && let user <- maybeUser { 1 } else { 0 }",
     ];
 
     for source in invalid {
@@ -842,7 +842,7 @@ fn requires_grouped_disjunctions_with_extraction_clauses() {
 
     let grouped = parse(
         r#"
-def run(cached Bool, ready Bool, overrideEnabled Bool, maybeUser User?) Unit {
+fn run(cached Bool, ready Bool, overrideEnabled Bool, maybeUser User?) Unit {
     if (cached || ready) && let user <- maybeUser {
         println(user)
     }
@@ -868,7 +868,75 @@ def run(cached Bool, ready Bool, overrideEnabled Bool, maybeUser User?) Unit {
 }
 
 #[test]
-fn rejects_top_level_function_without_def() {
+fn distinguishes_fn_declarations_from_function_types() {
+    let result = parse(
+        r#"
+interface Worker {
+    fn start()
+    fn status() Str
+    fn createCallback() fn() Str
+    get callback fn (Int) Int
+    fn finish()
+    fn restart()
+}
+
+class Processor {
+    action fn(Int) Int
+    fn run(value Int) Int = action(value)
+}
+
+fn makeAdder(base Int) fn(Int) Int = value => base + value
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let program = result.program.expect("program");
+    let Item::Type(worker) = &program.items[0] else {
+        panic!("expected Worker interface");
+    };
+    assert_eq!(worker.members.len(), 6);
+    let methods = worker
+        .members
+        .iter()
+        .map(|member| match member {
+            TypeMember::Method(method) => method,
+            _ => panic!("expected a callable signature"),
+        })
+        .collect::<Vec<_>>();
+    assert!(methods[0].return_type.is_none());
+    assert_eq!(methods[1].name, "status");
+    assert!(matches!(
+        methods[2].return_type,
+        Some(TypeRef::Function { .. })
+    ));
+    assert!(methods[3].getter);
+    assert!(matches!(
+        methods[3].return_type,
+        Some(TypeRef::Function { .. })
+    ));
+    assert!(methods[4].return_type.is_none());
+    assert!(methods[5].return_type.is_none());
+    let Item::Type(processor) = &program.items[1] else {
+        panic!("expected Processor class");
+    };
+    assert!(matches!(&processor.members[0], TypeMember::Field(field)
+        if matches!(field.ty, Some(TypeRef::Function { .. }))));
+    assert!(matches!(&processor.members[1], TypeMember::Method(method) if method.name == "run"));
+}
+
+#[test]
+fn rejects_def_as_a_function_declaration_keyword() {
+    for source in [
+        "def run() {}",
+        "class Worker { def run() {} }",
+        "fn main() { def run() {} }",
+    ] {
+        let result = parse(source);
+        assert!(!result.diagnostics.is_empty(), "accepted {source}");
+    }
+}
+
+#[test]
+fn rejects_top_level_function_without_fn() {
     let result = parse(
         r#"
 main() Unit {
@@ -880,14 +948,14 @@ main() Unit {
         result
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "missing_def"),
+            .any(|diagnostic| diagnostic.code == "missing_fn"),
         "{:#?}",
         result.diagnostics
     );
 }
 
 #[test]
-fn rejects_methods_without_def_in_declaration_contexts() {
+fn rejects_methods_without_fn_in_declaration_contexts() {
     let result = parse(
         r#"
 interface Named {
@@ -912,7 +980,7 @@ ext Box {
         result
             .diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.code == "missing_def")
+            .filter(|diagnostic| diagnostic.code == "missing_fn")
             .count(),
         4,
         "{:#?}",
@@ -937,7 +1005,7 @@ class Holder {
 fn rejects_for_tuple_destructuring_in_generator() {
     let result = parse(
         r#"
-def run(rows Vector[(Int, Int)]) Unit {
+fn run(rows Vector[(Int, Int)]) Unit {
     for (value, idx) <- rows {
         OS.println(value, idx)
     }
@@ -958,7 +1026,7 @@ def run(rows Vector[(Int, Int)]) Unit {
 fn parses_for_let_tuple_destructuring_generator() {
     let result = parse(
         r#"
-def run(rows Vector[(Int, Int)]) Unit {
+fn run(rows Vector[(Int, Int)]) Unit {
     for let (value, idx) <- rows {
         println(value + idx)
     }
@@ -991,7 +1059,7 @@ def run(rows Vector[(Int, Int)]) Unit {
 fn parses_for_let_shape_destructuring_generator() {
     let result = parse(
         r#"
-def run(users Vector[User]) Unit {
+fn run(users Vector[User]) Unit {
     for let { name, age Int } <- users {
         println(name)
         println(age)
@@ -1026,7 +1094,7 @@ def run(users Vector[User]) Unit {
 fn parses_for_let_refutable_generator_pattern() {
     let result = parse(
         r#"
-def run(values Vector[Option[Int]]) Unit {
+fn run(values Vector[Option[Int]]) Unit {
     for let Some { value } <- values {
         println(value)
     }
@@ -1057,7 +1125,7 @@ def run(values Vector[Option[Int]]) Unit {
 fn parses_for_ignored_generator() {
     let result = parse(
         r#"
-def run(events [Str]) Unit {
+fn run(events [Str]) Unit {
     for _ <- events {
         println("event")
     }
@@ -1085,7 +1153,7 @@ def run(events [Str]) Unit {
 fn rejects_for_shape_destructuring_in_generator() {
     let result = parse(
         r#"
-def run(rows Vector[Row]) Unit {
+fn run(rows Vector[Row]) Unit {
     for { value, label } <- rows {
         OS.println(value, label)
     }
@@ -1106,7 +1174,7 @@ def run(rows Vector[Row]) Unit {
 fn rejects_for_named_shape_destructuring_in_generator() {
     let result = parse(
         r#"
-def run(users Vector[User]) Unit {
+fn run(users Vector[User]) Unit {
     for { name, location Str as loc, country as skipped } <- users {
         OS.println(name, loc)
     }
@@ -1127,7 +1195,7 @@ def run(users Vector[User]) Unit {
 fn rejects_for_constructor_pattern_in_generator() {
     let result = parse(
         r#"
-def run(values Vector[Option[Int]]) Unit {
+fn run(values Vector[Option[Int]]) Unit {
     for Some(value) <- values {
         OS.println(value)
     }
@@ -1148,7 +1216,7 @@ def run(values Vector[Option[Int]]) Unit {
 fn rejects_for_tuple_destructuring_without_parentheses() {
     let result = parse(
         r#"
-def run(rows Vector[(Int, Int)]) Unit {
+fn run(rows Vector[(Int, Int)]) Unit {
     for value, idx <- rows {
         OS.println(value, idx)
     }
@@ -1168,7 +1236,7 @@ def run(rows Vector[(Int, Int)]) Unit {
 fn rejects_parenthesized_for_generator_header_with_specific_diagnostic() {
     let result = parse(
         r#"
-def run(items [Int]) Unit {
+fn run(items [Int]) Unit {
     for (item <- items) {
         println(item)
     }
@@ -1191,7 +1259,7 @@ def run(items [Int]) Unit {
 fn rejects_parenthesized_for_yield_generator_header_with_specific_diagnostic() {
     let result = parse(
         r#"
-def run(items [Int]) [Int] = for (item <- items) yield {
+fn run(items [Int]) [Int] = for (item <- items) yield {
     item + 1
 }
 "#,
@@ -1212,7 +1280,7 @@ def run(items [Int]) [Int] = for (item <- items) yield {
 fn parses_for_yield_with_irrefutable_let_clauses() {
     let result = parse(
         r#"
-def run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
+fn run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
 	    values = for {
 	        pair <- pairs
 	        let (left Int, right Int) = pair
@@ -1260,7 +1328,7 @@ def run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
 fn parses_for_yield_with_let_destructuring_generators() {
     let result = parse(
         r#"
-def run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
+fn run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
     values = for {
         let (left, right) <- pairs
         let { age Int } <- users
@@ -1303,10 +1371,10 @@ def run(pairs Vector[(Int, Int)], users Vector[User]) [Int] {
 fn parses_short_for_yield_with_let_destructuring_generator() {
     let result = parse(
         r#"
-def tupleSums(pairs [(Int, Int)]) [Int] =
+fn tupleSums(pairs [(Int, Int)]) [Int] =
     for let (left, right) <- pairs yield left + right
 
-def ages(users [User]) [Int] =
+fn ages(users [User]) [Int] =
     for let { age } <- users yield age
 "#,
     );
@@ -1354,7 +1422,7 @@ shape Point {
     y Int
 }
 
-def xs(points [Point]) [Int] {
+fn xs(points [Point]) [Int] {
     for let { x } <- points yield x
 }
 "#,
@@ -1387,7 +1455,7 @@ def xs(points [Point]) [Int] {
 fn parses_for_yield_let_refutable_generator_pattern() {
     let result = parse(
         r#"
-def run(values Vector[Option[Int]]) [Int] {
+fn run(values Vector[Option[Int]]) [Int] {
     mapped = for {
         let Some { value } <- values
     } yield value
@@ -1419,7 +1487,7 @@ def run(values Vector[Option[Int]]) [Int] {
 fn rejects_for_yield_plain_let_binding_clause() {
     let result = parse(
         r#"
-def run(items [Int]) [Int] {
+fn run(items [Int]) [Int] {
     values = for {
         item <- items
         let doubled = item * 2
@@ -1449,7 +1517,7 @@ class Counter {
         this.count = count
     }
 
-    def bump(delta Int) Int = this.count + delta
+    fn bump(delta Int) Int = this.count + delta
 }
 "#,
     );
@@ -1466,7 +1534,7 @@ fn parses_named_declarations_nested_in_declaration_bodies() {
 class Namespace {
     class Worker {}
     shape Point { x Int }
-    interface Reader { def read() Str }
+    interface Reader { fn read() Str }
     object Defaults { prefix Str = "v" }
     annotation Label { value Str }
     type Key = Str
@@ -1474,7 +1542,7 @@ class Namespace {
         class Parsed { text Str }
         | object Empty {}
 
-    def worker() Worker = Worker()
+    fn worker() Worker = Worker()
 }
 "#,
     );
@@ -1566,7 +1634,7 @@ fn rejects_named_declarations_inside_callable_bodies() {
         "object Local {}",
         "annotation Local {}",
     ] {
-        let result = parse(&format!("def main() Unit {{\n    {declaration}\n}}"));
+        let result = parse(&format!("fn main() Unit {{\n    {declaration}\n}}"));
         assert!(
             result
                 .diagnostics
@@ -1596,7 +1664,7 @@ class User {
 }
 
 ext User {
-    def label() Str = this.name
+    fn label() Str = this.name
 }
 "#,
     );
@@ -1619,7 +1687,7 @@ fn allows_member_order_with_class_field_after_method() {
     let result = parse(
         r#"
 class User {
-    def label() Str = "user"
+    fn label() Str = "user"
     name Str
 }
 "#,
@@ -1665,7 +1733,7 @@ fn allows_member_order_with_inline_constructor_after_class_method() {
     let result = parse(
         r#"
 class User {
-    def label() Str = "user"
+    fn label() Str = "user"
 
     new(name Str) {
         this.name = name
@@ -1687,7 +1755,7 @@ class User {
         this.name = name
     }
 
-    def label() Str = this.name
+    fn label() Str = this.name
 }
 "#,
     );
@@ -1722,7 +1790,7 @@ class User {
 
 #[test]
 fn parses_variadic_function_parameter() {
-    let result = parse("def collect(values [Str] vararg) Unit = ()");
+    let result = parse("fn collect(values [Str] vararg) Unit = ()");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
     let Item::Function(function) = &program.items[0] else {
@@ -1734,7 +1802,7 @@ fn parses_variadic_function_parameter() {
 
 #[test]
 fn parses_defaulted_function_parameter() {
-    let result = parse("def range(start Int, step Int = 1) Int = start + step");
+    let result = parse("fn range(start Int, step Int = 1) Int = start + step");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
     let Item::Function(function) = &program.items[0] else {
@@ -1776,7 +1844,7 @@ class Path {
 fn rejects_prefix_variadic_parameter_marker() {
     let result = parse(
         r#"
-def bad(vararg values [Str]) Unit = ()
+fn bad(vararg values [Str]) Unit = ()
 
 class Path {
     segments [Str]
@@ -1813,14 +1881,14 @@ class Path {
 #[test]
 fn rejects_by_name_parameters_in_every_callable_kind() {
     for source in [
-        "def debug(message => Str) = ()",
-        "class Logger { def write(message => Str) = () }",
-        "interface Logger { def write(message => Str) }",
+        "fn debug(message => Str) = ()",
+        "class Logger { fn write(message => Str) = () }",
+        "interface Logger { fn write(message => Str) }",
         "class Box { new(value => Int) {} }",
         "class Box { new { value => Int } {} }",
-        "def main() { def local(value => Int) = () }",
-        "mixin Logger { def write(message => Str) = () }",
-        "def bad(values => [Int] vararg) = ()",
+        "fn main() { fn local(value => Int) = () }",
+        "mixin Logger { fn write(message => Str) = () }",
+        "fn bad(values => [Int] vararg) = ()",
     ] {
         let result = parse(source);
         assert!(
@@ -1837,9 +1905,9 @@ fn rejects_by_name_parameters_in_every_callable_kind() {
 fn parses_zero_argument_braced_lambdas_in_expression_positions() {
     let result = parse(
         r#"
-def invoke(work fn() Int) Int = work()
-def create() fn() Int = { => 5 }
-def main() {
+fn invoke(work fn() Int) Int = work()
+fn create() fn() Int = { => 5 }
+fn main() {
     work fn() Int = { => 1 }
     invoke({ => 2 })
     invoke { => 3 }
@@ -1877,7 +1945,7 @@ fn rejects_removed_symbolic_operator_methods_at_lexer() {
         let source = format!(
             r#"
 class Vec {{
-    def {operator}(other Vec) Vec = this
+    fn {operator}(other Vec) Vec = this
 }}
 "#
         );
@@ -1890,7 +1958,7 @@ fn rejects_removed_symbolic_infix_operators_at_lexer() {
     for operator in ["++", "--", ":-", "::"] {
         let source = format!(
             r#"
-def main() Unit {{
+fn main() Unit {{
     left = 1
     right = 2
     value = left {operator} right
@@ -1907,7 +1975,7 @@ fn parses_empty_method_body() {
         r#"
 class Counter {
 
-    def reset() {
+    fn reset() {
     }
 }
 
@@ -1920,7 +1988,7 @@ class Counter {
 fn parses_empty_function_body() {
     let result = parse(
         r#"
-def main() {
+fn main() {
 }
 "#,
     );
@@ -1934,7 +2002,7 @@ fn parses_named_object_with_body_methods() {
 object Counter {
     private value = 0
 
-    def next() Int = this.value + 1
+    fn next() Int = this.value + 1
 }
 
 "#,
@@ -1958,7 +2026,7 @@ annotation Route {
 }
 
 @Route { path: "/health" }
-def health() Str = "ok"
+fn health() Str = "ok"
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -2035,7 +2103,7 @@ fn parses_methods_in_named_object_body() {
 object Counter {
     private value = 0
 
-    def next() Int = 1
+    fn next() Int = 1
 }
 "#,
     );
@@ -2058,7 +2126,7 @@ value = object {
     count Int = 4
     label Str = "items"
 
-    def describe() Str = this.label + this.count.toStr()
+    fn describe() Str = this.label + this.count.toStr()
 }
 "#,
     );
@@ -2081,10 +2149,10 @@ value = object {
 fn anonymous_members_allow_method_overloads_but_reject_other_name_collisions() {
     let overloaded = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     formatter = object {
-        def format(value Int) Str = value.toStr()
-        def format(value Str) Str = value
+        fn format(value Int) Str = value.toStr()
+        fn format(value Str) Str = value
     }
 }
 "#,
@@ -2097,23 +2165,23 @@ def main() Unit {
 
     for source in [
         r#"
-def main() Unit {
+fn main() Unit {
     value = object {
         label Str = "x"
-        def label() Str = this.label
+        fn label() Str = this.label
     }
 }
 "#,
         r#"
-def main() Unit {
+fn main() Unit {
     value = object {
         get label Str = "x"
-        def label() Str = this.label
+        fn label() Str = this.label
     }
 }
 "#,
         r#"
-def main() Unit {
+fn main() Unit {
     value = object {
         get label Str = "x"
         get label Str = "y"
@@ -2137,11 +2205,11 @@ def main() Unit {
 fn allows_member_order_with_anonymous_fields_after_methods() {
     for source in [
         r#"object {
-    def value() Int = this.count
+    fn value() Int = this.count
     count Int = 2
 }"#,
         r#"object with Value {
-    def value() Int = this.count
+    fn value() Int = this.count
     count Int = 2
 }"#,
     ] {
@@ -2161,13 +2229,13 @@ fn parses_object_with_fields_and_interface_methods() {
     let result = parse(
         r#"
 interface Greeter {
-    def greet() Str
+    fn greet() Str
 }
 
 greeter Greeter = object with Greeter {
     source Str = "hello"
 
-    def greet() Str = source
+    fn greet() Str = source
 }
 "#,
     );
@@ -2220,19 +2288,19 @@ fn parses_comma_separated_interface_lists() {
     let result = parse(
         r#"
 interface First {
-    def first() Str
+    fn first() Str
 }
 
 interface Second {
-    def second() Str
+    fn second() Str
 }
 
 class Combined with First, Second {
 }
 
 objectValue = object with First, Second {
-    def first() Str = "first"
-    def second() Str = "second"
+    fn first() Str = "first"
+    fn second() Str = "second"
 }
 
 "#,
@@ -2258,19 +2326,19 @@ fn rejects_repeated_with_in_interface_lists() {
     let result = parse(
         r#"
 interface First {
-    def first() Str
+    fn first() Str
 }
 
 interface Second {
-    def second() Str
+    fn second() Str
 }
 
 class Combined with First with Second {
 }
 
 objectValue = object with First with Second {
-    def first() Str = "first"
-    def second() Str = "second"
+    fn first() Str = "first"
+    fn second() Str = "second"
 }
 
 "#,
@@ -2292,20 +2360,20 @@ fn rejects_interface_led_anonymous_implementations() {
     let result = parse(
         r#"
 interface First {
-    def first() Str
+    fn first() Str
 }
 
 interface Second {
-    def second() Str
+    fn second() Str
 }
 
 value = First {
-    def first() Str = "first"
+    fn first() Str = "first"
 }
 
 other = First with Second {
-    def first() Str = "first"
-    def second() Str = "second"
+    fn first() Str = "first"
+    fn second() Str = "second"
 }
 
 marker = First with Second {}
@@ -2328,17 +2396,17 @@ fn parses_comma_separated_interface_list_inside_equals_block_body() {
     let result = parse(
         r#"
 interface First {
-    def first() Str
+    fn first() Str
 }
 
 interface Second {
-    def second() Str
+    fn second() Str
 }
 
-def main() Unit = {
+fn main() Unit = {
     value First = object with First, Second {
-        def first() Str = "first"
-        def second() Str = "second"
+        fn first() Str = "first"
+        fn second() Str = "second"
     }
     println(value.first())
 }
@@ -2364,7 +2432,7 @@ main() Int {
         result
             .diagnostics
             .iter()
-            .filter(|diagnostic| diagnostic.code == "missing_def")
+            .filter(|diagnostic| diagnostic.code == "missing_fn")
             .count(),
         3,
         "{:#?}",
@@ -2386,7 +2454,7 @@ main() Int {
 fn control_flow_headers_do_not_consume_their_body_as_construction() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     new = [3]
     for item <- new {
         println(item)
@@ -2411,24 +2479,22 @@ def main() Unit {
 }
 
 #[test]
-fn default_is_reserved_for_default_initialization() {
+fn default_is_an_ordinary_identifier() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     default = [1, 2]
 }
 "#,
     );
-    assert!(result.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "expected_expression" || diagnostic.code == "unexpected_token"
-    }));
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
 #[test]
 fn do_is_reserved_and_reports_a_keyword_diagnostic() {
     for source in [
-        "def main() Unit {\n    do = 1\n}\n",
-        "def example(do Int) Unit = ()\n",
+        "fn main() Unit {\n    do = 1\n}\n",
+        "fn example(do Int) Unit = ()\n",
         "class Example {\n    do Int\n}\n",
     ] {
         let result = parse(source);
@@ -2446,10 +2512,10 @@ fn do_is_reserved_and_reports_a_keyword_diagnostic() {
 fn loop_body_local_function_is_not_misread_as_removed_construction() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     values = [1, 2]
     for value <- values {
-        def twice(input Int) Int = input * 2
+        fn twice(input Int) Int = input * 2
         println(twice(value))
     }
 }
@@ -2483,9 +2549,9 @@ def main() Unit {
 fn keeps_direct_trailing_lambda_calls_as_expressions() {
     let result = parse(
         r#"
-def run(block fn() Int) Int = block()
+fn run(block fn() Int) Int = block()
 
-def main() Int {
+fn main() Int {
     run() { () => 5 }
 }
 "#,
@@ -2661,7 +2727,7 @@ fn parses_shape_literal_forms() {
         other => panic!("expected call, got {other:#?}"),
     }
 
-    let file = SourceFile::new("test.lum", r#"def run() Unit = class(1, "x")"#);
+    let file = SourceFile::new("test.lum", r#"fn run() Unit = class(1, "x")"#);
     let lexed = lex(&file);
     assert!(
         lexed.diagnostics.is_empty(),
@@ -2785,15 +2851,16 @@ fn parses_contextual_new_forms() {
 }
 
 #[test]
-fn parses_default_initialization() {
+fn default_braces_are_an_ordinary_call() {
     assert!(matches!(
         parse_expr_only("default { name: \"Ada\" }"),
-        Expr::ContextualNew {
+        Expr::Call {
+            ref callee,
             uses_brace_syntax: true,
-            default_initialize: true,
             ref args,
             ..
-        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 1)
+        } if matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "default")
+            && matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 1)
     ));
 }
 
@@ -2809,11 +2876,11 @@ fn parses_empty_braces_as_construction_in_expression_positions() {
         r#"
 class Empty {}
 
-def expressionBody() Empty = {}
-def emptyExpression() = {}
-def blockBody() Unit {}
+fn expressionBody() Empty = {}
+fn emptyExpression() = {}
+fn blockBody() Unit {}
 
-def lambdas() Unit {
+fn lambdas() Unit {
     emptyCallback = () => {}
     shapeCallback = () => new {}
 }
@@ -2877,7 +2944,7 @@ def lambdas() Unit {
 fn parses_empty_lambda_braces_as_construction_across_newline_layout() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     sameLine fn() Unit = () => {}
     nextLine fn() Unit = () =>
         {}
@@ -2910,13 +2977,13 @@ def main() Unit {
 #[test]
 fn rejects_expression_level_shape_forms() {
     for source in [
-        r#"def main() Unit = shape { x: 10 }"#,
-        r#"def main() Unit = shape { x }"#,
-        r#"def main() Unit = shape {}"#,
-        r#"def main() Unit = shape with Printable {
+        r#"fn main() Unit = shape { x: 10 }"#,
+        r#"fn main() Unit = shape { x }"#,
+        r#"fn main() Unit = shape {}"#,
+        r#"fn main() Unit = shape with Printable {
     x: 10
 
-    def print() Str = x.toStr()
+    fn print() Str = x.toStr()
 }"#,
     ] {
         let result = parse(source);
@@ -2933,7 +3000,7 @@ fn rejects_expression_level_shape_forms() {
 
 #[test]
 fn rejects_removed_positional_shape_construction() {
-    let result = parse("def main() Unit = shape(1, 2)\n");
+    let result = parse("fn main() Unit = shape(1, 2)\n");
     assert!(
         result
             .diagnostics
@@ -2970,25 +3037,25 @@ fn allows_trailing_commas_in_delimited_forms() {
     let cases = [
         "class Box[T,] { value T }",
         "class Box[T when T with Eq[T],] { value T }",
-        "def identity(value Int,) Int = value",
-        "def useCallback(callback fn(Int,) Int) Int = callback(1)",
+        "fn identity(value Int,) Int = value",
+        "fn useCallback(callback fn(Int,) Int) Int = callback(1)",
         "type Pair = (Int, Str,)",
-        "class Box[T] { value T }\ndef main() Unit { box Box[Int,] = Box(1) }",
-        "def consume(left Int, right Int) Unit {}\ndef main() Unit { consume(1, 2,) }",
-        "def main() Unit { pair = (1, 2,) }",
-        "def main() Unit { mapper = (left, right,) => left + right }",
-        "def main() Unit { let (left, right,) = (1, 2) }",
-        "def main(value Int?) Unit { match value { case Some { value as item, } => println(item) case None => () } }",
-        "def main(values [Int]) Unit { match values { case [left, right,] => println(left + right) case _ => () } }",
-        "class User { name Str age Int }\ndef main(user User) Unit { match user { case User { name, } => println(name) case _ => () } }",
+        "class Box[T] { value T }\nfn main() Unit { box Box[Int,] = Box(1) }",
+        "fn consume(left Int, right Int) Unit {}\nfn main() Unit { consume(1, 2,) }",
+        "fn main() Unit { pair = (1, 2,) }",
+        "fn main() Unit { mapper = (left, right,) => left + right }",
+        "fn main() Unit { let (left, right,) = (1, 2) }",
+        "fn main(value Int?) Unit { match value { case Some { value as item, } => println(item) case None => () } }",
+        "fn main(values [Int]) Unit { match values { case [left, right,] => println(left + right) case _ => () } }",
+        "class User { name Str age Int }\nfn main(user User) Unit { match user { case User { name, } => println(name) case _ => () } }",
         "use app/models/{User, Account,}",
         "interface First {}\ninterface Second {}\nclass Both with First, Second, {}",
-        "def main() Unit { value { left Int, right Int, } = { left: 1, right: 2 } }",
+        "fn main() Unit { value { left Int, right Int, } = { left: 1, right: 2 } }",
         "class Pair { left Int right Int new(left Int, right Int,) { this.left = left\nthis.right = right } }",
-        "def main(values [[Int]]) Unit { value = values[0, 1,] }",
-        "def main() Unit { values = [1, 2,] }",
-        "def main() Unit { lookup = [\"left\": 1, \"right\": 2,] }",
-        "def main() Unit { point = { x: 10, y: 20, } }",
+        "fn main(values [[Int]]) Unit { value = values[0, 1,] }",
+        "fn main() Unit { values = [1, 2,] }",
+        "fn main() Unit { lookup = [\"left\": 1, \"right\": 2,] }",
+        "fn main() Unit { point = { x: 10, y: 20, } }",
     ];
 
     for source in cases {
@@ -3004,9 +3071,9 @@ fn allows_trailing_commas_in_delimited_forms() {
 #[test]
 fn rejects_singleton_tuple_syntax() {
     for source in [
-        "def main() Unit { value = (1,) }",
-        "def main() Unit { value (Int,) = 1 }",
-        "def main(value Int) Unit { let (item,) = value }",
+        "fn main() Unit { value = (1,) }",
+        "fn main() Unit { value (Int,) = 1 }",
+        "fn main(value Int) Unit { let (item,) = value }",
     ] {
         let result = parse(source);
         assert_eq!(
@@ -3017,6 +3084,23 @@ fn rejects_singleton_tuple_syntax() {
         );
         assert_eq!(result.diagnostics[0].code, "singleton_tuple");
     }
+}
+
+#[test]
+fn parses_whole_module_aliases_separately_from_symbol_aliases() {
+    let result = parse(
+        "use customers/storage as customerStore\nuse audit/storage as auditStore\nuse models/User as Customer\nuse storage\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let imports = result.program.unwrap().imports;
+    assert_eq!(imports[0].path, "customers/storage");
+    assert_eq!(imports[0].alias.as_deref(), Some("customerStore"));
+    assert!(imports[0].symbols.is_empty());
+    assert_eq!(imports[1].path, "audit/storage");
+    assert_eq!(imports[1].alias.as_deref(), Some("auditStore"));
+    assert!(imports[2].alias.is_none());
+    assert_eq!(imports[2].symbols[0].alias.as_deref(), Some("Customer"));
+    assert!(imports[3].alias.is_none());
 }
 
 #[test]
@@ -3151,9 +3235,9 @@ fn rejects_mixed_list_and_map_literal_entries() {
 #[test]
 fn colon_outside_supported_syntax_uses_normal_parser_errors() {
     for source in [
-        r#"def main() Unit { entries = Map("a": 1) }"#,
-        r#"def main() Unit { value = "a": 1: true }"#,
-        r#"def main() Unit { holder = Holder { entry: "a": 1 } }"#,
+        r#"fn main() Unit { entries = Map("a": 1) }"#,
+        r#"fn main() Unit { value = "a": 1: true }"#,
+        r#"fn main() Unit { holder = Holder { entry: "a": 1 } }"#,
     ] {
         let result = parse(source);
         assert!(!result.diagnostics.is_empty(), "{source}");
@@ -3162,7 +3246,7 @@ fn colon_outside_supported_syntax_uses_normal_parser_errors() {
 
 #[test]
 fn rejects_equals_in_named_shape_literal_fields() {
-    let result = parse(r#"def run() Unit = { name = "Ana", age = 10 }"#);
+    let result = parse(r#"fn run() Unit = { name = "Ana", age = 10 }"#);
     assert!(
         !result.diagnostics.is_empty(),
         "expected parser diagnostics for '=' construction fields"
@@ -3171,7 +3255,7 @@ fn rejects_equals_in_named_shape_literal_fields() {
 
 #[test]
 fn rejects_removed_shape_update_syntax_with_a_migration_diagnostic() {
-    let result = parse("def run(value Amount) Unit = value with { amount: 42 }");
+    let result = parse("fn run(value Amount) Unit = value with { amount: 42 }");
     assert!(
         result.diagnostics.iter().any(|diag| {
             diag.code == "removed_shape_update"
@@ -3197,7 +3281,7 @@ fn parses_override_as_an_ordinary_field_name() {
 
 #[test]
 fn rejects_removed_shape_merge_operator() {
-    let file = SourceFile::new("test.lum", r#"def run() Unit = left :+ right"#);
+    let file = SourceFile::new("test.lum", r#"fn run() Unit = left :+ right"#);
     let result = lex(&file);
     assert!(
         result
@@ -3211,7 +3295,7 @@ fn rejects_removed_shape_merge_operator() {
 
 #[test]
 fn rejects_shape_field_after_parallel_block_binding() {
-    let result = parse(r#"def run() Unit = { amount = 42, label: "x" }"#);
+    let result = parse(r#"fn run() Unit = { amount = 42, label: "x" }"#);
     assert!(!result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
@@ -3223,9 +3307,9 @@ class User {
     name Str
 }
 
-def describe(user { name Str }) Str = user.name
+fn describe(user { name Str }) Str = user.name
 
-def run() Unit {
+fn run() Unit {
     _ = describe({
         name: "Ana"
     })
@@ -3253,7 +3337,7 @@ fn parses_single_expression_braces_as_block_not_shape() {
 fn parses_brace_destructuring_binding() {
     let result = parse(
         r#"
-def run(box Box) Int {
+fn run(box Box) Int {
     let { value Int, label Str } = box
     return value
 }
@@ -3286,7 +3370,7 @@ def run(box Box) Int {
 fn parses_named_brace_destructuring_binding() {
     let result = parse(
         r#"
-def run(user User) Str {
+fn run(user User) Str {
     let { name, location Str as loc, country as skipped } = user
     return name + loc
 }
@@ -3328,7 +3412,7 @@ def run(user User) Str {
 fn rejects_at_style_brace_destructuring() {
     let result = parse(
         r#"
-def run(user User) Unit {
+fn run(user User) Unit {
     let { @name } = user
 }
 "#,
@@ -3349,7 +3433,7 @@ def run(user User) Unit {
 fn rejects_wildcard_brace_destructuring_entry() {
     let result = parse(
         r#"
-def run(user User) Unit {
+fn run(user User) Unit {
     let { _, location } = user
 }
 "#,
@@ -3395,7 +3479,7 @@ fn parses_extract_or_with_return_fallback() {
 fn rejects_removed_try_catch_syntax() {
     let result = parse(
         r#"
-def run() Result[Int, Str] {
+fn run() Result[Int, Str] {
     value = try maybe catch "missing"
 }
 "#,
@@ -3412,7 +3496,7 @@ def run() Result[Int, Str] {
 
 #[test]
 fn parses_single_expression_function_body() {
-    let result = parse("def zero() Int = 0\n");
+    let result = parse("fn zero() Int = 0\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
     let program = result.program.expect("program");
     match &program.items[0] {
@@ -3428,7 +3512,7 @@ fn parses_single_expression_function_body() {
 fn parses_same_line_if_expression_function_body() {
     let result = parse(
         r#"
-def pick(flag Bool) Int = if flag { 5 } else { 6 }
+fn pick(flag Bool) Int = if flag { 5 } else { 6 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -3446,7 +3530,7 @@ def pick(flag Bool) Int = if flag { 5 } else { 6 }
 fn composes_control_flow_expressions_with_postfix_and_infix_operators() {
     let result = parse(
         r#"
-def run(flag Bool) Unit {
+fn run(flag Bool) Unit {
     ifValue = if flag { 10 } else { 20 } - 1
     matchValue = match flag {
         case true => 10
@@ -3527,18 +3611,18 @@ def run(flag Bool) Unit {
 fn composes_leading_control_flow_expressions_at_block_tail() {
     let result = parse(
         r#"
-def ifAnswer(flag Bool) Int {
+fn ifAnswer(flag Bool) Int {
     if flag { 40 } else { 0 } + 2
 }
 
-def matchAnswer(flag Bool) Int {
+fn matchAnswer(flag Bool) Int {
     match flag {
         case true => 40
         case false => 0
     } + 2
 }
 
-def statements(flag Bool) Unit {
+fn statements(flag Bool) Unit {
     if flag {
         println("if")
     }
@@ -3596,7 +3680,7 @@ def statements(flag Bool) Unit {
 fn rejects_same_line_statements_without_separator() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     println("first") println("second")
 }
 "#,
@@ -3615,7 +3699,7 @@ def main() Unit {
 fn rejects_double_dot_member_access() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     value = user..name
 }
 "#,
@@ -3634,7 +3718,7 @@ def main() Unit {
 fn parses_newline_after_equals_before_callable_expression_body() {
     let result = parse(
         r#"
-def pick(flag Bool) Int =
+fn pick(flag Bool) Int =
     if flag { 5 } else { 6 }
 "#,
     );
@@ -3653,7 +3737,7 @@ def pick(flag Bool) Int =
 fn parses_newline_after_equals_before_binding_value() {
     let result = parse(
         r#"
-def run() Unit {
+fn run() Unit {
     value =
         5
 }
@@ -3666,7 +3750,7 @@ def run() Unit {
 fn parses_equals_before_block_callable_body() {
     let result = parse(
         r#"
-def run() Unit = {
+fn run() Unit = {
     OS.println("old block form")
 }
 "#,
@@ -3689,7 +3773,7 @@ fn parses_equals_before_assignment_statement_callable_body() {
 class Counter {
     private var value Int = 0
 
-    def reset() Unit =
+    fn reset() Unit =
         this.value := 0
 }
 
@@ -3716,7 +3800,7 @@ class Counter {
 fn allows_equals_before_shape_expression_callable_body() {
     let result = parse(
         r#"
-def user() { name Str, age Int } = { name: "Ada", age: 10 }
+fn user() { name Str, age Int } = { name: "Ada", age: 10 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -3741,12 +3825,12 @@ shape Point {
     y Int
 }
 
-def fromCallable(value Int) Point = {
+fn fromCallable(value Int) Point = {
     x: value
     y: 0
 }
 
-def run(flag Bool, fallback Point, values [Int]) Unit {
+fn run(flag Bool, fallback Point, values [Int]) Unit {
     mapper fn(Int) Point = value => {
         x: value
         y: 0
@@ -3822,24 +3906,24 @@ def run(flag Bool, fallback Point, values [Int]) Unit {
 fn continues_expression_parsing_after_leading_brace_construction() {
     let result = parse(
         r#"
-def readX() Int =
+fn readX() Int =
     { x: 1 }.x
 
-def invoke() Int =
+fn invoke() Int =
     { callback: () => 2 }.callback()
 
-def extract() Int =
+fn extract() Int =
     { value: Some(3) }.value!
 
-def increment() Int =
+fn increment() Int =
     { x: 4 }.x + 1
 
-def choose(flag Bool) Int = match flag {
+fn choose(flag Bool) Int = match flag {
     case true => { x: 5 }.x
     case false => 0
 }
 
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     mapper fn() Int = () => { x: 6 }.x
     projected [Int] = for value <- values yield { x: value }.x
 }
@@ -3872,22 +3956,22 @@ def run(values [Int]) Unit {
 fn continues_expression_parsing_after_leading_block_expression() {
     let result = parse(
         r#"
-def answer() Int =
+fn answer() Int =
     { 40 } + 2
 
-def render() Str =
+fn render() Str =
     { 42 }.toStr()
 
-def choose(flag Bool) Int = match flag {
+fn choose(flag Bool) Int = match flag {
     case true => { 40 } + 2
     case false => 0
 }
 
-def calculation() = {
+fn calculation() = {
     40
 }
 
-def run() Unit {
+fn run() Unit {
     mapper fn() Int = () => { 40 } + 2
     lengths [Int] = for value <- [1] yield { "abc" }.size
 }
@@ -3967,7 +4051,7 @@ def run() Unit {
 fn parses_if_expression_and_calls() {
     let result = parse(
         r#"
-def run(flag Bool) Int {
+fn run(flag Bool) Int {
     value Int = if flag {
         foo(1)
     } else {
@@ -4000,7 +4084,7 @@ fn parses_if_type_pattern_bindings() {
 class Worker {
 }
 
-def run(value Worker) Unit {
+fn run(value Worker) Unit {
     if let item Worker = value {
         OS.println(item)
     }
@@ -4050,7 +4134,7 @@ fn parses_let_else_type_patterns() {
 class Worker {
 }
 
-def run(value Worker) Int {
+fn run(value Worker) Int {
     let item Worker = value else {
         return 1
     }
@@ -4094,7 +4178,7 @@ def run(value Worker) Int {
 fn parses_inline_let_else_return_body() {
     let result = parse(
         r#"
-def run(value Option[Int]) Unit {
+fn run(value Option[Int]) Unit {
     let Some { value as item } = value else return ()
     OS.println(item)
 }
@@ -4125,7 +4209,7 @@ def run(value Option[Int]) Unit {
 fn parses_let_else_recoverable_binding() {
     let result = parse(
         r#"
-def run(value Option[Int]) Unit {
+fn run(value Option[Int]) Unit {
     let Some { value as item } = value else return ()
     OS.println(item)
 }
@@ -4143,7 +4227,7 @@ class SomeClass {
     field2 Str
 }
 
-def run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
+fn run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
     let SomeClass { field1, field2 as length } = value else {
         field1: "fallback"
         length: "fallback"
@@ -4220,7 +4304,7 @@ def run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
 fn parses_option_extract_let_else_shorthand() {
     let result = parse(
         r#"
-def run(value Option[Int]) Unit {
+fn run(value Option[Int]) Unit {
     let item <- value else return ()
     OS.println(item)
 }
@@ -4252,7 +4336,7 @@ def run(value Option[Int]) Unit {
 fn parses_plain_let_pattern_binding() {
     let result = parse(
         r#"
-def run(value Option[Int]) Int {
+fn run(value Option[Int]) Int {
     let Some { value as item } = value
     return item
 }
@@ -4328,7 +4412,7 @@ fn parses_named_record_patterns_with_aliases_literals_and_nesting() {
 fn parses_refutable_headless_record_pattern_in_let() {
     let result = parse(
         r#"
-def run(user User) Str {
+fn run(user User) Str {
     let { name as matchedName, age: 18 } = user else return "other"
     matchedName
 }
@@ -4357,7 +4441,7 @@ def run(user User) Str {
 fn distinguishes_headless_record_conditions_from_grouped_let_clauses() {
     let result = parse(
         r#"
-def run(user User, maybeUser User?, maybeLeft Int?, maybeRight Int?) Unit {
+fn run(user User, maybeUser User?, maybeLeft Int?, maybeRight Int?) Unit {
     if let { age: 18 } = user {
         println("eighteen")
     }
@@ -4485,7 +4569,7 @@ fn rejects_parenthesized_named_unpacking_in_every_pattern_context() {
             format!("items = for let {pattern} <- inputs yield 1"),
             format!("items = for {{\nlet {pattern} <- inputs\n}} yield 1"),
         ] {
-            let result = parse(&format!("def run(input Any, inputs [Any]) {{\n{body}\n}}"));
+            let result = parse(&format!("fn run(input Any, inputs [Any]) {{\n{body}\n}}"));
             let diagnostic = result
                 .diagnostics
                 .iter()
@@ -4504,7 +4588,7 @@ fn rejects_parenthesized_named_unpacking_in_every_pattern_context() {
 
 #[test]
 fn checker_rejects_parenthesized_unpacking_when_parser_diagnostics_are_ignored() {
-    let parsed = parse("def run(input Any) { let Ok(value) = input else return }");
+    let parsed = parse("fn run(input Any) { let Ok(value) = input else return }");
     let checked = crate::check_program(&parsed.program.expect("recovered program"));
     assert!(
         checked
@@ -4520,7 +4604,7 @@ fn checker_rejects_parenthesized_unpacking_when_parser_diagnostics_are_ignored()
 fn parses_bare_cases_and_whole_pattern_aliases() {
     let result = parse(
         r#"
-def run(status Status) Unit {
+fn run(status Status) Unit {
     match status {
         case Pending => ()
         case User { name } as user => println(name, user)
@@ -4569,7 +4653,7 @@ class User {
     name Str
 }
 
-def run(value User) Unit {
+fn run(value User) Unit {
     let User { name } as user = value
 }
 "#,
@@ -4578,7 +4662,7 @@ class User {
     name Str
 }
 
-def run(value User) Unit {
+fn run(value User) Unit {
     if let User { name } as user = value {
         println(name)
     }
@@ -4589,7 +4673,7 @@ class User {
     name Str
 }
 
-def run(value User) Unit {
+fn run(value User) Unit {
     while let User { name } as user = value {
         break
     }
@@ -4600,7 +4684,7 @@ class User {
     name Str
 }
 
-def run(users [User]) Unit {
+fn run(users [User]) Unit {
     for let User { name } as user <- users {
         println(name)
     }
@@ -4611,7 +4695,7 @@ class User {
     name Str
 }
 
-def run(users [User]) [Str] =
+fn run(users [User]) [Str] =
     for {
         let User { name } as user <- users
     } yield name
@@ -4628,7 +4712,7 @@ def run(users [User]) [Str] =
 fn composes_tuple_patterns_with_aliases_and_refutable_elements() {
     let result = parse(
         r#"
-def run(pair (Int?, Str), pairs [(Int, Int)]) [Int] {
+fn run(pair (Int?, Str), pairs [(Int, Int)]) [Int] {
     let (left, right) as whole = (10, 20)
     let (Some { value }, label) = pair else return []
     return for {
@@ -4665,7 +4749,7 @@ def run(pair (Int?, Str), pairs [(Int, Int)]) [Int] {
 fn parses_list_pattern_binding_with_typed_elements_and_rest() {
     let result = parse(
         r#"
-def run(values [Any]) Unit {
+fn run(values [Any]) Unit {
     let [name Str, age Int, ...rest] = values else return ()
 }
 "#,
@@ -4707,7 +4791,7 @@ def run(values [Any]) Unit {
 fn parses_bare_list_pattern_rest_as_ignored() {
     let result = parse(
         r#"
-def run(values [Int]) Unit {
+fn run(values [Int]) Unit {
     let [first, second, ...] = values else return ()
 }
 "#,
@@ -4737,7 +4821,7 @@ def run(values [Int]) Unit {
 fn rejects_plain_let_identifier_binding() {
     let result = parse(
         r#"
-def run() Int {
+fn run() Int {
     let value = 5
     return value
 }
@@ -4757,7 +4841,7 @@ def run() Int {
 fn rejects_plain_let_option_extract_shorthand_without_else() {
     let result = parse(
         r#"
-def run(value Option[Int]) Int {
+fn run(value Option[Int]) Int {
     let item <- value
     return item
 }
@@ -4777,7 +4861,7 @@ def run(value Option[Int]) Int {
 fn rejects_visibly_successful_let_extract_without_else() {
     let result = parse(
         r#"
-def run() Int {
+fn run() Int {
     let item <- Some(5)
     return item
 }
@@ -4797,7 +4881,7 @@ def run() Int {
 fn rejects_grouped_plain_let_option_extract_shorthand_without_else() {
     let result = parse(
         r#"
-def run(value Option[Int]) Int {
+fn run(value Option[Int]) Int {
     let {
         item <- value
     }
@@ -4819,7 +4903,7 @@ def run(value Option[Int]) Int {
 fn rejects_removed_expect_pattern_binding() {
     let result = parse(
         r#"
-def run(value Option[Int]) Int {
+fn run(value Option[Int]) Int {
     expect Some(item) = value
     return item
 }
@@ -4841,7 +4925,7 @@ def run(value Option[Int]) Int {
 fn rejects_removed_expect_option_extract_shorthand() {
     let result = parse(
         r#"
-def run(value Option[Int]) Int {
+fn run(value Option[Int]) Int {
     expect item <- value
     return item
 }
@@ -4861,7 +4945,7 @@ def run(value Option[Int]) Int {
 fn parses_defer_call_and_block_statements() {
     let result = parse(
         r#"
-def run() Unit {
+fn run() Unit {
     defer cleanup()
     defer {
         OS.println("later")
@@ -4898,7 +4982,7 @@ def run() Unit {
 fn rejects_non_call_defer_target() {
     let result = parse(
         r#"
-def run() Unit {
+fn run() Unit {
     value = 1
     defer value
 }
@@ -4919,7 +5003,7 @@ def run() Unit {
 fn parses_grouped_option_extract_shorthand() {
     let result = parse(
         r#"
-def run(left Option[Int], right Option[Int]) Int {
+fn run(left Option[Int], right Option[Int]) Int {
     let {
         first <- left
         second <- right
@@ -4959,7 +5043,7 @@ def run(left Option[Int], right Option[Int]) Int {
 fn parses_if_let_option_extract_shorthand() {
     let result = parse(
         r#"
-def run(value Option[Int]) Unit {
+fn run(value Option[Int]) Unit {
     if let item <- value {
         OS.println(item)
     }
@@ -4995,7 +5079,7 @@ def run(value Option[Int]) Unit {
 fn parses_assert_runtime_call() {
     let result = parse(
         r#"
-def run(split [Str]) Unit {
+fn run(split [Str]) Unit {
     assert(split.size() == 3)
 }
 "#,
@@ -5034,7 +5118,7 @@ def run(split [Str]) Unit {
 fn rejects_removed_assert_statement_syntax() {
     let result = parse(
         r#"
-def run(split [Str]) Unit {
+fn run(split [Str]) Unit {
     assert split.size() == 3
 }
 "#,
@@ -5053,7 +5137,7 @@ def run(split [Str]) Unit {
 fn rejects_expect_boolean_assertion() {
     let result = parse(
         r#"
-def run(split [Str]) Unit {
+fn run(split [Str]) Unit {
     expect split.size() == 3
 }
 "#,
@@ -5072,7 +5156,7 @@ def run(split [Str]) Unit {
 fn rejects_if_expression_without_else() {
     let result = parse(
         r#"
-def run(flag Bool) Int {
+fn run(flag Bool) Int {
     value = if flag {
         1
     }
@@ -5094,7 +5178,7 @@ def run(flag Bool) Int {
 fn rejects_omitted_match_case_body() {
     let result = parse(
         r#"
-def run(flag Bool) Unit = match flag {
+fn run(flag Bool) Unit = match flag {
     case true =>
     case false => ()
 }
@@ -5119,7 +5203,7 @@ type Size =
     | object Medium {}
     | object Large {}
 
-def run(size Size) Str = match size {
+fn run(size Size) Str = match size {
     case Size.Small | Size.Medium => "common"
     case Size.Large => "large"
 }
@@ -5178,7 +5262,7 @@ shape Reading {
     value Float
 }
 
-def describe(reading Reading) Str = match reading {
+fn describe(reading Reading) Str = match reading {
     case Reading { value: -3.5 } => "negative"
     case _ => "other"
 }
@@ -5220,7 +5304,7 @@ fn parses_option_wrap_pattern_shorthand() {
 fn rejects_non_numeric_negated_patterns() {
     let result = parse(
         r#"
-def describe(code Int, threshold Int) Str = match code {
+fn describe(code Int, threshold Int) Str = match code {
     case -threshold => "threshold"
     case _ => "other"
 }
@@ -5239,7 +5323,7 @@ def describe(code Int, threshold Int) Str = match code {
 fn parses_match_guards_without_consuming_the_case_arrow() {
     let result = parse(
         r#"
-def run(value Any, ready Bool, values [Int]) Int = match value {
+fn run(value Any, ready Bool, values [Int]) Int = match value {
     case _ if ready => 1
     case _ if value is Int => 2
     case _ if values.exists(item => item > 0) => 3
@@ -5272,7 +5356,7 @@ def run(value Any, ready Bool, values [Int]) Int = match value {
 fn rejects_match_without_value() {
     let result = parse(
         r#"
-def run() Int = match {
+fn run() Int = match {
     case true => 1
 }
 "#,
@@ -5291,7 +5375,7 @@ def run() Int = match {
 fn rejects_removed_partial_match_syntax() {
     let result = parse(
         r#"
-def run(value Bool) Int = partial match value {
+fn run(value Bool) Int = partial match value {
     case true => 1
 }
 "#,
@@ -5306,7 +5390,7 @@ def run(value Bool) Int = partial match value {
 fn rejects_postfix_match_expression() {
     let result = parse(
         r#"
-def run(flag Bool) Int {
+fn run(flag Bool) Int {
     value = flag match {
         case true => 1
         case false => 0
@@ -5334,14 +5418,14 @@ shape User {
     name Str
 }
 
-def extract(value Option[Int]) Int = value !
-def compactName(value Option[User]) Str = value!.name
-def spacedName(value Option[User]) Str = value !.name
-def invoke(value Option[fn() Str]) Str = value!()
-def indexed(value Option[[Int]]) Int = value![0]!
-def compactIndex(value [Str: Int]) Int = value["first"]!
-def spacedIndex(value [Str: Int]) Int = value["first"] !
-def nested(value Option[Option[Int]]) Int = value!!
+fn extract(value Option[Int]) Int = value !
+fn compactName(value Option[User]) Str = value!.name
+fn spacedName(value Option[User]) Str = value !.name
+fn invoke(value Option[fn() Str]) Str = value!()
+fn indexed(value Option[[Int]]) Int = value![0]!
+fn compactIndex(value [Str: Int]) Int = value["first"]!
+fn spacedIndex(value [Str: Int]) Int = value["first"] !
+fn nested(value Option[Option[Int]]) Int = value!!
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -5399,8 +5483,8 @@ def nested(value Option[Option[Int]]) Int = value!!
 fn parses_option_wrap_as_a_prefix_operator() {
     let result = parse(
         r#"
-def optionValue() Option[Int] = ^5
-def nestedValue() Option[Option[Int]] = ^^5
+fn optionValue() Option[Int] = ^5
+fn nestedValue() Option[Option[Int]] = ^^5
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -5436,7 +5520,7 @@ def nestedValue() Option[Option[Int]] = ^^5
 fn parses_single_statement_match_case_body_without_braces() {
     let result = parse(
         r#"
-def run(flag Bool) Unit {
+fn run(flag Bool) Unit {
     var total Int = 0
     match flag {
         case true => total += 1
@@ -5468,7 +5552,7 @@ def run(flag Bool) Unit {
 
 #[test]
 fn parses_lambda_expression() {
-    let result = parse("def make() Unit = values.map((x, y) => x + y)\n");
+    let result = parse("fn make() Unit = values.map((x, y) => x + y)\n");
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
 }
 
@@ -5476,7 +5560,7 @@ fn parses_lambda_expression() {
 fn parses_standalone_lambda_body_as_multiline_expression() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     mapper = (x Int) =>
         x +
             5
@@ -5490,7 +5574,7 @@ def main() Unit {
 fn lambda_indentation_does_not_extend_its_body() {
     for source in [
         r#"
-def calculate() Int {
+fn calculate() Int {
     mapper fn(Int) Int = value =>
         value + 1
     next = 2
@@ -5498,7 +5582,7 @@ def calculate() Int {
 }
 "#,
         r#"
-def calculate() Int {
+fn calculate() Int {
     mapper fn(Int) Int = value =>
         value + 1
         next = 2
@@ -5530,7 +5614,7 @@ def calculate() Int {
 fn parses_supported_lambda_parameter_forms() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     empty = () => 0
     bare = x => x
     bareIgnored = _ => 1
@@ -5551,7 +5635,7 @@ def main() Unit {
 fn rejects_destructured_lambda_parameter_forms() {
     let tuple = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     mapper = let (x Int, y Int) => x + y
 }
 "#,
@@ -5569,7 +5653,7 @@ def main() Unit {
 
     let shape = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     mapper = let { name, age } => name
 }
 "#,
@@ -5590,7 +5674,7 @@ def main() Unit {
 fn rejects_parenthesized_let_destructuring_lambda_param() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     mapper = (let (x, y)) => x + y
 }
 "#,
@@ -5612,7 +5696,7 @@ def main() Unit {
 fn rejects_let_destructuring_inside_multi_parameter_lambdas() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     mapper = (let (x, y), index) => x + y + index
 }
 "#,
@@ -5634,7 +5718,7 @@ def main() Unit {
 fn parses_trailing_block_lambda_call_syntax() {
     let result = parse(
         r#"
-def make() Unit = values.map { value => value + 5 }
+fn make() Unit = values.map { value => value + 5 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -5667,7 +5751,7 @@ def make() Unit = values.map { value => value + 5 }
 fn parses_trailing_block_lambda_with_multiline_body() {
     let result = parse(
         r#"
-def make() Unit = values.forEach { value =>
+fn make() Unit = values.forEach { value =>
     plusOne = value + 1
     println(plusOne)
 }
@@ -5708,7 +5792,7 @@ def make() Unit = values.forEach { value =>
 fn parses_parallel_binding_inside_block_expression() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     result = {
         left, right = 1, 2
         left + right
@@ -5724,9 +5808,9 @@ def main() Unit {
 fn parses_parallel_binding_inside_trailing_lambda() {
     let result = parse(
         r#"
-def consume(block fn(Int) Int) Int = block(5)
+fn consume(block fn(Int) Int) Int = block(5)
 
-def main() Unit {
+fn main() Unit {
     result = consume { value =>
         left, right = 1, 2
         value + left + right
@@ -5742,7 +5826,7 @@ def main() Unit {
 fn parses_trailing_block_lambda_with_typed_single_param() {
     let result = parse(
         r#"
-def make() Unit = values.map { (value Int) => value + 5 }
+fn make() Unit = values.map { (value Int) => value + 5 }
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -5756,10 +5840,10 @@ class Box {
     value Int
 }
 
-def positive(box Box) Bool = box.value > 0
-def boxes(box Box) [Box] = [box]
+fn positive(box Box) Bool = box.value > 0
+fn boxes(box Box) [Box] = [box]
 
-def main() Unit {
+fn main() Unit {
     if positive(Box { value: 1 }) {
         println("if")
     }
@@ -5786,9 +5870,9 @@ def main() Unit {
 fn parses_grouped_trailing_lambda_inside_if_condition() {
     let result = parse(
         r#"
-def check(block fn() Bool) Bool = block()
+fn check(block fn() Bool) Bool = block()
 
-def main() Unit {
+fn main() Unit {
     if (check { () => true }) {
         println("ok")
     }
@@ -5802,7 +5886,7 @@ def main() Unit {
 fn keeps_trailing_lambda_disabled_at_if_header_depth() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     if check { () => true }
 }
 "#,
@@ -5829,7 +5913,7 @@ def main() Unit {
 fn parses_trailing_block_lambda_head_on_next_line() {
     let result = parse(
         r#"
-def make() Unit = values.map {
+fn make() Unit = values.map {
     value => value + 5
 }
 "#,
@@ -5841,7 +5925,7 @@ def make() Unit = values.map {
 fn rejects_headless_trailing_lambda_block() {
     let result = parse(
         r#"
-def make() Unit = runner.zero {
+fn make() Unit = runner.zero {
     26
 }
 "#,
@@ -5862,14 +5946,14 @@ def make() Unit = runner.zero {
 fn parses_trailing_block_lambda_with_zero_or_multiple_params() {
     let zero = parse(
         r#"
-def make() Unit = values.map { () => 5 }
+fn make() Unit = values.map { () => 5 }
 "#,
     );
     assert!(zero.diagnostics.is_empty(), "{:#?}", zero.diagnostics);
 
     let multi = parse(
         r#"
-def make() Unit = values.map { (left, right) => left + right }
+fn make() Unit = values.map { (left, right) => left + right }
 "#,
     );
     assert!(multi.diagnostics.is_empty(), "{:#?}", multi.diagnostics);
@@ -5913,7 +5997,7 @@ fn rejects_removed_spaced_lift_tuple_expression() {
 fn parses_trailing_block_lambda_when_parameter_list_starts_on_opening_line() {
     let result = parse(
         r#"
-def make() Unit = values.map { (left,
+fn make() Unit = values.map { (left,
     right) => left + right }
 "#,
     );
@@ -5924,9 +6008,9 @@ def make() Unit = values.map { (left,
 fn parses_qualified_type_paths_in_all_type_positions() {
     let result = parse(
         r#"
-def display(user models.User, users Vector[models.User]) models.User | models.Guest = user
+fn display(user models.User, users Vector[models.User]) models.User | models.Guest = user
 
-def isUser(value Any) Bool = value is models.User
+fn isUser(value Any) Bool = value is models.User
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -5973,7 +6057,7 @@ class Store[T] {
     matrix [[T]]
 }
 
-def wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
+fn wrap(input Map[Str, [Int]]) [[[(Str, Int)]]] {
     cache Map[Str, [Int]] = input
     return []
 }
@@ -6061,7 +6145,7 @@ class Store {
     nested [Str: [Int: Bool]]
 }
 
-def lookup(values [Str: Int], key Str) Option[Int] = values[key]
+fn lookup(values [Str: Int], key Str) Option[Int] = values[key]
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -6114,8 +6198,8 @@ def lookup(values [Str: Int], key Str) Option[Int] = values[key]
 fn parses_optional_type_ref_shorthand() {
     let result = parse(
         r#"
-def convert(value Int?, labels [Str?], lookup [Str: Int?]) Str? = None
-def nested(value Option[Int?]) Option[Int?] = value
+fn convert(value Int?, labels [Str?], lookup [Str: Int?]) Str? = None
+fn nested(value Option[Int?]) Option[Int?] = value
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -6173,7 +6257,7 @@ def nested(value Option[Int?]) Option[Int?] = value
 fn rejects_repeated_optional_type_shorthand() {
     let result = parse(
         r#"
-def invalid(value Int??) Unit = ()
+fn invalid(value Int??) Unit = ()
 "#,
     );
     assert!(
@@ -6191,7 +6275,7 @@ def invalid(value Int??) Unit = ()
 fn parses_wildcard_type_argument() {
     let result = parse(
         r#"
-def inspect(value Type[_]) Unit {}
+fn inspect(value Type[_]) Unit {}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -6215,7 +6299,7 @@ def inspect(value Type[_]) Unit {}
 fn parses_fn_function_type_refs() {
     let result = parse(
         r#"
-def apply(
+fn apply(
     f fn(Int) Int,
     both fn(Int, Str) Bool,
     empty fn() Unit,
@@ -6267,7 +6351,7 @@ def apply(
 fn rejects_tuple_type_field_names() {
     let result = parse(
         r#"
-def describe(value (name Str, age Int)) Unit {}
+fn describe(value (name Str, age Int)) Unit {}
 "#,
     );
     let diagnostics = result
@@ -6289,7 +6373,7 @@ def describe(value (name Str, age Int)) Unit {}
 fn rejects_bare_function_type_refs() {
     let result = parse(
         r#"
-def apply(f Int => Int) Unit {}
+fn apply(f Int => Int) Unit {}
 "#,
     );
     assert!(
@@ -6305,7 +6389,7 @@ def apply(f Int => Int) Unit {}
 fn rejects_removed_parenthesized_function_type_refs() {
     let result = parse(
         r#"
-def apply(f (Int) => Int) Unit {}
+fn apply(f (Int) => Int) Unit {}
 "#,
     );
     assert!(
@@ -6321,7 +6405,7 @@ def apply(f (Int) => Int) Unit {}
 fn parses_space_between_fn_and_parameter_types() {
     let result = parse(
         r#"
-def apply(f fn (Int) Int, empty fn () Unit) Unit {}
+fn apply(f fn (Int) Int, empty fn () Unit) Unit {}
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -6349,7 +6433,7 @@ def apply(f fn (Int) Int, empty fn () Unit) Unit {}
 fn rejects_fat_arrow_in_fn_function_type() {
     let result = parse(
         r#"
-def apply(f fn(Int) => Int) Unit {}
+fn apply(f fn(Int) => Int) Unit {}
 "#,
     );
     assert!(
@@ -6366,7 +6450,7 @@ def apply(f fn(Int) => Int) Unit {}
 fn rejects_single_param_typed_lambda_without_parens() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     value = item Int => item + 1
 }
 "#,
@@ -6387,7 +6471,7 @@ def main() Unit {
 fn rejects_mixed_typed_and_untyped_lambda_params() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     value = (left Int, right) => left + right
 }
 "#,
@@ -6408,7 +6492,7 @@ def main() Unit {
 fn rejects_mixed_typed_and_untyped_ignored_lambda_params() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     value = (left Int, _) => left
 }
 "#,
@@ -6429,7 +6513,7 @@ def main() Unit {
 fn parses_newline_continuation_after_operator_or_postfix_dot() {
     let result = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     sum Int = 1 +
         2
     size Int = "haha".
@@ -6457,7 +6541,7 @@ def main() Unit {
 fn parses_newline_continuation_after_type_test_keywords_in_conditions() {
     let result = parse(
         r#"
-def classify(value Any) Int {
+fn classify(value Any) Int {
     direct Bool = value is
         Str
     negative Bool = value is not
@@ -6493,7 +6577,7 @@ def classify(value Any) Int {
 fn anonymous_shape_type_tests_do_not_consume_condition_bodies() {
     let result = parse(
         r#"
-def classify(value Any) Int {
+fn classify(value Any) Int {
     if value is { x Int } {
         return 1
     }
@@ -6525,7 +6609,7 @@ def classify(value Any) Int {
 fn parses_newline_continuation_after_assignment_and_extraction_operators() {
     let result = parse(
         r#"
-def run(maybe Int?, values [Int], pairs [(Int, Int)]) Unit {
+fn run(maybe Int?, values [Int], pairs [(Int, Int)]) Unit {
     var total = 0
     total :=
         10
@@ -6579,7 +6663,7 @@ def run(maybe Int?, values [Int], pairs [(Int, Int)]) Unit {
 fn rejects_newline_continuation_before_non_postfix_operators() {
     let leading_operator = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     sum Int = 1
         + 2
 }
@@ -6596,7 +6680,7 @@ def main() Unit {
 
     let leading_with = parse(
         r#"
-def main() Unit {
+fn main() Unit {
     user = { age: 41 }
     updated = user
         with Printable
@@ -6617,7 +6701,7 @@ def main() Unit {
 fn parses_string_interpolation_as_binary_concat() {
     let result = parse(
         r#"
-def run(name Str, count Int) Str {
+fn run(name Str, count Int) Str {
     return "hello $name ${count + 1} \$done"
 }
 "#,
@@ -6670,7 +6754,7 @@ fn simple_string_interpolation_uses_identifier_rules() {
 fn parses_multiline_string_interpolation_as_binary_concat() {
     let result = parse(
         r#"
-def run(name Str) Str {
+fn run(name Str) Str {
     return """
 hello
 $name
@@ -6699,7 +6783,7 @@ $name
 fn keeps_raw_strings_as_literals() {
     let result = parse(
         r#"
-def run() Unit {
+fn run() Unit {
     rawSingle = raw"$name\n"
     rawMulti = raw"""
 $name
@@ -6735,10 +6819,10 @@ fn parses_advanced_generic_bound_clauses() {
     let result = parse(
         r#"
 interface Callable {
-    def call() Unit
+    fn call() Unit
 }
 
-def something[
+fn something[
     LocalT with Callable,
     LocalR
     when GlobalT with Callable,
@@ -6807,7 +6891,7 @@ fn keeps_not_contextual_to_runtime_type_tests() {
 
 #[test]
 fn rejects_value_expression_after_is_not() {
-    let result = parse("def main(value Any) Bool = value is not 5\n");
+    let result = parse("fn main(value Any) Bool = value is not 5\n");
     assert!(
         result
             .diagnostics
@@ -6822,7 +6906,7 @@ fn rejects_value_expression_after_is_not() {
 fn rejects_removed_strict_equality_operators() {
     for operator in ["===", "!=="] {
         let result = parse(&format!(
-            "def test(left Int, right Int) Bool = left {operator} right"
+            "fn test(left Int, right Int) Bool = left {operator} right"
         ));
         assert!(
             !result.diagnostics.is_empty(),
@@ -6833,7 +6917,7 @@ fn rejects_removed_strict_equality_operators() {
 
 #[test]
 fn rejects_chained_runtime_type_tests() {
-    let result = parse("def test(value Any) Bool = value is Str is Any");
+    let result = parse("fn test(value Any) Bool = value is Str is Any");
     assert!(
         result.diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "non_associative_type_test"
@@ -6847,9 +6931,7 @@ fn rejects_chained_runtime_type_tests() {
 #[test]
 fn rejects_chained_comparison_operators() {
     for expression in ["a < b < c", "a <= b > c", "a >= b <= c"] {
-        let result = parse(&format!(
-            "def test(a Int, b Int, c Int) Bool = {expression}"
-        ));
+        let result = parse(&format!("fn test(a Int, b Int, c Int) Bool = {expression}"));
         assert!(
             result.diagnostics.iter().any(|diagnostic| {
                 diagnostic.code == "non_associative_comparison"
@@ -6864,9 +6946,7 @@ fn rejects_chained_comparison_operators() {
 #[test]
 fn rejects_chained_equality_operators() {
     for expression in ["a == b == c", "a != b == c"] {
-        let result = parse(&format!(
-            "def test(a Any, b Any, c Any) Bool = {expression}"
-        ));
+        let result = parse(&format!("fn test(a Any, b Any, c Any) Bool = {expression}"));
         assert!(
             result.diagnostics.iter().any(|diagnostic| {
                 diagnostic.code == "non_associative_equality"
@@ -6881,9 +6961,9 @@ fn rejects_chained_equality_operators() {
 #[test]
 fn allows_separate_or_explicitly_grouped_comparisons() {
     for source in [
-        "def ordered(a Int, b Int, c Int) Bool = a < b && b < c",
-        "def grouped(a Bool, b Bool, c Bool) Bool = (a == b) == c",
-        "def nested(a Bool, b Bool, c Bool) Bool = a == (b == c)",
+        "fn ordered(a Int, b Int, c Int) Bool = a < b && b < c",
+        "fn grouped(a Bool, b Bool, c Bool) Bool = (a == b) == c",
+        "fn nested(a Bool, b Bool, c Bool) Bool = a == (b == c)",
     ] {
         let result = parse(source);
         assert!(
@@ -6949,8 +7029,8 @@ class Bird {}
 
 type Pet = Cat | Dog
 
-def widen(value Pet) Bird | Dog | Cat = value
-def inline(value Cat | Bird) Cat | Bird = value
+fn widen(value Pet) Bird | Dog | Cat = value
+fn inline(value Cat | Bird) Cat | Bird = value
 "#,
     );
     assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
@@ -6980,7 +7060,7 @@ shape Entry {
     type Str
 }
 
-def read(entry Entry) Str {
+fn read(entry Entry) Str {
     copied Entry = Entry { type: entry.type }
     let { type as kind } = copied
     match copied {
@@ -7002,7 +7082,7 @@ type Outcome =
     | object Cancelled {}
 
 ext Outcome {
-    def result() Str = "ok"
+    fn result() Str = "ok"
 }
 "#,
     );
@@ -7072,7 +7152,7 @@ type Outcome =
 type Outcome =
     class Success {
         value Str
-        def text() Str = value
+        fn text() Str = value
     }
     | object Cancelled {}
 "#,
@@ -7156,10 +7236,27 @@ type Companion = Pet
 }
 
 #[test]
+fn parses_generic_transparent_type_aliases() {
+    let result = parse(
+        "type AppResult[T] = Result[T, Str]\ntype Lookup[K with Hashed[K], V] = Map[K, V]\ntype Transform[A, B] = fn(A) B\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    let program = result.program.unwrap();
+    let Item::TypeAlias(alias) = &program.items[1] else {
+        panic!("expected alias")
+    };
+    assert_eq!(alias.type_params.len(), 2);
+    assert_eq!(alias.type_params[0].bounds.len(), 1);
+    assert!(
+        matches!(&alias.target, TypeRef::Named { name, args, .. } if name == "Map" && args.len() == 2)
+    );
+}
+
+#[test]
 fn parses_anonymous_shape_types_in_inline_positions() {
     let result = parse(
         r#"
-def project(value { position Str, start Int }) { position Str } =
+fn project(value { position Str, start Int }) { position Str } =
     { position: value.position }
 "#,
     );
@@ -7198,7 +7295,7 @@ fn rejects_anonymous_shape_type_alias() {
 fn rejects_shape_prefix_on_anonymous_shape_types() {
     for source in [
         "value shape { x Str } = { x: \"hello\" }",
-        "def value() shape { x Str } = { x: \"hello\" }",
+        "fn value() shape { x Str } = { x: \"hello\" }",
     ] {
         let result = parse(source);
         assert!(
@@ -7216,7 +7313,7 @@ fn rejects_shape_prefix_on_anonymous_shape_types() {
 fn rejects_type_equals_forms_for_named_declaration_kinds() {
     for (source, keyword, name) in [
         ("type A = class { value Int }", "class", "A"),
-        ("type B = interface { def value() Int }", "interface", "B"),
+        ("type B = interface { fn value() Int }", "interface", "B"),
         ("type C = shape { value Int }", "shape", "C"),
         ("type D = object { value Int = 5 }", "object", "D"),
         ("type E = annotation { value Str }", "annotation", "E"),
@@ -7408,12 +7505,12 @@ fn treats_get_as_an_identifier_outside_member_declaration_starts() {
     let result = parse(
         r#"
 class Box {
-    def get() Int = 1
+    fn get() Int = 1
 }
 
-def identity(get Int) Int = get
+fn identity(get Int) Int = get
 
-def main() Unit {
+fn main() Unit {
     get = Box()
     value = get.get()
     positional = identity(5)
@@ -7549,11 +7646,11 @@ class Values {
 fn anonymous_shape_signatures_end_before_following_interface_members() {
     for (callable, getter) in [
         ("get position { x Int, y Int }", true),
-        ("def position() { x Int, y Int }", false),
+        ("fn position() { x Int, y Int }", false),
     ] {
         for (following, description, expected_error) in [
             ("get label Str", "getter", None),
-            ("def label() Str", "method", None),
+            ("fn label() Str", "method", None),
             (
                 "shape Metadata { value Str }",
                 "nested declaration",
@@ -7604,7 +7701,7 @@ interface Positioned {{
     let result = parse(
         r#"
 interface Defaults {
-    def noop() {}
+    fn noop() {}
     get label Str
 }
 "#,
@@ -7631,11 +7728,11 @@ interface Positioned {
 }
 
 class Accessors {
-    def coordinates() (Int, Int) = (1, 2)
+    fn coordinates() (Int, Int) = (1, 2)
     get coordinateValue (Int, Int) = (1, 2)
-    def values() [Int] = [1]
+    fn values() [Int] = [1]
     get valueList [Int] = [1]
-    def callback() fn() Int = () => 41
+    fn callback() fn() Int = () => 41
     get callbackValue fn() Int = () => 42
 }
 "#,
@@ -7679,16 +7776,16 @@ class Accessors {
 fn allows_whitespace_before_function_and_method_parameter_lists() {
     let result = parse(
         r#"
-def calculate (input Int) Int = input
-def identity[T] (input T) T = input
+fn calculate (input Int) Int = input
+fn identity[T] (input T) T = input
 
 class Calculator {
-    def calculate (input Int) Int = input
-    def convert[T] () T = panic("missing")
+    fn calculate (input Int) Int = input
+    fn convert[T] () T = panic("missing")
 }
 
-def main() Unit {
-    def local (input Int) Int = input
+fn main() Unit {
+    fn local (input Int) Int = input
     calculator = Calculator()
     println(calculate(1), identity[Int](2), calculator.calculate(3), local(4))
 }
@@ -7745,11 +7842,11 @@ class Invalid {
 }
 
 #[test]
-fn rejects_def_getter_syntax() {
+fn rejects_fn_getter_syntax() {
     let result = parse(
         r#"
 class Invalid {
-    def label Str = "legacy"
+    fn label Str = "legacy"
 }
 "#,
     );

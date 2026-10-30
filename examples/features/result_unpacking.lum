@@ -11,22 +11,22 @@
 # while let ok 2
 # while let err done
 
-def describeResult(result Result[Int, Str]) Str = match result {
+fn describeResult(result Result[Int, Str]) Str = match result {
     case Ok { value } => "match ok ${value}"
     case Err { error } => "match err ${error}"
 }
 
-def unpackValue(result Result[Int, Str]) Str {
+fn unpackValue(result Result[Int, Str]) Str {
     let Ok { value } = result else return "let fallback"
     "let ok ${value}"
 }
 
-def unpackError(result Result[Int, Str]) Str {
+fn unpackError(result Result[Int, Str]) Str {
     let Err { error } = result else return "let no error"
     "let err ${error}"
 }
 
-def main() {
+fn main() {
     success Result[Int, Str] = Ok(7)
     failure Result[Int, Str] = Err("missing")
 

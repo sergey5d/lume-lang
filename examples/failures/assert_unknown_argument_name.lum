@@ -1,6 +1,6 @@
 # FAIL_REGEX:
 # .*callable has no parameter named 'misspelled'.*
 
-def main() Unit {
+fn main() Unit {
     assert(misspelled = true)
 }

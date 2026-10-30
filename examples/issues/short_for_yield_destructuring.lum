@@ -12,11 +12,11 @@ shape User {
     age Int
 }
 
-def namesFromBlock(users [User]) [Str] {
+fn namesFromBlock(users [User]) [Str] {
     for let { name } <- users yield name
 }
 
-def main() Unit {
+fn main() Unit {
     pairs = [(1, 2), (3, 4)]
     users = [User("Ada", 36), User("Lin", 28)]
 

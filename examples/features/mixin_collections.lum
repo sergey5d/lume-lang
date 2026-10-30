@@ -3,7 +3,7 @@
 
 module examples/mixin_collections
 
-def main() {
+fn main() {
     vector [Int] = Vector(1, 2)
     set Set[Int] = Set(1, 2)
     linked LinkedList[Int] = LinkedList(1, 2)

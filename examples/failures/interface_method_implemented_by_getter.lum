@@ -2,7 +2,7 @@
 # .*does not implement required method 'id'.*
 
 interface Identified {
-    def id() Int
+    fn id() Int
 }
 
 class WrongKind with Identified {

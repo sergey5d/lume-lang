@@ -25,7 +25,7 @@
 # fill 7 7 9
 # generate 0 2 4
 
-def main() Unit {
+fn main() Unit {
     items = [1, 2, 3]
     items.add(4)
 

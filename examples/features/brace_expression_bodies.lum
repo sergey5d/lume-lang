@@ -11,17 +11,17 @@ shape Point {
     y Int
 }
 
-def origin() Point = {
+fn origin() Point = {
     x: 0
     y: 0
 }
 
-def choose(flag Bool, fallback Point) Point = match flag {
+fn choose(flag Bool, fallback Point) Point = match flag {
     case true => { x: 1, y: 2 }
     case false => { ...fallback }
 }
 
-def main() Int {
+fn main() Int {
     start = origin()
     println("origin", start.x, start.y)
 

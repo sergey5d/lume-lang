@@ -6,13 +6,13 @@ module or_pattern_guard_evaluated_once
 class Guard {
     var calls Int = 0
 
-    def allowed() Bool {
+    fn allowed() Bool {
         this.calls += 1
         false
     }
 }
 
-def main() Unit {
+fn main() Unit {
     tracker = Guard {}
     result = match (0, 0) {
         case (0, _) | (_, 0) if tracker.allowed() => "accepted"

@@ -5,7 +5,7 @@ class Box[T] {
     value T
 }
 
-def main() Int =
+fn main() Int =
     match Box(7) {
         case _ Box[Int] => 1
         case _ => 0

@@ -7,7 +7,7 @@ type Color =
     | object Blue {}
 
 ext Color {
-    def label() Str = match this {
+    fn label() Str = match this {
         case Color.Red => "red"
         case Color.Blue => "blue"
     }
@@ -15,11 +15,11 @@ ext Color {
 
 object Color {
 
-    def palette() Str = "palette"
+    fn palette() Str = "palette"
 }
 
 
-def main() Unit {
+fn main() Unit {
     color Color = Color.Red
     println(color.label())
     println(Color.palette())

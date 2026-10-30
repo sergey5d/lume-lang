@@ -1,0 +1,38 @@
+# EXPECT:
+# module aliases ok
+
+use module_alias_support/customers/storage as customerStore
+use module_alias_support/audit/storage as auditStore
+use module_alias_support/customers/storage as sameCustomerStore
+
+fn countRows(rows customerStore.CustomerRows[Str]) Int = rows.size
+fn load(id Int) Str = "local:" + id.toStr()
+fn prefix() Str = "local:"
+
+class PrefixView {
+    prefix Str
+    fn read() Str = prefix
+}
+
+fn useLoader(callback fn(Int) Str) Str = callback(3)
+
+fn main() {
+    assert(customerStore.load(7) == "customer:7")
+    assert(auditStore.load(8) == "audit:8")
+    assert(sameCustomerStore.load(9) == "customer:9")
+    customerLoader fn(Int) Str = customerStore.load
+    auditLoader fn(Int) Str = auditStore.load
+    assert(customerLoader(10) == "customer:10")
+    assert(auditLoader(11) == "audit:11")
+    assert(load(1) == "local:1")
+    assert(prefix() == "local:")
+    assert(useLoader(customerLoader) == "customer:3")
+    assert(PrefixView("field").read() == "field")
+    assert(customerStore.literalPrefix("parameter") == "parameter")
+    assert(customerStore.PrefixSnapshot("stored").read() == "stored")
+    customer customerStore.Customer = customerStore.Customer(12)
+    assert(customer.id == 12)
+    rows customerStore.CustomerRows[Str] = ["one", "two"]
+    assert(countRows(rows) == 2)
+    println("module aliases ok")
+}

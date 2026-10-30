@@ -2,12 +2,12 @@
 # .*expression-level 'shape with' has been removed.*
 
 interface Printable {
-    def print() Unit
+    fn print() Unit
 }
 
-def main() Unit {
+fn main() Unit {
     value = shape with Printable {
-        def print() Unit = ()
+        fn print() Unit = ()
     }
     value.print()
 }

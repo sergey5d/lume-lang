@@ -10,7 +10,7 @@ shape Full {
     y Int = 42
 }
 
-def main() Unit {
+fn main() Unit {
     source = Small(1)
     target Full = Full { ...source }
     println(target.x, target.y)

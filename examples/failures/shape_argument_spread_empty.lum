@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*empty construction.*requires an expected concrete type.*
 
-def consume() {}
-def main() {
+fn consume() {}
+fn main() {
     consume(...{})
 }

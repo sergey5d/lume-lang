@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # .*named-value unpacking uses braces; 'None\(\.\.\.\)' is not supported.*
 
-def main(value Option[Int]) Int = match value {
+fn main(value Option[Int]) Int = match value {
     case Some { value } => value
     case None() => 0
 }

@@ -24,7 +24,7 @@ class RecordAggregator {
     private rollupMap [Str: [Record]] = []
     private recordMap [Str: Record] = []
 
-    def ingest(record Str) Bool {
+    fn ingest(record Str) Bool {
         lines [Str] = record.split(",")
 
         if lines.size != 4 {
@@ -68,8 +68,8 @@ class RecordAggregator {
         true
     }
 
-    private def getRollup(key Str, range IntRange?) Rollup? = {
-        def outsideRange(record Record) Bool = {
+    private fn getRollup(key Str, range IntRange?) Rollup? = {
+        fn outsideRange(record Record) Bool = {
             let selected <- range else return false
             record.timestamp < selected.start || record.timestamp >= selected.end
         }
@@ -92,9 +92,9 @@ class RecordAggregator {
         maybeRollup
     }
 
-    def getRollup(key Str) Rollup? = getRollup(key, None)
+    fn getRollup(key Str) Rollup? = getRollup(key, None)
 
-    private def rollups(range IntRange?) [(Str, Rollup)] =
+    private fn rollups(range IntRange?) [(Str, Rollup)] =
         rollupMap.keys().flatMap { key =>
             rollup = getRollup(key, range)
             if rollup.isEmpty {
@@ -104,7 +104,7 @@ class RecordAggregator {
             }
         }
 
-    def allRollups(range IntRange? = None) [Str] {
+    fn allRollups(range IntRange? = None) [Str] {
         values = rollups(range)
         values.sort((left, right) => {
             leftRollup = left[1]
@@ -117,14 +117,14 @@ class RecordAggregator {
         values.map(entry => "${entry[0]}(${entry[1].count},${entry[1].total})")
     }
 
-    def top(count Int) [Str] {
+    fn top(count Int) [Str] {
         if count <= 0 {
             return []
         }
         allRollups().take(count)
     }
 
-    def voidRecord(recordId Str) Bool {
+    fn voidRecord(recordId Str) Bool {
         let record <- recordMap[recordId] else return false
 
         if record.void {
@@ -135,7 +135,7 @@ class RecordAggregator {
         true
     }
 
-    def topInRange(start Int, end Int, count Int) [Str] {
+    fn topInRange(start Int, end Int, count Int) [Str] {
         if count <= 0 || start >= end {
             return []
         }
@@ -143,7 +143,7 @@ class RecordAggregator {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     aggregator = RecordAggregator()
 
     first = aggregator.ingest("r1,10,alpha,20")

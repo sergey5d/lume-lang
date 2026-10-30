@@ -2,9 +2,9 @@
 # 5
 # 5
 
-def echo(get Int) Int = get
+fn echo(get Int) Int = get
 
-def main() Unit {
+fn main() Unit {
     println(echo(5))
     println(echo(get = 5))
 }

@@ -5,7 +5,7 @@ class Cat {}
 class Dog {}
 class Bird {}
 
-def main() Unit {
+fn main() Unit {
     source Cat | Dog = Cat {}
     invalid Bird | Dog = source
 }

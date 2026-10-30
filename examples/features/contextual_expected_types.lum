@@ -14,7 +14,7 @@ shape Point {
     y Int
 }
 
-def main() Unit {
+fn main() Unit {
     grouped [Str] = ([])
     configuration ([Str], Bool) = ([], false)
     groupedPoint Point = (new(1, 2))

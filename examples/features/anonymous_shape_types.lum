@@ -6,20 +6,20 @@ shape Result {
     x Str
 }
 
-def result() { x Str } =
+fn result() { x Str } =
     { x: "hello" }
 
-def toResult(value { x Str }) Result = value
+fn toResult(value { x Str }) Result = value
 
-def toAnonymous(value Result) { x Str } = value
+fn toAnonymous(value Result) { x Str } = value
 
 shape NamedResult {
     x Int
 
-    def doubled() Int = this.x * 2
+    fn doubled() Int = this.x * 2
 }
 
-def main() Unit {
+fn main() Unit {
     value Result = toResult(result())
     copy { x Str } = toAnonymous(value)
     println("aliases", value.x, copy.x)

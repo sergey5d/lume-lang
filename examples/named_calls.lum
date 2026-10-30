@@ -9,17 +9,17 @@
 
 class Formatter {
 
-	def format(prefix Str, value Int) Str {
+	fn format(prefix Str, value Int) Str {
 		return prefix + value
 	}
 }
 
 
-def format(prefix Str, value Int) Str {
+fn format(prefix Str, value Int) Str {
 	return prefix + value
 }
 
-def main() Int {
+fn main() Int {
 	formatter = Formatter {}
 
 	println("plain function", format("regular-", 7))

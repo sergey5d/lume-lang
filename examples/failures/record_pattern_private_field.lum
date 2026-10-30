@@ -11,7 +11,7 @@ class User {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     user = User("Ada", "secret")
     match user {
         case User { password } => println(password)

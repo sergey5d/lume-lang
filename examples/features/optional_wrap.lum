@@ -7,17 +7,17 @@
 # 12
 # 13
 
-def optionValue() Int? = ^5
+fn optionValue() Int? = ^5
 
-def resultValue() Result[Str, Str] = Ok("ready")
+fn resultValue() Result[Str, Str] = Ok("ready")
 
-def eitherValue() Either[Str, Int] = Right(9)
+fn eitherValue() Either[Str, Int] = Right(9)
 
-def choose(flag Bool) Int? = if flag { ^12 } else { ^0 }
+fn choose(flag Bool) Int? = if flag { ^12 } else { ^0 }
 
-def consume(value Int?) Int = value ?? 0
+fn consume(value Int?) Int = value ?? 0
 
-def main() Unit {
+fn main() Unit {
     inferred = ^6
 
     println(optionValue()!)

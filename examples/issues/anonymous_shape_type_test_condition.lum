@@ -4,7 +4,7 @@
 
 module anonymous_shape_type_test_condition
 
-def main() Unit {
+fn main() Unit {
     value Any = { x: 1 }
 
     if value is { x Int } {

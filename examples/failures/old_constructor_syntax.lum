@@ -1,13 +1,13 @@
 # FAIL_REGEX:
-# .*constructors omit 'def'.*
+# .*constructors omit 'fn'.*
 
 class User {
     name Str
 
-    def new(name Str) {
+    fn new(name Str) {
         this.name = name
     }
 }
 
 
-def main() Unit = ()
+fn main() Unit = ()

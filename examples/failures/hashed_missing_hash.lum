@@ -4,5 +4,5 @@
 class IncompleteKey with Hashed[IncompleteKey] {
     id Int
 
-    def equals(other IncompleteKey) Bool = this.id == other.id
+    fn equals(other IncompleteKey) Bool = this.id == other.id
 }

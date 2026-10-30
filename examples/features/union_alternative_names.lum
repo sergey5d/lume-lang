@@ -13,22 +13,22 @@ annotation DefaultOption {
 }
 
 @DefaultOption { value: NoneX }
-def annotatedBare() Unit {}
+fn annotatedBare() Unit {}
 
 @DefaultOption { value: OptionX.NoneX }
-def annotatedQualified() Unit {}
+fn annotatedQualified() Unit {}
 
-def readBare(value OptionX[Int]) Int = match value {
+fn readBare(value OptionX[Int]) Int = match value {
     case SomeX { value as item } => item
     case NoneX => 0
 }
 
-def readQualified(value OptionX[Int]) Int = match value {
+fn readQualified(value OptionX[Int]) Int = match value {
     case OptionX.SomeX { value as item } => item
     case OptionX.NoneX => 0
 }
 
-def main() Unit {
+fn main() Unit {
     bare OptionX[Int] = SomeX(5)
     qualified OptionX[Int] = OptionX.SomeX(5)
     empty OptionX[Int] = NoneX

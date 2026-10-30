@@ -7,30 +7,30 @@
 # single 9
 # many 3 rest 2
 
-def pairSum(values Array[Int]) Str {
+fn pairSum(values Array[Int]) Str {
     let [left, right] = values else return "pair fallback"
     "pair " + (left + right)
 }
 
-def headTail(values Array[Int]) Str {
+fn headTail(values Array[Int]) Str {
     let [head, ...tail] = values else return "empty head"
     tail.add(99)
     "head " + head + " rest " + tail.size + " source " + values[1]
 }
 
-def copyAll(values Array[Int]) Str {
+fn copyAll(values Array[Int]) Str {
     let [...all] = values
     all.add(99)
     "all " + all.size + " source " + values.size
 }
 
-def describe(values Array[Int]) Str = match values {
+fn describe(values Array[Int]) Str = match values {
     case [] => "empty"
     case [only] => "single " + only
     case [first, second, ...rest] => "many " + (first + second) + " rest " + rest.size
 }
 
-def main() Unit {
+fn main() Unit {
     println(pairSum(Array(3, 4)))
     println(pairSum(Array(3, 4, 5)))
     println(headTail(Array(1, 2, 3)))

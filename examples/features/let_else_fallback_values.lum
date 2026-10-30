@@ -16,17 +16,17 @@ class SomeClass {
     field2 Str
 }
 
-def scalar(value Str?) Str {
+fn scalar(value Str?) Str {
     let Some { value as item } = value else "fallback"
     item
 }
 
-def arrow(value Str?) Str {
+fn arrow(value Str?) Str {
     let item <- value else "fallback"
     item
 }
 
-def recordFallback(value Any) Str {
+fn recordFallback(value Any) Str {
     let SomeClass { field1, field2 as length } = value else {
         field1: "fallback1"
         length: "fallback2"
@@ -34,12 +34,12 @@ def recordFallback(value Any) Str {
     field1 + " " + length
 }
 
-def pairFallback(value Option[(Str, Str)]) Str {
+fn pairFallback(value Option[(Str, Str)]) Str {
     let Some { value as pair } = value else ("positional1", "positional2")
     pair[0] + " " + pair[1]
 }
 
-def contextualNewFallback(value Any) Str {
+fn contextualNewFallback(value Any) Str {
     let SomeClass { field1, field2 as length } = value else {
         field1 = "new1"
         length = "new2"
@@ -48,7 +48,7 @@ def contextualNewFallback(value Any) Str {
     field1 + " " + length
 }
 
-def groupedTuple(left Str?, right Str?) Str {
+fn groupedTuple(left Str?, right Str?) Str {
     let {
         a <- left
         c <- right
@@ -59,7 +59,7 @@ def groupedTuple(left Str?, right Str?) Str {
     a + " " + c
 }
 
-def main() Unit {
+fn main() Unit {
     println("scalar", scalar(Some("present")))
     println("scalar", scalar(None))
     println("arrow", arrow(Some("present")))

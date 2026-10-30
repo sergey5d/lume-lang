@@ -1,11 +1,11 @@
 # FAIL_REGEX:
 # .*local function 'twice' must be declared directly in a callable body, not inside a nested block.*
 
-def main() Unit {
+fn main() Unit {
     values = [1, 2]
 
     for value <- values {
-        def twice(input Int) Int = input * 2
+        fn twice(input Int) Int = input * 2
         println(twice(value))
     }
 }

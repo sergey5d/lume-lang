@@ -1,7 +1,7 @@
 # FAIL_REGEX:
 # runtime_error at .*: integer overflow: 9223372036854775807 \* 2
 
-def main() {
+fn main() {
     var value = Int.MAX
     value *= 2
 }

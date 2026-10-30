@@ -14,23 +14,23 @@ public class RegexMatch {
     get groups [Str?] = panic("RegexMatch is provided by the active runtime")
     get groupMap [Str: Str] = panic("RegexMatch is provided by the active runtime")
 
-    def group(index Int) Str? = panic("RegexMatch is provided by the active runtime")
-    def group(name Str) Str? = panic("RegexMatch is provided by the active runtime")
+    fn group(index Int) Str? = panic("RegexMatch is provided by the active runtime")
+    fn group(name Str) Str? = panic("RegexMatch is provided by the active runtime")
 }
 
 public class Regex {
     private new() {}
 
-    def contains(text Str) Bool = panic("Regex is provided by the active runtime")
-    def matches(text Str) Bool = panic("Regex is provided by the active runtime")
-    def find(text Str) RegexMatch? = panic("Regex is provided by the active runtime")
-    def fullMatch(text Str) RegexMatch? = panic("Regex is provided by the active runtime")
-    def findAll(text Str) [RegexMatch] = panic("Regex is provided by the active runtime")
+    fn contains(text Str) Bool = panic("Regex is provided by the active runtime")
+    fn matches(text Str) Bool = panic("Regex is provided by the active runtime")
+    fn find(text Str) RegexMatch? = panic("Regex is provided by the active runtime")
+    fn fullMatch(text Str) RegexMatch? = panic("Regex is provided by the active runtime")
+    fn findAll(text Str) [RegexMatch] = panic("Regex is provided by the active runtime")
 }
 
 public object Regex {
-    def compile(pattern Str) Result[Regex, RegexError] =
+    fn compile(pattern Str) Result[Regex, RegexError] =
         panic("Regex is provided by the active runtime")
 
-    def escape(text Str) Str = panic("Regex is provided by the active runtime")
+    fn escape(text Str) Str = panic("Regex is provided by the active runtime")
 }

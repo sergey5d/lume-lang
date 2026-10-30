@@ -97,7 +97,7 @@ class User {
 
     new(label Str) = this(label, Point { x: 0, y: 0 })
 
-    def moved(dx Int, dy Int) User = User {
+    fn moved(dx Int, dy Int) User = User {
         name: this.name
         home: Point {
             x: this.home.x + dx
@@ -106,7 +106,7 @@ class User {
     }
 }
 
-def main() Unit {
+fn main() Unit {
     user User = User { label: "Ada" }
     moved = user.moved(3, 4)
 

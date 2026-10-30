@@ -15,19 +15,19 @@ type Outcome =
     }
 
 ext Outcome {
-    def describe() Str = match this {
+    fn describe() Str = match this {
         case Left { value } => "left: " + value
         case Right { value } => "right: num " + value
     }
 
-    def tag() Str = match this {
+    fn tag() Str = match this {
         case Left { tag } => tag
         case Right { tag } => tag
     }
 }
 
 
-def main() Unit {
+fn main() Unit {
     left Outcome = Outcome.Left("bad")
     right Outcome = Outcome.Right(7)
 

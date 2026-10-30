@@ -1,0 +1,8 @@
+# FAIL_REGEX:
+# .*parameter 'value' is supplied more than once explicitly.*
+
+fn consume(value Int) {}
+
+fn main() {
+    consume(value = 1, ...{ value: 2 }, value = 3)
+}

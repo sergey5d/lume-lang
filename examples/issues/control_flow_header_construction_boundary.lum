@@ -2,7 +2,7 @@
 # 4
 # 4
 
-def main() Unit {
+fn main() Unit {
     new = [4]
 
     for item <- new {

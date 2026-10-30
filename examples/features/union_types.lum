@@ -16,14 +16,14 @@ class Bird {
 
 type Pet = Cat | Dog
 
-def describe(value Pet) Str = match value {
+fn describe(value Pet) Str = match value {
     case Cat { name } => "cat " + name
     case Dog { name } => "dog " + name
 }
 
-def widen(value Pet) Bird | Dog | Cat = value
+fn widen(value Pet) Bird | Dog | Cat = value
 
-def main() Unit {
+fn main() Unit {
     pet Pet = Cat("Milo")
 
     # Union order is irrelevant, and a union widens into a superset.

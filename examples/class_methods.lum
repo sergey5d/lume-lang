@@ -5,11 +5,11 @@
 class Adder {
     amount Int
 
-    def add(value Int) Int = this.amount + value
+    fn add(value Int) Int = this.amount + value
 }
 
 
-def main() Int {
+fn main() Int {
     adder Adder = Adder(5)
     println(adder.add(7))
     0

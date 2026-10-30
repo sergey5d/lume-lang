@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*duplicate use alias 'store'.*
+
+use features/module_alias_support/customers/storage as store
+use features/module_alias_support/audit/storage as store
+
+fn main() {}

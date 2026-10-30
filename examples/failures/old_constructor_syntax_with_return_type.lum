@@ -1,11 +1,11 @@
 # FAIL_REGEX:
-# .*constructors omit 'def'.*
+# .*constructors omit 'fn'.*
 
 class User {
     name Str
     age Int
 
-    def new(name Str, age Int) User {
+    fn new(name Str, age Int) User {
         User {
             name: name
             age: age
@@ -14,4 +14,4 @@ class User {
 }
 
 
-def main() Unit = ()
+fn main() Unit = ()

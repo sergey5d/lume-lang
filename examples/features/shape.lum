@@ -18,13 +18,13 @@ class ClassPoint {
     y Int
 }
 
-def makeClassPoint(x Int, y Int) ClassPoint =
+fn makeClassPoint(x Int, y Int) ClassPoint =
     ClassPoint { x, y }
 
-def makeAnonymousPoint(x Int, y Int) { x Int, y Int } =
+fn makeAnonymousPoint(x Int, y Int) { x Int, y Int } =
     new { x, y }
 
-def main() Unit {
+fn main() Unit {
     x = 1
     y = 2
     point Point = Point { x, y }

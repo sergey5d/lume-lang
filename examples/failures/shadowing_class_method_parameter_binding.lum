@@ -4,11 +4,11 @@
 class Box {
     value Int
 
-    def bad(value Int) Int {
+    fn bad(value Int) Int {
         value = 2
         this.value
     }
 }
 
 
-def main() Unit {}
+fn main() Unit {}
