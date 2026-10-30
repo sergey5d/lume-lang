@@ -571,7 +571,7 @@ impl<'a> Parser<'a> {
         annotations: Vec<Annotation>,
         visibility: Visibility,
     ) -> Option<FunctionDecl> {
-        let start = if self.match_keyword(Keyword::Fn) {
+        let start = if self.match_function_keyword() {
             self.previous_span()
         } else {
             let span = self.current_span();
@@ -1148,7 +1148,7 @@ impl<'a> Parser<'a> {
         visibility: Visibility,
         signature_only: bool,
     ) -> Option<MethodDecl> {
-        let (start, getter) = if self.match_keyword(Keyword::Fn) {
+        let (start, getter) = if self.match_function_keyword() {
             (self.previous_span(), false)
         } else if self.match_keyword(Keyword::Get) {
             (self.previous_span(), true)

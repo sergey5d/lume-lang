@@ -19,6 +19,32 @@ fn temp_source(name: &str, source: &str) -> PathBuf {
 }
 
 #[test]
+fn def_declarations_report_the_keyword_rename() {
+    let path = temp_source("renamed-def", "def main() {}\n");
+    for command in ["check", "run"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_lume"))
+            .arg(command)
+            .arg(&path)
+            .env(
+                "LUME_STDLIB",
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../stdlib"),
+            )
+            .output()
+            .expect("lume should run");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{command} accepted def");
+        assert!(stderr.contains("error[renamed_def_keyword]"), "{stderr}");
+        assert!(stderr.contains("def was renamed to fn"), "{stderr}");
+        assert!(
+            !stderr.contains("top-level statements are not allowed"),
+            "{stderr}"
+        );
+        assert!(output.stdout.is_empty());
+    }
+    fs::remove_file(path).expect("remove temporary source");
+}
+
+#[test]
 fn check_reports_unused_mutability_without_failing() {
     let path = temp_source(
         "unused-mutability",

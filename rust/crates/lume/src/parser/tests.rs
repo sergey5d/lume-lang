@@ -927,12 +927,69 @@ fn makeAdder(base Int) fn(Int) Int = value => base + value
 fn rejects_def_as_a_function_declaration_keyword() {
     for source in [
         "def run() {}",
+        "public def run() {}",
+        "internal def run() {}",
+        "@Tag private def run() {}",
+        "def run (value Int) Int = value",
+        "def run[T] (value T) T = value",
         "class Worker { def run() {} }",
+        "shape Worker { private def run() {} }",
+        "object Worker { def run() {} }",
+        "mixin Worker { def run() {} }",
+        "interface Worker { def run()\nfn stop() }",
+        "ext Worker { def run() {} }",
+        "class Worker { def [](index Int) Int = index }",
         "fn main() { def run() {} }",
+        "fn main() { worker = object with Worker { def run() {} } }",
     ] {
         let result = parse(source);
-        assert!(!result.diagnostics.is_empty(), "accepted {source}");
+        assert_eq!(
+            result.diagnostics.len(),
+            1,
+            "{source}: {:?}",
+            result.diagnostics
+        );
+        let diagnostic = &result.diagnostics[0];
+        assert_eq!(diagnostic.code, "renamed_def_keyword", "{source}");
+        assert_eq!(diagnostic.message, "def was renamed to fn", "{source}");
+        assert_eq!(
+            diagnostic.span.start,
+            source.find("def ").unwrap(),
+            "{source}"
+        );
+        assert_eq!(diagnostic.span.end - diagnostic.span.start, 3, "{source}");
+        assert!(
+            diagnostic
+                .helps
+                .iter()
+                .any(|help| help.contains("replace 'def' with 'fn'"))
+        );
     }
+}
+
+#[test]
+fn def_remains_usable_as_an_ordinary_identifier() {
+    let result = parse(
+        r#"
+def Int = 1
+
+class Reader {
+    def Str
+    fn read() Str = def
+}
+
+fn def(value Int) Int = value
+fn apply(def fn(Int) Int) Int = def(5)
+
+fn main() {
+    def Reader = Reader("value")
+    println(def.read())
+    tuple = (1, 2)
+    let (def, other) = tuple
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
 }
 
 #[test]

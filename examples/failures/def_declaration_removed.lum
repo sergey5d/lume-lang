@@ -1,4 +1,4 @@
 # FAIL_REGEX:
-# .*top-level statements are not allowed.*
+# .*def was renamed to fn.*
 
 def main() {}

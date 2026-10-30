@@ -1661,6 +1661,16 @@ fn main() {
     }
 
     #[test]
+    fn diagnoses_renamed_def_without_overwriting_source() {
+        let source = "def main() {}\n";
+        let result = format(source);
+        assert_eq!(result.text, source);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(result.diagnostics[0].code, "renamed_def_keyword");
+        assert_eq!(result.diagnostics[0].message, "def was renamed to fn");
+    }
+
+    #[test]
     fn formats_fn_declarations_and_function_types() {
         assert_formatted(
             "interface Worker {\nfn start()\nfn status() Str\nfn callback() fn () Str\n}\nfn normalize (value Str) Str=value.trim()\nfn main() {\ncallback fn (Str) Str=normalize\n}\n",

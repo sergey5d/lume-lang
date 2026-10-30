@@ -5857,7 +5857,7 @@ counter is Counter
 for item <- items {
 }
 fn(Int) Str
-SomeX(x) => x
+case SomeX { value as x } => x
 class Box[T] with Named
 pair = ("a", 1)
 name = maybeName ?? "unknown"

@@ -161,7 +161,48 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn starts_callable_decl(&self) -> bool {
-        self.starts_callable_decl_at(self.index)
+        self.at_renamed_def_declaration() || self.starts_callable_decl_at(self.index)
+    }
+
+    fn at_renamed_def_declaration(&self) -> bool {
+        if !self.at(TokenKind::Identifier) || self.current().lexeme != "def" {
+            return false;
+        }
+        let mut parser = Parser {
+            tokens: self.tokens,
+            index: self.index + 1,
+            diagnostics: Vec::new(),
+            allow_trailing_block_call: self.allow_trailing_block_call,
+            type_path: self.type_path.clone(),
+            nested_items: Vec::new(),
+        };
+        if parser
+            .parse_callable_name("expected callable name")
+            .is_none()
+        {
+            return false;
+        }
+        if parser.at(TokenKind::LBracket) && parser.parse_generic_clause().is_none() {
+            return false;
+        }
+        parser.at(TokenKind::LParen)
+    }
+
+    pub(super) fn match_function_keyword(&mut self) -> bool {
+        if self.match_keyword(Keyword::Fn) {
+            return true;
+        }
+        if !self.at_renamed_def_declaration() {
+            return false;
+        }
+        let span = self.current_span();
+        self.advance();
+        // Recover the declaration, but never accept the old spelling silently.
+        self.diagnostics.push(
+            Diagnostic::error("renamed_def_keyword", "def was renamed to fn", span)
+                .with_help("replace 'def' with 'fn'"),
+        );
+        true
     }
 
     pub(super) fn starts_callable_decl_at(&self, start: usize) -> bool {
@@ -201,7 +242,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn starts_local_callable_decl(&self) -> bool {
-        self.starts_local_callable_decl_at(self.index)
+        self.at_renamed_def_declaration() || self.starts_local_callable_decl_at(self.index)
     }
 
     pub(super) fn starts_local_callable_decl_at(&self, start: usize) -> bool {
