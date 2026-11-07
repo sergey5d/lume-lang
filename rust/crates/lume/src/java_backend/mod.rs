@@ -494,7 +494,7 @@ fn java_library_name_is_exposed(name: &str, exposed_names: &HashSet<String>) -> 
             | "Bool"
             | "Int"
             | "Float"
-            | "Rune"
+            | "Char"
             | "Str"
             | "Unit"
             | "Never"
@@ -841,7 +841,7 @@ fn java_library_default_initializer_marker(
         Some(TypeRef::Named { name, .. }) if name == "Bool" => {
             crate::ast::Expr::Bool { value: false, span }
         }
-        Some(TypeRef::Named { name, .. }) if matches!(name.as_str(), "Int" | "Rune") => {
+        Some(TypeRef::Named { name, .. }) if matches!(name.as_str(), "Int" | "Char") => {
             crate::ast::Expr::Integer {
                 raw: "0".to_string(),
                 span,
@@ -1645,7 +1645,7 @@ fn is_lume_builtin_java_bound(name: &str, args: &[TypeRef]) -> bool {
     args.is_empty()
         && matches!(
             name,
-            "Any" | "Bool" | "Int" | "Float" | "Rune" | "Str" | "Unit" | "LumeTyped"
+            "Any" | "Bool" | "Int" | "Float" | "Char" | "Str" | "Unit" | "LumeTyped"
         )
         || matches!(name, "Vector" | "LinkedList" | "Set" | "Map" | "Option")
 }
@@ -2086,7 +2086,7 @@ fn java_builtin_lume_type_name(base: &str, arg_count: usize) -> Option<&'static 
         }
         "lume.core.LumeDecimal" | "LumeDecimal" if arg_count == 0 => Some("Decimal"),
         "lume.core.Rounding" | "Rounding" if arg_count == 0 => Some("Rounding"),
-        "char" | "java.lang.Character" | "Character" => Some("Rune"),
+        "char" | "java.lang.Character" | "Character" => Some("Char"),
         "java.lang.String" | "String" => Some("Str"),
         "java.util.List"
         | "java.util.Collection"
@@ -7761,14 +7761,14 @@ fn main() Unit {
     }
 
     #[test]
-    fn generated_java_executable_runs_array_fill_with_rune() {
+    fn generated_java_executable_runs_array_fill_with_char() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java executable test because javac/java is not available");
             return;
         }
 
-        let temp = temp_path("lume-java-array-rune");
-        let source = temp.join("array_rune.lum");
+        let temp = temp_path("lume-java-array-char");
+        let source = temp.join("array_char.lum");
         let out = temp.join("out");
         let classes = temp.join("classes");
         fs::create_dir_all(&temp).expect("create temp dir");
@@ -7778,8 +7778,8 @@ fn main() Unit {
 module demo/runarray
 
 fn main() Int {
-    nul Rune = "\0".runeAt(0)!
-    runes Array[Rune] = Array.fill(2, nul)
+    nul Char = "\0".charAt(0)!
+    characters Array[Char] = Array.fill(2, nul)
     0
 }
 "#,
@@ -9067,7 +9067,7 @@ fn main() Unit {
     println("".nonEmpty)
     println("lume".isEmpty)
     println("😀a".size)
-    println("😀a".runeAt(1)! == "a".runeAt(0)!)
+    println("😀a".charAt(1)! == "a".charAt(0)!)
     text = "  LuMe  "
     println("[${text.trim()}]")
     println("[${text.trimLeft()}]")
@@ -9109,7 +9109,7 @@ fn main() Unit {
             .expect("read module");
         assert!(module.contains("LumeRuntime.stringSplit"));
         assert!(module.contains("LumeRuntime.stringSplitRegex"));
-        assert!(module.contains("LumeRuntime.stringRuneAt"));
+        assert!(module.contains("LumeRuntime.stringCharAt"));
         assert!(module.contains("LumeRuntime.stringSize"));
         assert!(module.contains("LumeRuntime.stringTrimLeft"));
         assert!(module.contains("LumeRuntime.stringTrimRight"));
@@ -9204,9 +9204,9 @@ public class RepeatErrors {
     public static void main(String[] args) {
         check(() -> lume.core.LumeRuntime.stringRepeat("x", -1), "Str.repeat count must be non-negative");
         check(() -> lume.core.LumeRuntime.stringRepeat("", -1), "Str.repeat count must be non-negative");
-        check(() -> lume.core.LumeRuntime.runeRepeat('x', -1), "Rune.repeat count must be non-negative");
+        check(() -> lume.core.LumeRuntime.charRepeat('x', -1), "Char.repeat count must be non-negative");
         check(() -> lume.core.LumeRuntime.stringRepeat("xx", Long.MAX_VALUE), "repeated string is too large");
-        check(() -> lume.core.LumeRuntime.runeRepeat(0x1f600, Long.MAX_VALUE), "repeated string is too large");
+        check(() -> lume.core.LumeRuntime.charRepeat(0x1f600, Long.MAX_VALUE), "repeated string is too large");
     }
     private static void check(Runnable action, String expected) {
         try {

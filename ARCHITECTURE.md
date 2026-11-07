@@ -34,7 +34,7 @@ a-lang/
   stdlib/                     language-visible standard library source
   examples/                   runnable and failing language fixtures
   vscode-extension/           editor syntax/config support
-  syntax.md                   language reference
+  SYNTAX.md                   language reference
   features.md                 feature notes and status
 ```
 
@@ -233,7 +233,7 @@ throughout the interpreter.
 - `run_samples.sh` sweeps checked examples from the repo root.
 - Many Rust modules keep unit tests next to the implementation, and
   `parser/tests.rs` holds parser-focused coverage.
-- `syntax.md` is the main language reference.
+- `SYNTAX.md` is the main language reference.
 - `features.md` tracks general open language work, while focused proposal files
   such as `async_proposal.md` retain designs that need more room.
 

@@ -8,7 +8,7 @@ public interface Str with Comparable[Str] {
     get nonEmpty Bool
     get isBlank Bool
     fn compareTo(other Str) Int
-    fn runeAt(index Int) Option[Rune]
+    fn charAt(index Int) Option[Char]
     fn slice() Str
     fn slice(start Int) Str
     fn slice(start Int, end Int) Str

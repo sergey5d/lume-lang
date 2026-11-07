@@ -15,7 +15,7 @@ the interface type runs the **class** member, not the `ext` method. The reader
 cannot tell which body runs without knowing the runtime type. That is exactly
 the behaviour-inheritance problem Lume avoids by having no class inheritance.
 
-`syntax.md` does not say what happens when an `ext` member and a class member
+`SYNTAX.md` does not say what happens when an `ext` member and a class member
 share a name, so every result below is unspecified behaviour.
 
 | # | Problem | Severity |
@@ -206,7 +206,7 @@ methods in C# and Kotlin.
    `default` methods that implementing classes are guaranteed not to override.
    Do not emit them as abstract members. Keep them out of the interface's
    reflected `TYPE` method list, or mark them as extensions there.
-5. **`syntax.md`:** add the rule to the `ext` section and to the visibility and
+5. **`SYNTAX.md`:** add the rule to the `ext` section and to the visibility and
    member-resolution rules.
 6. **Examples:**
    - `examples/failures/` for the name clash.

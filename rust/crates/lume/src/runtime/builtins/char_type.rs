@@ -6,24 +6,30 @@ use crate::{
 };
 
 pub(super) fn define() -> RuntimeType {
-    let mut ty = super::empty_builtin_type("Rune");
+    let mut ty = super::empty_builtin_type("Char");
     ty.methods = vec![super::builtin_method(
         0,
         "repeat",
         vec![ir::Type::Int],
-        rune_repeat,
+        char_repeat,
     )];
     ty
 }
 
-fn rune_repeat(
+fn char_repeat(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
     span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
-    let Value::Rune(rune) = receiver else {
+    let Value::Char(character) = receiver else {
         unreachable!();
     };
-    super::str_type::repeat_text(interpreter, &rune.to_string(), &args, span, "Rune.repeat")
+    super::str_type::repeat_text(
+        interpreter,
+        &character.to_string(),
+        &args,
+        span,
+        "Char.repeat",
+    )
 }

@@ -1026,7 +1026,7 @@ pub(crate) enum Value {
     Float(f64),
     Decimal(Decimal),
     String(String),
-    Rune(char),
+    Char(char),
     Tuple(Vec<Value>),
     List(Rc<RefCell<Vec<Value>>>),
     Set(Rc<RefCell<Vec<Value>>>),
@@ -1139,7 +1139,7 @@ impl Value {
             Value::Float(value) => render_float(*value),
             Value::Decimal(value) => value.to_string(),
             Value::String(value) => value.clone(),
-            Value::Rune(value) => value.to_string(),
+            Value::Char(value) => value.to_string(),
             Value::Tuple(items) => format!(
                 "({})",
                 items
@@ -2127,9 +2127,9 @@ impl<'a> Interpreter<'a> {
                 let _ = args;
                 self.either_left(Value::Unit)
             }
-            ir::Type::Named { name, args } if name == "Rune" => {
+            ir::Type::Named { name, args } if name == "Char" => {
                 let _ = args;
-                Value::Rune('\0')
+                Value::Char('\0')
             }
             _ => Value::Unit,
         }
@@ -2249,7 +2249,7 @@ impl<'a> Interpreter<'a> {
             Value::Decimal(_) => RuntimeTypeValue::Primitive("Decimal".to_string()),
             Value::Bool(_) => RuntimeTypeValue::Primitive("Bool".to_string()),
             Value::Unit => RuntimeTypeValue::Primitive("Unit".to_string()),
-            Value::Rune(_) => RuntimeTypeValue::Primitive("Rune".to_string()),
+            Value::Char(_) => RuntimeTypeValue::Primitive("Char".to_string()),
             Value::Tuple(items) => RuntimeTypeValue::Tuple(vec![ir::Type::Unknown; items.len()]),
             Value::Record(_) => RuntimeTypeValue::AnonymousShape(Vec::new()),
             Value::Closure(_) => RuntimeTypeValue::Function {
@@ -2309,9 +2309,9 @@ impl<'a> Interpreter<'a> {
             Value::Decimal(_) => self
                 .runtime
                 .type_id_by_name_kind("Decimal", crate::ast::TypeKind::Class),
-            Value::Rune(_) => self
+            Value::Char(_) => self
                 .runtime
-                .type_id_by_name_kind("Rune", crate::ast::TypeKind::Class),
+                .type_id_by_name_kind("Char", crate::ast::TypeKind::Class),
             Value::List(_) => self
                 .runtime
                 .type_id_by_name_kind("Vector", crate::ast::TypeKind::Class),
@@ -4859,7 +4859,7 @@ impl<'a> Interpreter<'a> {
             Value::String(value) => {
                 self.json_variant("JsonString", &["value"], vec![Value::String(value.clone())])
             }
-            Value::Rune(value) => self.json_variant(
+            Value::Char(value) => self.json_variant(
                 "JsonString",
                 &["value"],
                 vec![Value::String(value.to_string())],
@@ -5217,13 +5217,13 @@ impl<'a> Interpreter<'a> {
             "Bool" => json_bool(value)
                 .map(Value::Bool)
                 .ok_or_else(|| "expected JSON boolean for Bool".to_string()),
-            "Rune" => {
+            "Char" => {
                 let code =
-                    json_i64(value).ok_or_else(|| "expected JSON integer for Rune".to_string())?;
+                    json_i64(value).ok_or_else(|| "expected JSON integer for Char".to_string())?;
                 let code = u32::try_from(code)
                     .map_err(|_| format!("invalid Unicode scalar value {code}"))?;
                 char::from_u32(code)
-                    .map(Value::Rune)
+                    .map(Value::Char)
                     .ok_or_else(|| format!("invalid Unicode scalar value {code}"))
             }
             other => {
@@ -5248,7 +5248,7 @@ impl<'a> Interpreter<'a> {
             .cloned()
             .ok_or_else(|| "JSON target type metadata is unavailable".to_string())?;
         match runtime_type.name.as_str() {
-            "Str" | "Int" | "Int64" | "Float" | "Float64" | "Decimal" | "Bool" | "Rune" => {
+            "Str" | "Int" | "Int64" | "Float" | "Float64" | "Decimal" | "Bool" | "Char" => {
                 return self.decode_json_primitive(value, &runtime_type.name, span);
             }
             "Option" => {
@@ -5447,7 +5447,7 @@ impl<'a> Interpreter<'a> {
             ir::Type::Named { name, .. }
                 if matches!(
                     name.as_str(),
-                    "Rune"
+                    "Char"
                         | "Decimal"
                         | "Option"
                         | "Vector"
@@ -6163,7 +6163,7 @@ impl<'a> Interpreter<'a> {
             (Value::Float(lhs), Value::Float(rhs)) => Ok(lhs == rhs),
             (Value::Decimal(lhs), Value::Decimal(rhs)) => Ok(lhs == rhs),
             (Value::String(lhs), Value::String(rhs)) => Ok(lhs == rhs),
-            (Value::Rune(lhs), Value::Rune(rhs)) => Ok(lhs == rhs),
+            (Value::Char(lhs), Value::Char(rhs)) => Ok(lhs == rhs),
             (Value::Tuple(lhs), Value::Tuple(rhs)) => {
                 if lhs.len() != rhs.len() {
                     return Ok(false);
@@ -6343,8 +6343,8 @@ impl<'a> Interpreter<'a> {
                 "Str".hash(&mut hasher);
                 value.hash(&mut hasher);
             }
-            Value::Rune(value) => {
-                "Rune".hash(&mut hasher);
+            Value::Char(value) => {
+                "Char".hash(&mut hasher);
                 value.hash(&mut hasher);
             }
             Value::ReferenceId(reference) => {
@@ -7179,7 +7179,7 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 Value::String(_) => name == "Str",
-                Value::Rune(_) => name == "Rune",
+                Value::Char(_) => name == "Char",
                 Value::Int(_) => name == "Int",
                 Value::Float(_) => name == "Float",
                 Value::Decimal(_) => name == "Decimal",
@@ -8507,7 +8507,7 @@ fn runtime_type_kind_name(kind: crate::ast::TypeKind) -> &'static str {
 fn is_primitive_type_name(name: &str) -> bool {
     matches!(
         name,
-        "Bool" | "Decimal" | "Float" | "Int" | "Never" | "Rune" | "Unit"
+        "Bool" | "Decimal" | "Float" | "Int" | "Never" | "Char" | "Unit"
     )
 }
 
@@ -10185,13 +10185,13 @@ mod tests {
                 OS.println((left + Vec(1, 2))[1])
                 OS.println((-left)[0])
 
-                nul Rune = "\0".runeAt(0)!
+                nul Char = "\0".charAt(0)!
                 ints = Array.fill(2, 0)
                 floats = Array.fill(1, 0.0)
                 bools = Array.fill(1, false)
                 strs = Array.fill(1, "")
-                runes = Array.fill(1, nul)
-                OS.println(ints[0], floats[0], bools[0], strs[0], runes[0] == nul)
+                characters = Array.fill(1, nul)
+                OS.println(ints[0], floats[0], bools[0], strs[0], characters[0] == nul)
             }
             "#,
         );
@@ -10654,20 +10654,20 @@ $name
     }
 
     #[test]
-    fn runs_string_rune_access_methods() {
+    fn runs_string_char_access_methods() {
         let program = lower_inline(
             r##"
             fn main() Unit {
                 word Str = "apple"
-                first Rune = word.runeAt(0)!
-                let second <- word.runeAt(1) else panic("expected second rune")
-                missing = word.runeAt(9)
+                first Char = word.charAt(0)!
+                let second <- word.charAt(1) else panic("expected second character")
+                missing = word.charAt(9)
 
                 OS.println(first)
                 OS.println(second)
                 OS.println(missing.isEmpty)
                 OS.println("😀a".size)
-                OS.println("😀a".runeAt(1)!)
+                OS.println("😀a".charAt(1)!)
                 text Str = "a😀bc"
                 OS.println(text[:])
                 OS.println(text[:2])
@@ -10737,7 +10737,7 @@ $name
     }
 
     #[test]
-    fn string_and_rune_repeat_reject_invalid_counts() {
+    fn string_and_char_repeat_reject_invalid_counts() {
         for (expression, message) in [
             (
                 r#""text".repeat(-1)"#,
@@ -10745,12 +10745,12 @@ $name
             ),
             (r#""".repeat(-1)"#, "Str.repeat count must be non-negative"),
             (
-                r#""x".runeAt(0)!.repeat(-1)"#,
-                "Rune.repeat count must be non-negative",
+                r#""x".charAt(0)!.repeat(-1)"#,
+                "Char.repeat count must be non-negative",
             ),
             (r#""xx".repeat(Int.MAX)"#, "repeated string is too large"),
             (
-                r#""😀".runeAt(0)!.repeat(Int.MAX)"#,
+                r#""😀".charAt(0)!.repeat(Int.MAX)"#,
                 "repeated string is too large",
             ),
         ] {

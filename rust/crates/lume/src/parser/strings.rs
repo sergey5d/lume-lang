@@ -171,7 +171,7 @@ fn encode_string_literal(value: &str) -> String {
 }
 
 fn parse_interpolated_string_parts(body: &str) -> Result<Vec<InterpolatedStringPart>, String> {
-    let runes: Vec<char> = body.chars().collect();
+    let characters: Vec<char> = body.chars().collect();
     let mut parts = Vec::new();
     let mut literal = String::new();
     let flush_literal = |parts: &mut Vec<InterpolatedStringPart>, literal: &mut String| {
@@ -185,9 +185,9 @@ fn parse_interpolated_string_parts(body: &str) -> Result<Vec<InterpolatedStringP
     };
 
     let mut i = 0usize;
-    while i < runes.len() {
-        match runes[i] {
-            '\\' if i + 1 < runes.len() && runes[i + 1] == '$' => {
+    while i < characters.len() {
+        match characters[i] {
+            '\\' if i + 1 < characters.len() && characters[i + 1] == '$' => {
                 literal.push('$');
                 i += 2;
             }
@@ -196,14 +196,14 @@ fn parse_interpolated_string_parts(body: &str) -> Result<Vec<InterpolatedStringP
                 i += 1;
             }
             '$' => {
-                if i + 1 >= runes.len() {
+                if i + 1 >= characters.len() {
                     return Err("dangling '$'".to_string());
                 }
                 flush_literal(&mut parts, &mut literal);
-                if runes[i + 1] == '{' {
+                if characters[i + 1] == '{' {
                     let start = i + 2;
-                    let end = find_interpolated_expr_end(&runes, start)?;
-                    let expr: String = runes[start..end].iter().collect();
+                    let end = find_interpolated_expr_end(&characters, start)?;
+                    let expr: String = characters[start..end].iter().collect();
                     if expr.is_empty() {
                         return Err("empty interpolation".to_string());
                     }
@@ -214,17 +214,17 @@ fn parse_interpolated_string_parts(body: &str) -> Result<Vec<InterpolatedStringP
                     i = end + 1;
                     continue;
                 }
-                if !is_ascii_identifier_start(runes[i + 1]) {
+                if !is_ascii_identifier_start(characters[i + 1]) {
                     return Err("expected identifier or '{' after '$'".to_string());
                 }
                 let start = i + 1;
                 let mut end = start + 1;
-                while end < runes.len() && is_ascii_identifier_continue(runes[end]) {
+                while end < characters.len() && is_ascii_identifier_continue(characters[end]) {
                     end += 1;
                 }
                 parts.push(InterpolatedStringPart {
                     is_literal: false,
-                    text: runes[start..end].iter().collect(),
+                    text: characters[start..end].iter().collect(),
                 });
                 i = end;
             }
@@ -247,11 +247,11 @@ fn is_ascii_identifier_continue(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
 }
 
-fn find_interpolated_expr_end(runes: &[char], start: usize) -> Result<usize, String> {
+fn find_interpolated_expr_end(characters: &[char], start: usize) -> Result<usize, String> {
     let mut depth = 1usize;
     let mut i = start;
-    while i < runes.len() {
-        match runes[i] {
+    while i < characters.len() {
+        match characters[i] {
             '{' => depth += 1,
             '}' => {
                 depth -= 1;
@@ -261,34 +261,34 @@ fn find_interpolated_expr_end(runes: &[char], start: usize) -> Result<usize, Str
             }
             '"' => {
                 i += 1;
-                while i < runes.len() {
-                    if runes[i] == '\\' {
+                while i < characters.len() {
+                    if characters[i] == '\\' {
                         i += 2;
                         continue;
                     }
-                    if runes[i] == '"' {
+                    if characters[i] == '"' {
                         break;
                     }
                     i += 1;
                 }
-                if i >= runes.len() {
+                if i >= characters.len() {
                     return Err("unterminated string inside interpolation".to_string());
                 }
             }
             '\'' => {
                 i += 1;
-                while i < runes.len() {
-                    if runes[i] == '\\' {
+                while i < characters.len() {
+                    if characters[i] == '\\' {
                         i += 2;
                         continue;
                     }
-                    if runes[i] == '\'' {
+                    if characters[i] == '\'' {
                         break;
                     }
                     i += 1;
                 }
-                if i >= runes.len() {
-                    return Err("unterminated rune inside interpolation".to_string());
+                if i >= characters.len() {
+                    return Err("unterminated character inside interpolation".to_string());
                 }
             }
             _ => {}

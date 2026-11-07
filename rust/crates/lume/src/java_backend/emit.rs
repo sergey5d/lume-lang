@@ -9541,12 +9541,12 @@ impl<'a> SourceBodyEmitter<'a> {
                         || self
                             .expr_type(receiver, bindings)
                             .as_ref()
-                            .is_some_and(|ty| is_named_builtin(ty, "Rune"))) =>
+                            .is_some_and(|ty| is_named_builtin(ty, "Char"))) =>
             {
                 let helper = if self.is_java_string_receiver(receiver, bindings) {
                     "stringRepeat"
                 } else {
-                    "runeRepeat"
+                    "charRepeat"
                 };
                 Some(format!(
                     "lume.core.LumeRuntime.{helper}({}, {})",
@@ -9618,12 +9618,12 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. }
-                if name == "runeAt"
+                if name == "charAt"
                     && args.len() == 1
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
                 Some(format!(
-                    "lume.core.LumeRuntime.stringRuneAt({}, {})",
+                    "lume.core.LumeRuntime.stringCharAt({}, {})",
                     self.emit_receiver_expr(receiver, bindings)?,
                     self.emit_call_arg(&args[0], bindings)?
                 ))
@@ -12865,7 +12865,7 @@ fn java_named_builtin_value(name: &str) -> Option<String> {
         "Decimal" => Some("lume.core.LumeDecimal".to_string()),
         "Rounding" => Some("lume.core.Rounding".to_string()),
         "Str" => Some("String".to_string()),
-        "Rune" => Some("Integer".to_string()),
+        "Char" => Some("Integer".to_string()),
         "Eq" => Some("lume.core.Eq".to_string()),
         "Hashed" => Some("lume.core.Hashed".to_string()),
         "Comparable" => Some("lume.core.Comparable".to_string()),
@@ -12926,7 +12926,7 @@ fn java_named_builtin_annotation(name: &str) -> Option<String> {
         "Int" => Some("long".to_string()),
         "Float" => Some("double".to_string()),
         "Str" => Some("String".to_string()),
-        "Rune" => Some("int".to_string()),
+        "Char" => Some("int".to_string()),
         _ => None,
     }
 }
@@ -13031,7 +13031,7 @@ fn builtin_method_param_types(
                 | "nonEmpty" | "isBlank" | "lines",
                 0,
             ) => Some(Vec::new()),
-            ("runeAt", 1) => Some(vec![ir::Type::Int]),
+            ("charAt", 1) => Some(vec![ir::Type::Int]),
             ("repeat", 1) => Some(vec![ir::Type::Int]),
             ("slice", 0) => Some(Vec::new()),
             ("slice", 1) => Some(vec![ir::Type::Int]),
@@ -13039,7 +13039,7 @@ fn builtin_method_param_types(
             _ => None,
         };
     }
-    if is_named_builtin(receiver, "Rune") && method == "repeat" && arg_len == 1 {
+    if is_named_builtin(receiver, "Char") && method == "repeat" && arg_len == 1 {
         return Some(vec![ir::Type::Int]);
     }
     match receiver {
@@ -13161,12 +13161,12 @@ fn builtin_method_return_type(
             ("size", 0) | ("compareTo", 1) => Some(ir::Type::Int),
             ("indexOf" | "lastIndexOf", 1) => Some(ir::Type::option(ir::Type::Int)),
             ("repeat", 1) => Some(ir::Type::Str),
-            ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
+            ("charAt", 1) => Some(ir::Type::option(ir::Type::named("Char"))),
             ("slice", 0..=2) => Some(ir::Type::Str),
             _ => None,
         };
     }
-    if is_named_builtin(receiver, "Rune") && method == "repeat" && arg_len == 1 {
+    if is_named_builtin(receiver, "Char") && method == "repeat" && arg_len == 1 {
         return Some(ir::Type::Str);
     }
     match receiver {

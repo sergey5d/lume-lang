@@ -314,11 +314,11 @@ public final class LumeRuntime {
         return text.repeat((int) count);
     }
 
-    public static String runeRepeat(int rune, long count) {
+    public static String charRepeat(int character, long count) {
         if (count < 0) {
-            throw new LumePanic("Rune.repeat count must be non-negative");
+            throw new LumePanic("Char.repeat count must be non-negative");
         }
-        return stringRepeat(new String(Character.toChars(rune)), count);
+        return stringRepeat(new String(Character.toChars(character)), count);
     }
 
     public static String stringTrimLeft(String text) {
@@ -387,7 +387,7 @@ public final class LumeRuntime {
         return (long) text.codePointCount(0, text.length());
     }
 
-    public static Option<Integer> stringRuneAt(String text, Long index) {
+    public static Option<Integer> stringCharAt(String text, Long index) {
         if (index < 0 || index > Integer.MAX_VALUE) {
             return optionNone();
         }

@@ -1,4 +1,0 @@
-# FAIL_REGEX:
-# runtime_error at .*: Rune.repeat count must be non-negative
-
-fn main() { println("x".runeAt(0)!.repeat(-1)) }

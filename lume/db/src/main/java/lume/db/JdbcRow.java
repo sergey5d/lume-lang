@@ -166,7 +166,7 @@ public final class JdbcRow {
         return switch (descriptor) {
             case "Str" -> String.valueOf(value);
             case "Int", "Int64" -> toLong(value);
-            case "Rune" -> Math.toIntExact(toLong(value));
+            case "Char" -> Math.toIntExact(toLong(value));
             case "Float", "Float64" -> toDouble(value);
             case "Bool" -> toBool(value);
             default -> value;

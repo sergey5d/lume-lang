@@ -387,7 +387,7 @@ public final class JsonRuntime {
             case "JsonValue" -> encode(value);
             case "Str" -> value == null ? "" : String.valueOf(value);
             case "Int", "Int64" -> toLong(value, trimmed);
-            case "Rune" -> Math.toIntExact(toLong(value, trimmed));
+            case "Char" -> Math.toIntExact(toLong(value, trimmed));
             case "Float", "Float64" -> toDouble(value, trimmed);
             case "Decimal" -> {
                 if (!(value instanceof Number) && !(value instanceof String)) {
@@ -543,7 +543,7 @@ public final class JsonRuntime {
         return switch (trimmed) {
             case "Str" -> "";
             case "Int", "Int64" -> 0L;
-            case "Rune" -> 0;
+            case "Char" -> 0;
             case "Float", "Float64" -> 0.0;
             case "Decimal" -> LumeDecimal.fromInt(0);
             case "Bool" -> false;

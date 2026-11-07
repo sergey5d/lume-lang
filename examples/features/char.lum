@@ -1,0 +1,21 @@
+# EXPECT:
+# ,
+# Ж
+# 😀😀
+# 1 2
+
+module examples/char
+
+fn main() {
+    separator Char = ",".charAt(0)!
+    letter Char = "Ж".charAt(0)!
+    symbol Char = "😀".charAt(0)!
+    println(separator)
+    println(letter)
+    println(symbol.repeat(2))
+
+    # Char and string indexes use Unicode scalar values, not grapheme clusters.
+    println("é".size, "é".size)
+    assert(symbol.runtimeType.name! == "Char")
+    assert("😀".charAt(1).isEmpty)
+}

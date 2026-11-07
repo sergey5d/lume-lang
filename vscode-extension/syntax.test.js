@@ -18,5 +18,8 @@ for (const source of ['fn(Int) Str', 'fn (Int) Str', 'fn() Int']) {
     assert.equal(keywordScope(source), 'storage.type.function.lume');
 }
 assert.equal(keywordScope('def normalize(value Str)'), undefined);
+const builtinType = new RegExp(grammar.repository.types.patterns[0].match);
+assert.ok(builtinType.test('Char'));
+assert.ok(!builtinType.test('Rune'));
 assert.match('fn main() {', new RegExp(configuration.folding.markers.start));
 console.log('Lume syntax checks passed');

@@ -3,11 +3,11 @@
 
 # "First" means first successful path in `allWords` order.
 
-fn firstLetter(word Str) Rune = word.runeAt(0)!
+fn firstLetter(word Str) Char = word.charAt(0)!
 
-fn lastLetter(word Str) Rune = word.runeAt(word.size - 1)!
+fn lastLetter(word Str) Char = word.charAt(word.size - 1)!
 
-fn matches(firstChar Rune, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) [Str]? {
+fn matches(firstChar Char, endWord Str, allWords [Str], pickedWords Set[Str], path [Str]) [Str]? {
     for word <- allWords {
         if pickedWords.contains(word) {
             continue

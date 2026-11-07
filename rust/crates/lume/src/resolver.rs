@@ -338,7 +338,7 @@ impl AmbientRegistry {
     fn with_builtin_values() -> Self {
         let mut registry = AmbientRegistry::default();
         for value in [
-            "Vector", "Map", "Int", "Bool", "Rune", "Float", "Decimal", "Str", "Unit", "Never",
+            "Vector", "Map", "Int", "Bool", "Char", "Float", "Decimal", "Str", "Unit", "Never",
             "print", "println", "printf", "panic", "assert", "ensure", "identity", "Math",
         ] {
             registry.values.insert(value.to_string());
@@ -4480,13 +4480,13 @@ fn member_reference_span(span: crate::source::Span, name: &str) -> crate::source
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
     match name {
-        "Any" | "Int" | "Bool" | "Rune" | "Float" | "Decimal" | "Str" | "Unit" | "Never" => Some(0),
+        "Any" | "Int" | "Bool" | "Char" | "Float" | "Decimal" | "Str" | "Unit" | "Never" => Some(0),
         _ => None,
     }
 }
 
 fn is_builtin_extension_target(name: &str) -> bool {
-    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Rune" | "Str")
+    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Char" | "Str")
 }
 
 fn arity_label(arity: usize) -> &'static str {
@@ -4673,6 +4673,23 @@ fn main() Parser.Outcome = Parser().parse("ok")
         );
         let result = resolve_program(&program);
         assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn char_replaces_the_legacy_rune_primitive() {
+        let program = parse_inline("fn identity(value Char) Char = value");
+        let result = resolve_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+
+        let program = parse_inline("fn identity(value Rune) Rune = value");
+        let result = resolve_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "undefined_type" && diagnostic.message.contains("Rune")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
     }
 
     #[test]

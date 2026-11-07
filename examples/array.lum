@@ -42,11 +42,11 @@ fn main() Unit {
     assigned = Array.fill(2, 0)
     assigned[0] := 9
     assigned[1] := 10
-    nul Rune = "\0".runeAt(0)!
+    nul Char = "\0".charAt(0)!
     defaultFloats = Array.fill(1, 0.0)
     defaultBools = Array.fill(1, false)
     defaultStrs = Array.fill(1, "")
-    defaultRunes = Array.fill(1, nul)
+    defaultChars = Array.fill(1, nul)
     filled = Array.fill(2, 7)
     generated = Array.generate(3, idx => idx * 2)
 
@@ -60,7 +60,7 @@ fn main() Unit {
     println("zip " + zippedValue + " " + zippedLabel)
     println("zipIndex " + indexedValue + " " + indexedPos)
     println("assigned " + assigned[0] + " " + assigned[1])
-    println("defaults " + defaultFloats[0] + " " + defaultBools[0] + " " + defaultStrs[0] + " " + defaultRunes.size)
+    println("defaults " + defaultFloats[0] + " " + defaultBools[0] + " " + defaultStrs[0] + " " + defaultChars.size)
     println("filled " + filled[0] + " " + filled[1])
     println("generated " + generated[0] + " " + generated[2])
     println("size " + values.size)

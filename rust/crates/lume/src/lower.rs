@@ -9784,7 +9784,7 @@ fn zero_arg_function_type(value_ty: ir::Type) -> ir::Type {
 }
 
 fn is_builtin_extension_target(name: &str) -> bool {
-    matches!(name, "Bool" | "Float" | "Int" | "Rune" | "Str")
+    matches!(name, "Bool" | "Float" | "Int" | "Char" | "Str")
 }
 
 fn builtin_extension_receiver_name(ty: &ir::Type) -> Option<&'static str> {
@@ -11354,7 +11354,7 @@ fn ir_type_is_hashable(
             if args.is_empty()
                 && matches!(
                     name.as_str(),
-                    "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                    "Bool" | "Float" | "Int" | "Char" | "Str" | "Unit"
                 ) =>
         {
             true
@@ -11441,7 +11441,7 @@ fn ir_type_is_equality(
             if args.is_empty()
                 && matches!(
                     name.as_str(),
-                    "Bool" | "Float" | "Int" | "Rune" | "Str" | "Unit"
+                    "Bool" | "Float" | "Int" | "Char" | "Str" | "Unit"
                 ) =>
         {
             true

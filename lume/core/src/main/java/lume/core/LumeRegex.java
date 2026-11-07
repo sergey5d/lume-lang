@@ -63,7 +63,7 @@ public final class LumeRegex {
         while (cursor <= text.length() && matcher.find(cursor)) {
             int start = matcher.start();
             int end = matcher.end();
-            // Do not split a supplementary rune or repeat an empty match at the last match's end.
+            // Do not split a supplementary character or repeat an empty match at the last match's end.
             if (start != end || start != previousEnd) {
                 result.add(new LumeRegexMatch(text, matcher, names));
             }

@@ -1,0 +1,8 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+# One Unicode scalar value, not a byte, UTF-16 code unit, or grapheme cluster.
+public interface Char {
+    fn repeat(count Int) Str
+}

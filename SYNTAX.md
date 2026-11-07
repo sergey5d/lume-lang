@@ -42,8 +42,15 @@ Primitive types:
 - `Decimal`
 - `Bool`
 - `Str`
-- `Rune`
+- `Char`
 - `Unit`
+
+`Char` represents one Unicode scalar value: U+0000 through U+10FFFF, excluding
+the surrogate range U+D800 through U+DFFF. It is not a byte, a UTF-16 code
+unit, or necessarily a user-perceived character (grapheme cluster).
+For example, precomposed `é` contains one scalar, while `e` followed by a
+combining acute accent contains two. String indexing continues to use scalar
+values, not grapheme clusters. `Str.charAt(index)` returns `Char?`.
 
 Intrinsic collection types:
 
@@ -632,8 +639,8 @@ Rules:
 - `\$` inserts a literal dollar sign
 - `Str.size` returns the number of Unicode scalar values as `Int`; it does not
   count UTF-8 bytes or UTF-16 code units
-- `Str.runeAt(index)` uses a zero-based Unicode-scalar index and returns `None`
-  when `index` is negative or outside the string; use `runeAt(index) !` for
+- `Str.charAt(index)` uses a zero-based Unicode-scalar index and returns `None`
+  when `index` is negative or outside the string; use `charAt(index) !` for
   assertive extraction
 - `Str.slice()`, `Str.slice(start)`, and `Str.slice(start, end)` use zero-based
   Unicode-scalar indexes and return the selected half-open range; string slice
@@ -660,7 +667,7 @@ Rules:
   or CR and removing those terminators. Interior empty lines are preserved;
   a final terminator does not add an extra line, and an empty string returns
   an empty vector
-- `Str.repeat(count)` and `Rune.repeat(count)` return a `Str` containing the
+- `Str.repeat(count)` and `Char.repeat(count)` return a `Str` containing the
   receiver repeated `count` times. Zero returns `""`; a negative count is a
   runtime error. Construction is subject to the runtime's string-size and
   allocation limits
@@ -2883,7 +2890,7 @@ println(counter.doubled())
 Extension rules:
 
 - extension blocks use `ext TypeName { fn method(...) ... }`
-- extension targets may be classes, shapes, declared unions, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Rune`
+- extension targets may be classes, shapes, declared unions, interfaces, or built-in primitive types such as `Int`, `Float`, `Bool`, `Str`, and `Char`
 - extension targets cannot be named objects, annotations, or individual union alternatives
 - extension blocks cannot declare constructors
 - a module may declare multiple `ext` blocks for the same target type
@@ -3484,7 +3491,7 @@ immutable fields and methods; `with` only adds the interfaces implemented by
 the synthesized nominal object.
 
 Built-in primitive types are closed runtime types. `Int`, `Float`, `Str`,
-`Bool`, and `Rune` cannot appear as implementation targets after `with`, either
+`Bool`, and `Char` cannot appear as implementation targets after `with`, either
 on a named declaration, an anonymous object, or a generic parameter. User code
 cannot synthesize values that impersonate primitives. Extension blocks such as
 `ext Int { ... }` remain valid because they add checked API surface without

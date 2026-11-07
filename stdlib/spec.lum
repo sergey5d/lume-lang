@@ -29,8 +29,8 @@ ext Float {
     }
 }
 
-ext Rune {
-    fn shouldBe(expected Rune) Unit {
+ext Char {
+    fn shouldBe(expected Char) Unit {
         if this != expected {
             panic("expected " + expected.toStr() + ", got " + this.toStr())
         }

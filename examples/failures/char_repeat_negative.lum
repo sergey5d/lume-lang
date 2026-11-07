@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# runtime_error at .*: Char.repeat count must be non-negative
+
+fn main() { println("x".charAt(0)!.repeat(-1)) }

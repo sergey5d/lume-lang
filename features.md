@@ -2,7 +2,7 @@
 
 This file captures the main language gaps and near-term design directions.
 It is for unsettled or proposed features only; settled syntax and behavior
-belong in `syntax.md`.
+belong in `SYNTAX.md`.
 
 ## Highest Priority
 
@@ -150,10 +150,10 @@ Leaning:
 
 ### 8. Primitive Type Definitions
 
-Primitive types such as `Int`, `Float`, `Str`, `Rune`, `Bool`, and `Unit` should eventually have their public companion/static-style signatures defined in Lume source instead of being scattered through checker, interpreter, and backend special cases.
+Primitive types such as `Int`, `Float`, `Str`, `Char`, `Bool`, and `Unit` should eventually have their public companion/static-style signatures defined in Lume source instead of being scattered through checker, interpreter, and backend special cases.
 
 Possible direction:
-- define core/predef singleton-style surfaces such as `IntExt`, `FloatExt`, `StrExt`, `RuneExt`, and `BoolExt`
+- define core/predef singleton-style surfaces such as `IntExt`, `FloatExt`, `StrExt`, `CharExt`, and `BoolExt`
 - keep the user-facing syntax as `Int.parse(...)`, `Float.parse(...)`, etc.
 - lower or resolve those user-facing primitive companion calls to the corresponding Lume-defined implementation
 - keep tiny native bridges only where the platform boundary requires it, such as parsing through Java exceptions
@@ -184,7 +184,7 @@ Clarification on "failure conversion":
 
 ### 10. Advanced Flow Analysis
 
-The settled conservative `is` narrowing rules live in `syntax.md`. Possible
+The settled conservative `is` narrowing rules live in `SYNTAX.md`. Possible
 later flow-analysis work is limited to broader deductions:
 
 - combining narrowing facts through `&&` and carefully selected `||` forms
@@ -240,7 +240,7 @@ recover the hidden concrete implementation type behind an interface value.
 
 Reifiable type arguments should probably include every closed type that has a
 runtime descriptor:
-- primitive types such as `Int`, `Float`, `Bool`, `Str`, `Rune`, and `Unit`
+- primitive types such as `Int`, `Float`, `Bool`, `Str`, `Char`, and `Unit`
 - classes, declared unions and their alternatives, named objects, annotations, and named shapes
 - interfaces, as interface metadata only
 - tuples and function types, if their component types are also reifiable

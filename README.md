@@ -10,7 +10,7 @@ editing support.
 
 Start with the [Lume documentation](https://sergey5d.github.io/lume-lang/) for an
 overview and guided introduction. The complete language reference lives in
-[syntax.md](syntax.md). For implementation details, see
+[SYNTAX.md](SYNTAX.md). For implementation details, see
 [ARCHITECTURE.md](ARCHITECTURE.md) and [rust/README.md](rust/README.md).
 
 ## Design Goals
@@ -75,7 +75,7 @@ Control flow is expression-friendly but still explicit:
 Numeric models stay distinct: `Int` is checked signed 64-bit arithmetic, `Float`
 is binary64, and `Decimal` provides exact arbitrary-precision decimal arithmetic
 with literals such as `19.99d` and explicit rounding. See
-[decimal arithmetic](syntax.md#decimal-arithmetic) and the runnable
+[decimal arithmetic](SYNTAX.md#decimal-arithmetic) and the runnable
 [Decimal example](examples/features/decimal.lum).
 
 ## Quick Start
@@ -250,6 +250,6 @@ and [Java-backed HTTP services](examples/java_gradle_rest/README.md).
 - `examples/` - Lume programs used as samples and parity fixtures.
 - `stdlib/` - Standard library sources loaded by the Rust toolchain.
 - `vscode-extension/` - Editor highlighting, formatting, and type-definition navigation.
-- `syntax.md` - Current language syntax reference.
+- `SYNTAX.md` - Current language syntax reference.
 - `features.md` - Unsettled feature notes and design discussion.
 - `ARCHITECTURE.md` - High-level architecture notes for the current pipeline.

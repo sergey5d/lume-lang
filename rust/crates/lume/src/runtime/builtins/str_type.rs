@@ -19,7 +19,7 @@ pub(super) fn define() -> RuntimeType {
         methods: vec![
             builtin_method(0, "size", Vec::new(), str_size),
             builtin_method(1, "split", vec![crate::ir::Type::Str], str_split),
-            builtin_method(2, "runeAt", vec![crate::ir::Type::Int], str_rune_at),
+            builtin_method(2, "charAt", vec![crate::ir::Type::Int], str_char_at),
             builtin_method(3, "compare", vec![crate::ir::Type::Str], str_compare),
             builtin_method(4, "trim", Vec::new(), str_trim),
             builtin_method(5, "isEmpty", Vec::new(), str_is_empty),
@@ -107,7 +107,7 @@ fn str_compare(
     }))
 }
 
-fn string_rune_at(text: &str, index: i64) -> Option<char> {
+fn string_char_at(text: &str, index: i64) -> Option<char> {
     if index < 0 {
         return None;
     }
@@ -607,7 +607,7 @@ fn str_replace_regex(
     Ok(Value::String(replaced.into_owned()))
 }
 
-fn str_rune_at(
+fn str_char_at(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
@@ -617,11 +617,11 @@ fn str_rune_at(
         unreachable!();
     };
     let [index] = args.as_slice() else {
-        return Err(interpreter.runtime_error(span, "Str.runeAt expects 1 argument"));
+        return Err(interpreter.runtime_error(span, "Str.charAt expects 1 argument"));
     };
-    let index = index.as_int(interpreter, span, "Str.runeAt index")?;
-    Ok(match string_rune_at(&text, index) {
-        Some(value) => interpreter.option_some(Value::Rune(value)),
+    let index = index.as_int(interpreter, span, "Str.charAt index")?;
+    Ok(match string_char_at(&text, index) {
+        Some(value) => interpreter.option_some(Value::Char(value)),
         None => interpreter.option_none(),
     })
 }

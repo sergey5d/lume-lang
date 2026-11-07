@@ -3,7 +3,7 @@
 Status: implemented (runtime checking, explicit wrapping/checking APIs, and
 backend parity tests). Optional compile-time constant-expression detection is
 not implemented. The historical behaviour described below is as of commit
-`f208f747`; current numeric semantics are authoritative in `syntax.md`.
+`f208f747`; current numeric semantics are authoritative in `SYNTAX.md`.
 
 ## Summary
 
@@ -30,15 +30,15 @@ number generators, checksums), and where the caller wants to handle overflow
 
 ### Spec
 
-`syntax.md`, under "Numeric semantics":
+`SYNTAX.md`, under "Numeric semantics":
 
 - integer `+`, `-`, `*`, and unary `-` wrap modulo 2^64 on overflow
 - the overflowing `Int.MIN / -1` case wraps to `Int.MIN`; `Int.MIN % -1` is zero
 
 Also:
 
-- `syntax.md:724`: "`Int.pow` … like other `Int` arithmetic, wraps on overflow".
-- `syntax.md:3608`: warns that subtracting sort keys can wrap.
+- `SYNTAX.md:724`: "`Int.pow` … like other `Int` arithmetic, wraps on overflow".
+- `SYNTAX.md:3608`: warns that subtracting sort keys can wrap.
 
 ### Interpreter (`rust/crates/lume/src/interpreter.rs`)
 
@@ -245,7 +245,7 @@ Audit existing code for intentional wrapping. Only `stdlib/reference_id.lum:12`
 defines `hash()` in the repo today. Check whether it depends on wrapping, and
 switch to `wrapping*` if it does.
 
-### `syntax.md` changes
+### `SYNTAX.md` changes
 
 Replace these two bullets under "Numeric semantics":
 
@@ -269,10 +269,10 @@ with:
 
 Also update:
 
-- `syntax.md:724`: "Its multiplication, like other `Int` arithmetic, wraps on
+- `SYNTAX.md:724`: "Its multiplication, like other `Int` arithmetic, wraps on
   overflow" becomes "It panics when the result overflows; use `checkedPow` to
   handle overflow as `None`".
-- `syntax.md:3608`: "subtraction can wrap" becomes "subtraction can overflow
+- `SYNTAX.md:3608`: "subtraction can wrap" becomes "subtraction can overflow
   and panic".
 
 ## Tests

@@ -1401,7 +1401,7 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
 }
 
 fn is_builtin_primitive_type_name(name: &str) -> bool {
-    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Rune" | "Str")
+    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Char" | "Str")
 }
 
 fn primitive_implementation_diagnostic(name: &str, span: crate::source::Span) -> Diagnostic {
@@ -10155,7 +10155,7 @@ impl<'a> Checker<'a> {
         };
         if matches!(
             name.as_str(),
-            "Any" | "Bool" | "Decimal" | "Float" | "Int" | "ReferenceId" | "Rune" | "Str" | "Unit"
+            "Any" | "Bool" | "Decimal" | "Float" | "Int" | "ReferenceId" | "Char" | "Str" | "Unit"
         ) {
             return false;
         }
@@ -14276,7 +14276,7 @@ impl<'a> Checker<'a> {
                 if args.is_empty()
                     && matches!(
                         name.as_str(),
-                        "Bool" | "Float" | "Decimal" | "Int" | "Rune" | "Str" | "Unit"
+                        "Bool" | "Float" | "Decimal" | "Int" | "Char" | "Str" | "Unit"
                     ) =>
             {
                 true
@@ -14344,7 +14344,7 @@ impl<'a> Checker<'a> {
                 if args.is_empty()
                     && matches!(
                         name.as_str(),
-                        "Bool" | "Float" | "Decimal" | "Int" | "Rune" | "Str" | "Unit"
+                        "Bool" | "Float" | "Decimal" | "Int" | "Char" | "Str" | "Unit"
                     ) =>
             {
                 true
@@ -19129,7 +19129,7 @@ class FakeInt with Int {}
 shape FakeFloat with Float {}
 interface FakeStr with Str {}
 object FakeBool with Bool {}
-annotation FakeRune with Rune {}
+annotation FakeChar with Char {}
 
 fn invalid[T with Int](value T) Unit = ()
 
@@ -19226,12 +19226,12 @@ fn main() Unit {
         let program = parse_inline(
             r#"
 fn main() Unit {
-    nul Rune = "\0".runeAt(0)!
+    nul Char = "\0".charAt(0)!
     ints Array[Int] = Array.fill(3, 0)
     floats Array[Float] = Array.fill(3, 0.0)
     bools Array[Bool] = Array.fill(3, false)
     texts Array[Str] = Array.fill(3, "")
-    runes Array[Rune] = Array.fill(3, nul)
+    characters Array[Char] = Array.fill(3, nul)
 }
 "#,
         );
@@ -23867,15 +23867,28 @@ fn fromEither(value Either[Str, Int]) Int = value.getOr(0)
     }
 
     #[test]
+    fn rejects_legacy_rune_at() {
+        let program = parse_inline("fn oldAccess(text Str) Char? = text.runeAt(0)");
+        let result = check_program(&program);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "unknown_member" && diagnostic.message.contains("runeAt")
+            }),
+            "{:#?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
     fn rejects_removed_panic_only_helpers() {
         let program = parse_inline(
             r#"
-fn rune(text Str) Rune = text.expectRuneAt(0)
+fn character(text Str) Char = text.expectCharAt(0)
 fn reflection(method Method, receiver Any) Any = method.invoke(receiver)
 "#,
         );
         let result = check_program(&program);
-        for removed in ["expectRuneAt", "invoke"] {
+        for removed in ["expectCharAt", "invoke"] {
             assert!(
                 result.diagnostics.iter().any(|diagnostic| {
                     diagnostic.code == "unknown_member" && diagnostic.message.contains(removed)
