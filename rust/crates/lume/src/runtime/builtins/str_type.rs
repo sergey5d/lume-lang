@@ -70,6 +70,15 @@ pub(super) fn define() -> RuntimeType {
                 vec![crate::ir::Type::Str, crate::ir::Type::Str],
                 str_replace_all,
             ),
+            builtin_method(23, "isBlank", Vec::new(), str_is_blank),
+            builtin_method(24, "lines", Vec::new(), str_lines),
+            builtin_method(25, "repeat", vec![crate::ir::Type::Int], str_repeat),
+            builtin_method(
+                26,
+                "lastIndexOf",
+                vec![crate::ir::Type::Str],
+                str_last_index_of,
+            ),
         ],
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),
@@ -181,6 +190,93 @@ fn str_non_empty(
         return Err(interpreter.runtime_error(span, "Str.nonEmpty expects 0 arguments"));
     }
     Ok(Value::Bool(!text.is_empty()))
+}
+
+fn str_is_blank(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!()
+    };
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Str.isBlank expects 0 arguments"));
+    }
+    Ok(Value::Bool(text.chars().all(char::is_whitespace)))
+}
+
+fn str_lines(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!()
+    };
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Str.lines expects 0 arguments"));
+    }
+    let mut lines = Vec::new();
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if matches!(bytes[index], b'\n' | b'\r') {
+            lines.push(Value::String(text[start..index].to_string()));
+            if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
+                index += 1;
+            }
+            start = index + 1;
+        }
+        index += 1;
+    }
+    if start < text.len() {
+        lines.push(Value::String(text[start..].to_string()));
+    }
+    Ok(Value::list(lines))
+}
+
+fn str_repeat(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!()
+    };
+    repeat_text(interpreter, &text, &args, span, "Str.repeat")
+}
+
+pub(super) fn repeat_text(
+    interpreter: &mut Interpreter<'_>,
+    text: &str,
+    args: &[Value],
+    span: Option<Span>,
+    method: &str,
+) -> Result<Value, Diagnostic> {
+    let [count] = args else {
+        return Err(interpreter.runtime_error(span, format!("{method} expects 1 argument")));
+    };
+    let count = count.as_int(interpreter, span, method)?;
+    if count < 0 {
+        return Err(interpreter.runtime_error(span, format!("{method} count must be non-negative")));
+    }
+    if count == 0 || text.is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    let too_large = || interpreter.runtime_error(span, "repeated string is too large");
+    let count = usize::try_from(count).map_err(|_| too_large())?;
+    let size = text.len().checked_mul(count).ok_or_else(too_large)?;
+    let mut result = String::new();
+    result.try_reserve_exact(size).map_err(|_| too_large())?;
+    for _ in 0..count {
+        result.push_str(text);
+    }
+    Ok(Value::String(result))
 }
 
 fn str_split(
@@ -385,6 +481,27 @@ fn str_index_of(
     };
     let index = text[..byte_index].chars().count() as i64;
     Ok(interpreter.option_some(Value::Int(index)))
+}
+
+fn str_last_index_of(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    let Value::String(text) = receiver else {
+        unreachable!()
+    };
+    let [part] = args.as_slice() else {
+        return Err(interpreter.runtime_error(span, "Str.lastIndexOf expects 1 argument"));
+    };
+    let Value::String(part) = part else {
+        return Err(interpreter.runtime_error(span, "Str.lastIndexOf argument must be Str"));
+    };
+    Ok(match text.rfind(part) {
+        Some(index) => interpreter.option_some(Value::Int(text[..index].chars().count() as i64)),
+        None => interpreter.option_none(),
+    })
 }
 
 fn str_replace_first(

@@ -10693,6 +10693,47 @@ $name
     }
 
     #[test]
+    fn runs_string_utilities() {
+        let run = run_path(
+            &repo_root().join("examples/features/string_utilities.lum"),
+            None,
+        )
+        .expect("run string utilities");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "string utilities ok\n");
+    }
+
+    #[test]
+    fn string_and_rune_repeat_reject_invalid_counts() {
+        for (expression, message) in [
+            (
+                r#""text".repeat(-1)"#,
+                "Str.repeat count must be non-negative",
+            ),
+            (r#""".repeat(-1)"#, "Str.repeat count must be non-negative"),
+            (
+                r#""x".runeAt(0)!.repeat(-1)"#,
+                "Rune.repeat count must be non-negative",
+            ),
+            (r#""xx".repeat(Int.MAX)"#, "repeated string is too large"),
+            (
+                r#""😀".runeAt(0)!.repeat(Int.MAX)"#,
+                "repeated string is too large",
+            ),
+        ] {
+            let program = lower_inline(&format!("fn main() {{ println({expression}) }}"));
+            let run = run_program(&program);
+            assert!(
+                run.diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message == message),
+                "{expression}: {:#?}",
+                run.diagnostics
+            );
+        }
+    }
+
+    #[test]
     fn runs_collection_from_add_and_add_all_methods() {
         let program = lower_inline(
             r#"

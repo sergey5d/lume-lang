@@ -1,0 +1,4 @@
+# FAIL_REGEX:
+# .*getter 'isBlank' is called with parentheses.*
+
+fn main() { println(" ".isBlank()) }

@@ -3,6 +3,7 @@ mod int_range_type;
 mod map_type;
 mod option_type;
 mod result_type;
+mod rune_type;
 mod set_type;
 mod str_type;
 mod vector_type;
@@ -62,7 +63,7 @@ pub(super) fn builtin_types() -> Vec<RuntimeType> {
         empty_builtin_type("Float"),
         empty_builtin_type("Decimal"),
         empty_builtin_type("Int"),
-        empty_builtin_type("Rune"),
+        rune_type::define(),
         str_type::define(),
         option_type::define(),
         result_type::define(),

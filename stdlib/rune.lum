@@ -1,0 +1,7 @@
+# PRELUDE_SKIP
+# JAVA_SKIP
+# INTERPRETER
+
+public interface Rune {
+    fn repeat(count Int) Str
+}

@@ -285,6 +285,42 @@ public final class LumeRuntime {
         return text.strip();
     }
 
+    public static Boolean stringIsBlank(String text) {
+        // Unicode White_Space, including NBSP and NEL which Java isBlank omits.
+        return text.codePoints().allMatch(value ->
+            (value >= 0x09 && value <= 0x0d) || value == 0x20 || value == 0x85 ||
+            value == 0xa0 || value == 0x1680 || (value >= 0x2000 && value <= 0x200a) ||
+            value == 0x2028 || value == 0x2029 || value == 0x202f ||
+            value == 0x205f || value == 0x3000
+        );
+    }
+
+    public static LumeVector<String> stringLines(String text) {
+        var lines = new ArrayList<String>();
+        text.lines().forEach(lines::add);
+        return LumeVector.from(lines);
+    }
+
+    public static String stringRepeat(String text, long count) {
+        if (count < 0) {
+            throw new LumePanic("Str.repeat count must be non-negative");
+        }
+        if (count == 0 || text.isEmpty()) {
+            return "";
+        }
+        if (count > Integer.MAX_VALUE / text.length()) {
+            throw new LumePanic("repeated string is too large");
+        }
+        return text.repeat((int) count);
+    }
+
+    public static String runeRepeat(int rune, long count) {
+        if (count < 0) {
+            throw new LumePanic("Rune.repeat count must be non-negative");
+        }
+        return stringRepeat(new String(Character.toChars(rune)), count);
+    }
+
     public static String stringTrimLeft(String text) {
         return text.stripLeading();
     }
@@ -315,6 +351,13 @@ public final class LumeRuntime {
 
     public static Option<Long> stringIndexOf(String text, String part) {
         int utf16Index = text.indexOf(part);
+        return utf16Index < 0
+            ? optionNone()
+            : optionSome((long) text.codePointCount(0, utf16Index));
+    }
+
+    public static Option<Long> stringLastIndexOf(String text, String part) {
+        int utf16Index = text.lastIndexOf(part);
         return utf16Index < 0
             ? optionNone()
             : optionSome((long) text.codePointCount(0, utf16Index));

@@ -2336,6 +2336,44 @@ mod tests {
     }
 
     #[test]
+    fn runs_match_value_bindings_with_exiting_arms_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap();
+        let source = root.join("examples/features/match_value_exits.lum");
+        let interpreted = run_path(&source, None).expect("run match value exits");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        let expected = interpreted.output;
+        let temp = temp_path("lume-java-match-value-exits");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate match value exits");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac match value exits",
+        );
+        let result = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.match_value_exits.Match_value_exitsMain"),
+            "java match value exits",
+        );
+        assert_eq!(String::from_utf8(result.stdout).unwrap(), expected);
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn maps_lume_core_java_boundary_types_back_to_lume_types() {
         let span = Span::new(0, 0, LineColumn::new(1, 1), LineColumn::new(1, 1));
         let local_type_names = HashMap::from([
@@ -9092,6 +9130,92 @@ fn main() Unit {
             "2\na\nb\n3\nalpha\nbeta\ngamma\ntrue\ntrue\nfalse\nfalse\n2\ntrue\n[LuMe]\n[LuMe  ]\n[  LuMe]\nlume\nLUME\ntrue\nfalse\n1\ntrue\na# b22\na# b#\na😀bc\na😀\n😀b\nbc\n😀b\ntrue\ntrue\nfalse\nfalse\na#b.a\na#b#a\n"
         );
 
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn runs_string_utilities_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap();
+        let source = root.join("examples/features/string_utilities.lum");
+        let interpreted = run_path(&source, None).expect("run string utilities");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "string utilities ok\n");
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java string utilities test because javac/java is not available");
+            return;
+        }
+        let temp = temp_path("lume-java-string-utilities");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate string utilities");
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:?}",
+            generated.diagnostics
+        );
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac string utilities",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.string_utilities.String_utilitiesMain"),
+            "java string utilities",
+        );
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            interpreted.output
+        );
+
+        let probe = temp.join("RepeatErrors.java");
+        fs::write(&probe, r#"
+public class RepeatErrors {
+    public static void main(String[] args) {
+        check(() -> lume.core.LumeRuntime.stringRepeat("x", -1), "Str.repeat count must be non-negative");
+        check(() -> lume.core.LumeRuntime.stringRepeat("", -1), "Str.repeat count must be non-negative");
+        check(() -> lume.core.LumeRuntime.runeRepeat('x', -1), "Rune.repeat count must be non-negative");
+        check(() -> lume.core.LumeRuntime.stringRepeat("xx", Long.MAX_VALUE), "repeated string is too large");
+        check(() -> lume.core.LumeRuntime.runeRepeat(0x1f600, Long.MAX_VALUE), "repeated string is too large");
+    }
+    private static void check(Runnable action, String expected) {
+        try {
+            action.run();
+            throw new AssertionError("expected failure: " + expected);
+        } catch (lume.core.LumePanic error) {
+            if (!expected.equals(error.getMessage())) throw new AssertionError(error);
+        }
+    }
+}
+"#).unwrap();
+        run_checked(
+            Command::new("javac")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("-d")
+                .arg(&classes)
+                .arg(&probe),
+            "javac repeat errors",
+        );
+        run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("RepeatErrors"),
+            "java repeat errors",
+        );
         let _ = fs::remove_dir_all(temp);
     }
 

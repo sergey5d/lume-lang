@@ -1,0 +1,134 @@
+# EXPECT:
+# fetch failed: boom
+# Ok 6 Err boom
+# Ok 5 Err boom
+# no value
+# 5
+# Ok 5 Ok 9 Err dot
+# Err too heavy Ok 1 Ok 3
+# 4 1
+# 20 6 -1
+# 10 20
+
+module examples/match_value_exits
+
+type Figure =
+    class Circle {
+        radius Int
+    }
+    | class Square {
+        side Int
+    }
+    | object Dot {}
+
+type Size = object Small {} | object Medium {} | object Large {}
+
+fn show(result Result[Int, Str]) Str = match result {
+    case Ok { value } => "Ok $value"
+    case Err { error } => "Err $error"
+}
+
+fn fetch(ok Bool) Result[Int, Str] = if ok { Ok(5) } else { Err("boom") }
+
+# A block arm runs statements before leaving the function.
+fn incremented(ok Bool) Result[Int, Str] {
+    value Int = match fetch(ok) {
+        case Ok { value } => value
+        case Err { error } => {
+            println("fetch failed:", error)
+            return Err(error)
+        }
+    }
+    Ok(value + 1)
+}
+
+# An expression arm may be a bare `return`, and the binding type is inferred.
+fn passthrough(ok Bool) Result[Int, Str] {
+    value = match fetch(ok) {
+        case Ok { value } => value
+        case Err { error } => return Err(error)
+    }
+    Ok(value)
+}
+
+# A Unit function leaves with a bare `return`.
+fn printValue(ok Bool) {
+    value = match fetch(ok) {
+        case Ok { value } => value
+        case Err { error: _ } => {
+            println("no value")
+            return
+        }
+    }
+    println(value)
+}
+
+fn area(figure Figure) Result[Int, Str] {
+    value Int = match figure {
+        case Circle { radius } => {
+            squared = radius * radius
+            squared + 1
+        }
+        case Square { side } => side * side
+        case Dot => return Err("dot")
+    }
+    Ok(value)
+}
+
+# Or-patterns and guards keep their usual meaning.
+fn weight(size Size, heavy Bool) Result[Int, Str] {
+    value Int = match size {
+        case Small | Medium if heavy => return Err("too heavy")
+        case Small | Medium => 1
+        case Large => 3
+    }
+    Ok(value)
+}
+
+# `continue` and `break` in an arm apply to the enclosing loop.
+fn sumUntilNine(values [Int]) Int {
+    var total = 0
+    for value <- values {
+        step Int = match value {
+            case 0 => continue
+            case 9 => break
+            case _ => value
+        }
+        total += step
+    }
+    total
+}
+
+# The bound value can be captured by a lambda.
+fn pick(maybe Int?) Int {
+    value = match maybe {
+        case Some { value } if value > 10 => value
+        case Some { value } => {
+            doubled = value * 2
+            doubled
+        }
+        case None => return -1
+    }
+    read fn() Int = () => value
+    read()
+}
+
+fn plain(number Int) Int {
+    value = match number {
+        case 1 => 10
+        case _ => 20
+    }
+    value
+}
+
+fn main() {
+    println(show(incremented(true)), show(incremented(false)))
+    println(show(passthrough(true)), show(passthrough(false)))
+    printValue(false)
+    printValue(true)
+    println(show(area(Circle { radius: 2 })), show(area(Square { side: 3 })), show(area(Dot)))
+    println(show(weight(Small, true)), show(weight(Medium, false)), show(weight(Large, true)))
+    println(sumUntilNine([1, 0, 3]), sumUntilNine([1, 9, 3]))
+    println(pick(Some(20)), pick(Some(3)), pick(None))
+    println(plain(1), plain(2))
+}

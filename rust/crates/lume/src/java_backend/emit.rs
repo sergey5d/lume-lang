@@ -2242,6 +2242,27 @@ impl<'a> SourceBodyEmitter<'a> {
                         bindings,
                         binding_types,
                         used_locals,
+                        loop_depth,
+                    )?;
+                }
+                core::Stmt::Binding(binding)
+                    if binding.destructure.is_none()
+                        && binding.bindings.len() == 1
+                        && binding.bindings[0].name != "_"
+                        && matches!(
+                            binding.values.as_slice(),
+                            [core::Expr::Match { cases, .. }] if match_needs_statement_form(cases)
+                        ) =>
+                {
+                    self.emit_match_value_binding(
+                        out,
+                        &binding.bindings[0],
+                        &binding.values[0],
+                        indent,
+                        bindings,
+                        binding_types,
+                        used_locals,
+                        loop_depth,
                     )?;
                 }
                 core::Stmt::Binding(binding)
@@ -2259,6 +2280,11 @@ impl<'a> SourceBodyEmitter<'a> {
                         let local_ty = if matches!(local.ty, ir::Type::Unknown) {
                             self.expr_type_with_binding_types(value, bindings, binding_types)
                                 .filter(|ty| !matches!(ty, ir::Type::Unknown))
+                                .or_else(|| {
+                                    self.source_expr_type(value.span())
+                                        .filter(|ty| !matches!(ty, ir::Type::Unknown))
+                                })
+                                .or_else(|| self.match_arm_value_type(value))
                                 .unwrap_or(ir::Type::Unknown)
                         } else {
                             local.ty.clone()
@@ -2738,6 +2764,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 bindings,
                 binding_types,
                 used_locals,
+                0,
             )?;
         } else {
             out.push_str(" = ");
@@ -2840,6 +2867,7 @@ impl<'a> SourceBodyEmitter<'a> {
             bindings,
             binding_types,
             used_locals,
+            0,
         )?;
         self.emit_flat_destructure(
             out,
@@ -3084,6 +3112,7 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &mut HashMap<String, String>,
         binding_types: &mut HashMap<String, ir::Type>,
         used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
     ) -> Option<()> {
         if binding.name == "_" {
             return None;
@@ -3124,10 +3153,295 @@ impl<'a> SourceBodyEmitter<'a> {
             bindings,
             binding_types,
             used_locals,
+            loop_depth,
         )?;
         bindings.insert(binding.name.clone(), java_name);
         binding_types.insert(binding.name.clone(), local.ty.clone());
         Some(())
+    }
+
+    /// Emits `name = match ...` as statements when an arm has a block body or
+    /// exits with `return`, `break`, or `continue`. A `Supplier` lambda cannot
+    /// leave the enclosing method, so the arms assign the local instead.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_match_value_binding(
+        &self,
+        out: &mut String,
+        binding: &ast::Binding,
+        value: &core::Expr,
+        indent: &str,
+        bindings: &mut HashMap<String, String>,
+        binding_types: &mut HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        let local = self.source_binding_local(&binding.name, used_locals)?;
+        let local_ty = if matches!(local.ty, ir::Type::Unknown) {
+            self.source_expr_type(value.span())
+                .or_else(|| self.expr_type_with_binding_types(value, bindings, binding_types))
+                .filter(|ty| !matches!(ty, ir::Type::Unknown))
+                .or_else(|| self.match_arm_value_type(value))
+                .or_else(|| {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot infer match binding type in '{}': {}",
+                            self.function.name, binding.name
+                        );
+                    }
+                    None
+                })?
+        } else {
+            local.ty.clone()
+        };
+        used_locals.insert(local.id);
+        let java_name = java_local_name(self.function, local);
+
+        // Declared without an initializer so it stays effectively final; every
+        // arm either assigns it or leaves the enclosing labeled block.
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(&local_ty));
+        out.push(' ');
+        out.push_str(&java_name);
+        out.push_str(";\n");
+        self.emit_assigning_expr(
+            out,
+            &java_name,
+            &local_ty,
+            value,
+            indent,
+            bindings,
+            binding_types,
+            used_locals,
+            loop_depth,
+        )?;
+        bindings.insert(binding.name.clone(), java_name);
+        binding_types.insert(binding.name.clone(), local_ty);
+        Some(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    /// The type of the first `match` arm that produces a value. The typechecker
+    /// may record no type for a `match` whose other arms exit.
+    fn match_arm_value_type(&self, value: &core::Expr) -> Option<ir::Type> {
+        let core::Expr::Match { cases, .. } = value else {
+            return None;
+        };
+        cases.iter().find_map(|case| {
+            let expr = match &case.body {
+                core::MatchCaseBody::Expr(expr) => expr,
+                core::MatchCaseBody::Block(block) => match block.statements.last()? {
+                    core::Stmt::Expr(statement) => &statement.expr,
+                    _ => return None,
+                },
+            };
+            if expr_is_jump(expr) {
+                return None;
+            }
+            self.source_expr_type(expr.span())
+                .filter(|ty| !matches!(ty, ir::Type::Unknown | ir::Type::Never))
+        })
+    }
+
+    /// Passes `value` through, reporting a `None` when `LUME_JAVA_DEBUG_STUBS` is set.
+    fn traced<T>(&self, what: &str, value: Option<T>) -> Option<T> {
+        if value.is_none() && std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+            eprintln!(
+                "readable java cannot emit {what} in '{}'",
+                self.function.name
+            );
+        }
+        value
+    }
+
+    fn emit_match_assignment(
+        &self,
+        out: &mut String,
+        target: &str,
+        target_ty: &ir::Type,
+        value: &core::Expr,
+        cases: &[core::MatchCase],
+        span: crate::source::Span,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        let value_ty = self.traced(
+            "match value type",
+            self.expr_type_with_binding_types(value, bindings, binding_types)
+                .filter(|ty| !matches!(ty, ir::Type::Unknown))
+                .or_else(|| self.source_expr_type(value.span())),
+        )?;
+        let match_local = self.synthetic_name("match", "match", span.start);
+        let label = self.synthetic_name("matchAssign", "matchAssign", span.start);
+        out.push_str(indent);
+        out.push_str(&self.names.value_type(&value_ty));
+        out.push(' ');
+        out.push_str(&match_local);
+        out.push_str(" = ");
+        out.push_str(&self.traced("match value", self.emit_expr(value, bindings))?);
+        out.push_str(";\n");
+        out.push_str(indent);
+        out.push_str(&label);
+        out.push_str(": {\n");
+        let group_indent = format!("{indent}    ");
+        let mut any_arm_assigns = false;
+        let mut group_start = 0;
+        while group_start < cases.len() {
+            let group_end = match_case_group_end(cases, group_start);
+            for (offset, case) in cases[group_start..group_end].iter().enumerate() {
+                let index = group_start + offset;
+                let matched = self.traced(
+                    "match pattern",
+                    self.match_case_pattern(
+                        &case.pattern,
+                        &match_local,
+                        &value_ty,
+                        span.start + index,
+                        bindings,
+                        binding_types,
+                    ),
+                )?;
+                out.push_str(&group_indent);
+                if offset > 0 {
+                    out.push_str("else ");
+                }
+                out.push_str("if (");
+                out.push_str(&matched.condition);
+                out.push_str(") {\n");
+                let action_indent = format!("{group_indent}    ");
+                let body_indent = if let Some(guard) = &case.guard {
+                    out.push_str(&action_indent);
+                    out.push_str("if (");
+                    out.push_str(
+                        &self.traced("match guard", self.emit_expr(guard, &matched.bindings))?,
+                    );
+                    out.push_str(") {\n");
+                    format!("{action_indent}    ")
+                } else {
+                    action_indent.clone()
+                };
+                let (emitted, exits) = match &case.body {
+                    core::MatchCaseBody::Expr(body) => (
+                        self.emit_assigning_expr(
+                            out,
+                            target,
+                            target_ty,
+                            body,
+                            &body_indent,
+                            &matched.bindings,
+                            &matched.binding_types,
+                            used_locals,
+                            loop_depth,
+                        ),
+                        expr_is_jump(body),
+                    ),
+                    core::MatchCaseBody::Block(block) => (
+                        self.emit_assigning_block(
+                            out,
+                            target,
+                            target_ty,
+                            block,
+                            &body_indent,
+                            &matched.bindings,
+                            &matched.binding_types,
+                            used_locals,
+                            loop_depth,
+                        ),
+                        block_tail_is_jump(block),
+                    ),
+                };
+                if emitted.is_none() {
+                    if std::env::var_os("LUME_JAVA_DEBUG_STUBS").is_some() {
+                        eprintln!(
+                            "readable java cannot emit assigning match arm in '{}': {:?}",
+                            self.function.name, case.body
+                        );
+                    }
+                    return None;
+                }
+                // Java rejects a statement after `return`, so only arms that
+                // assign need to leave the labeled block.
+                if !exits {
+                    any_arm_assigns = true;
+                    out.push_str(&body_indent);
+                    out.push_str("break ");
+                    out.push_str(&label);
+                    out.push_str(";\n");
+                }
+                if case.guard.is_some() {
+                    out.push_str(&action_indent);
+                    out.push_str("}\n");
+                }
+                out.push_str(&group_indent);
+                out.push_str("}\n");
+            }
+            group_start = group_end;
+        }
+        // If no arm assigns, code after the labeled block would be unreachable
+        // Java.
+        if !any_arm_assigns {
+            return None;
+        }
+        out.push_str(&group_indent);
+        out.push_str("throw new IllegalStateException(\"non-exhaustive Lume match\");\n");
+        out.push_str(indent);
+        out.push_str("}\n");
+        Some(())
+    }
+
+    /// Emits a `return`, `break`, or `continue` expression as a Java statement.
+    fn emit_jump_expr(
+        &self,
+        out: &mut String,
+        expr: &core::Expr,
+        indent: &str,
+        bindings: &HashMap<String, String>,
+        binding_types: &HashMap<String, ir::Type>,
+        loop_depth: usize,
+    ) -> Option<()> {
+        match expr {
+            core::Expr::Return { value, .. } => {
+                if self.lambda_returns_unit() {
+                    if let Some(value) = value {
+                        return self.emit_returning_expr(
+                            out,
+                            value,
+                            indent,
+                            bindings,
+                            binding_types,
+                        );
+                    }
+                    out.push_str(indent);
+                    out.push_str("return lume.core.LumeUnit.INSTANCE;\n");
+                    return Some(());
+                }
+                out.push_str(indent);
+                out.push_str("return");
+                if let Some(value) = value {
+                    out.push(' ');
+                    out.push_str(&self.emit_expr_against(
+                        value,
+                        bindings,
+                        &self.function.return_ty,
+                    )?);
+                }
+                out.push_str(";\n");
+                Some(())
+            }
+            core::Expr::Break { .. } if loop_depth > 0 => {
+                out.push_str(indent);
+                out.push_str("break;\n");
+                Some(())
+            }
+            core::Expr::Continue { .. } if loop_depth > 0 => {
+                out.push_str(indent);
+                out.push_str("continue;\n");
+                Some(())
+            }
+            _ => None,
+        }
     }
 
     fn emit_inline_value_expr(
@@ -3177,6 +3491,7 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
         used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
     ) -> Option<()> {
         match expr {
             core::Expr::If {
@@ -3200,6 +3515,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     &then_bindings,
                     &then_types,
                     used_locals,
+                    loop_depth,
                 )?;
                 out.push_str(indent);
                 out.push_str("} else {\n");
@@ -3213,6 +3529,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         bindings,
                         binding_types,
                         used_locals,
+                        loop_depth,
                     )?,
                     core::ElseExprBranch::Block(block) => self.emit_assigning_block(
                         out,
@@ -3223,14 +3540,31 @@ impl<'a> SourceBodyEmitter<'a> {
                         bindings,
                         binding_types,
                         used_locals,
+                        loop_depth,
                     )?,
                 }
                 out.push_str(indent);
                 out.push_str("}\n");
                 Some(())
             }
+            core::Expr::Match { value, cases, span } => self.emit_match_assignment(
+                out,
+                target,
+                target_ty,
+                value,
+                cases,
+                *span,
+                indent,
+                bindings,
+                binding_types,
+                used_locals,
+                loop_depth,
+            ),
             core::Expr::Try { value, span } => {
                 self.emit_try_assignment(out, target, target_ty, value, *span, indent, bindings)
+            }
+            core::Expr::Return { .. } | core::Expr::Break { .. } | core::Expr::Continue { .. } => {
+                self.emit_jump_expr(out, expr, indent, bindings, binding_types, loop_depth)
             }
             _ => {
                 out.push_str(indent);
@@ -3253,15 +3587,27 @@ impl<'a> SourceBodyEmitter<'a> {
         bindings: &HashMap<String, String>,
         binding_types: &HashMap<String, ir::Type>,
         used_locals: &mut HashSet<ir::LocalId>,
+        loop_depth: usize,
     ) -> Option<()> {
         let (tail, prefix) = block.statements.split_last()?;
         let mut branch_bindings = bindings.clone();
         let mut branch_types = binding_types.clone();
-        if !prefix.is_empty() {
+        // A branch ending in `return`, `break`, or `continue` leaves the
+        // binding unassigned, so emit it as ordinary statements.
+        let statement_tail = matches!(
+            tail,
+            core::Stmt::Return(_) | core::Stmt::Break(_) | core::Stmt::Continue(_)
+        );
+        let emitted_prefix: &[core::Stmt] = if statement_tail {
+            &block.statements
+        } else {
+            prefix
+        };
+        if !emitted_prefix.is_empty() {
             self.emit_statement_block(
                 out,
                 &core::Block {
-                    statements: prefix.to_vec(),
+                    statements: emitted_prefix.to_vec(),
                     span: block.span,
                 },
                 indent,
@@ -3269,8 +3615,11 @@ impl<'a> SourceBodyEmitter<'a> {
                 &mut branch_types,
                 used_locals,
                 false,
-                0,
+                loop_depth,
             )?;
+        }
+        if statement_tail {
+            return Some(());
         }
         let core::Stmt::Expr(statement) = tail else {
             return None;
@@ -3284,6 +3633,7 @@ impl<'a> SourceBodyEmitter<'a> {
             &branch_bindings,
             &branch_types,
             used_locals,
+            loop_depth,
         )
     }
 
@@ -6525,7 +6875,7 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some("lume.core.LumeRuntime.env()".to_string())
             }
             core::Expr::Member { receiver, name, .. }
-                if matches!(name.as_str(), "size" | "isEmpty" | "nonEmpty")
+                if matches!(name.as_str(), "size" | "isEmpty" | "nonEmpty" | "isBlank")
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
                 let receiver = self.emit_receiver_expr(receiver, bindings)?;
@@ -6533,6 +6883,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     "size" => Some(format!("lume.core.LumeRuntime.stringSize({receiver})")),
                     "isEmpty" => Some(format!("({receiver}).isEmpty()")),
                     "nonEmpty" => Some(format!("!({receiver}).isEmpty()")),
+                    "isBlank" => Some(format!("lume.core.LumeRuntime.stringIsBlank({receiver})")),
                     _ => unreachable!(),
                 }
             }
@@ -9184,9 +9535,29 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. }
+                if name == "repeat"
+                    && args.len() == 1
+                    && (self.is_java_string_receiver(receiver, bindings)
+                        || self
+                            .expr_type(receiver, bindings)
+                            .as_ref()
+                            .is_some_and(|ty| is_named_builtin(ty, "Rune"))) =>
+            {
+                let helper = if self.is_java_string_receiver(receiver, bindings) {
+                    "stringRepeat"
+                } else {
+                    "runeRepeat"
+                };
+                Some(format!(
+                    "lume.core.LumeRuntime.{helper}({}, {})",
+                    self.emit_receiver_expr(receiver, bindings)?,
+                    self.emit_call_arg(&args[0], bindings)?
+                ))
+            }
+            core::Expr::Member { receiver, name, .. }
                 if matches!(
                     name.as_str(),
-                    "trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper"
+                    "trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper" | "lines"
                 ) && args.is_empty()
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
@@ -9196,6 +9567,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     "trimRight" => "stringTrimRight",
                     "toLower" => "stringToLower",
                     "toUpper" => "stringToUpper",
+                    "lines" => "stringLines",
                     _ => unreachable!(),
                 };
                 Some(format!(
@@ -9206,7 +9578,7 @@ impl<'a> SourceBodyEmitter<'a> {
             core::Expr::Member { receiver, name, .. }
                 if matches!(
                     name.as_str(),
-                    "contains" | "startsWith" | "endsWith" | "indexOf"
+                    "contains" | "startsWith" | "endsWith" | "indexOf" | "lastIndexOf"
                 ) && args.len() == 1
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
@@ -9215,6 +9587,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     "startsWith" => "stringStartsWith",
                     "endsWith" => "stringEndsWith",
                     "indexOf" => "stringIndexOf",
+                    "lastIndexOf" => "stringLastIndexOf",
                     _ => unreachable!(),
                 };
                 Some(format!(
@@ -9275,13 +9648,15 @@ impl<'a> SourceBodyEmitter<'a> {
                 ))
             }
             core::Expr::Member { receiver, name, .. }
-                if matches!(name.as_str(), "isEmpty" | "nonEmpty")
+                if matches!(name.as_str(), "isEmpty" | "nonEmpty" | "isBlank")
                     && args.is_empty()
                     && self.is_java_string_receiver(receiver, bindings) =>
             {
                 let receiver = self.emit_receiver_expr(receiver, bindings)?;
                 if name == "isEmpty" {
                     Some(format!("({receiver}).isEmpty()"))
+                } else if name == "isBlank" {
+                    Some(format!("lume.core.LumeRuntime.stringIsBlank({receiver})"))
                 } else {
                     Some(format!("!({receiver}).isEmpty()"))
                 }
@@ -10269,9 +10644,17 @@ impl<'a> SourceBodyEmitter<'a> {
                     .locals
                     .iter()
                     .find(|local| java_local_name(self.function, local) == *reference)
-            }) && !matches!(local.ty, ir::Type::Unknown)
-            {
-                return Some(local.ty.clone());
+            }) {
+                if !matches!(local.ty, ir::Type::Unknown) {
+                    return Some(local.ty.clone());
+                }
+                let support = JavaIrSupport::new(self.bundle, self.function, self.names);
+                if let Some(ty) = support
+                    .place_type(&ir::Place::Local(local.id))
+                    .filter(|ty| !matches!(ty, ir::Type::Unknown))
+                {
+                    return Some(ty);
+                }
             }
         }
         if let core::Expr::Member { receiver, name, .. } = expr {
@@ -10478,6 +10861,60 @@ impl<'a> SourceBodyEmitter<'a> {
                     })?;
                 Some(emitter.substitute_receiver_type_args(&receiver_name, &receiver_args, &ret))
             }
+            // Operands bound by patterns are typed only through `binding_types`,
+            // which `expr_type` cannot see.
+            core::Expr::Binary {
+                left, op, right, ..
+            } => match op {
+                ast::BinaryOp::Add
+                | ast::BinaryOp::Sub
+                | ast::BinaryOp::Mul
+                | ast::BinaryOp::Div
+                | ast::BinaryOp::Mod => {
+                    let left = primitive_type(self.expr_type_with_binding_types(
+                        left,
+                        bindings,
+                        binding_types,
+                    )?);
+                    let right = primitive_type(self.expr_type_with_binding_types(
+                        right,
+                        bindings,
+                        binding_types,
+                    )?);
+                    match (left, right) {
+                        (ir::Type::Str, _) | (_, ir::Type::Str)
+                            if matches!(op, ast::BinaryOp::Add) =>
+                        {
+                            Some(ir::Type::Str)
+                        }
+                        (ir::Type::Int, ir::Type::Int) => Some(ir::Type::Int),
+                        (ir::Type::Float | ir::Type::Int, ir::Type::Float | ir::Type::Int) => {
+                            Some(ir::Type::Float)
+                        }
+                        _ => None,
+                    }
+                }
+                ast::BinaryOp::Eq
+                | ast::BinaryOp::NotEq
+                | ast::BinaryOp::Less
+                | ast::BinaryOp::LessEq
+                | ast::BinaryOp::Greater
+                | ast::BinaryOp::GreaterEq
+                | ast::BinaryOp::And
+                | ast::BinaryOp::Or => Some(ir::Type::Bool),
+                ast::BinaryOp::Colon => None,
+            },
+            core::Expr::Unary {
+                op: ast::UnaryOp::Neg,
+                expr,
+                ..
+            } => self
+                .expr_type_with_binding_types(expr, bindings, binding_types)
+                .map(primitive_type),
+            core::Expr::Unary {
+                op: ast::UnaryOp::Not,
+                ..
+            } => Some(ir::Type::Bool),
             _ => None,
         }
     }
@@ -10663,6 +11100,46 @@ struct JavaSwitchCase {
 
 fn match_case_group_end(cases: &[core::MatchCase], start: usize) -> usize {
     (start + cases[start].remaining_alternatives + 1).min(cases.len())
+}
+
+/// Generic arguments carry primitives as `Named` types (`Option[Int]` holds
+/// `Named("Int")`); arithmetic typing needs the primitive form.
+fn primitive_type(ty: ir::Type) -> ir::Type {
+    match &ty {
+        ir::Type::Named { name, args } if args.is_empty() => match name.as_str() {
+            "Int" => ir::Type::Int,
+            "Float" => ir::Type::Float,
+            "Str" => ir::Type::Str,
+            "Bool" => ir::Type::Bool,
+            _ => ty,
+        },
+        _ => ty,
+    }
+}
+
+fn expr_is_jump(expr: &core::Expr) -> bool {
+    matches!(
+        expr,
+        core::Expr::Return { .. } | core::Expr::Break { .. } | core::Expr::Continue { .. }
+    )
+}
+
+fn block_tail_is_jump(block: &core::Block) -> bool {
+    match block.statements.last() {
+        Some(core::Stmt::Return(_) | core::Stmt::Break(_) | core::Stmt::Continue(_)) => true,
+        Some(core::Stmt::Expr(statement)) => expr_is_jump(&statement.expr),
+        _ => false,
+    }
+}
+
+/// A `match` bound to a local needs statement emission when an arm has a block
+/// body or exits; the expression form is a `Supplier` lambda, which supports
+/// neither.
+fn match_needs_statement_form(cases: &[core::MatchCase]) -> bool {
+    cases.iter().any(|case| match &case.body {
+        core::MatchCaseBody::Block(_) => true,
+        core::MatchCaseBody::Expr(expr) => expr_is_jump(expr),
+    })
 }
 
 fn java_wildcard_type_args(count: usize) -> String {
@@ -12543,7 +13020,7 @@ fn builtin_method_param_types(
         return match (method, arg_len) {
             (
                 "split" | "splitRegex" | "contains" | "startsWith" | "endsWith" | "indexOf"
-                | "compareTo",
+                | "lastIndexOf" | "compareTo",
                 1,
             ) => Some(vec![ir::Type::Str]),
             ("replaceFirst" | "replaceAll" | "replaceFirstRegex" | "replaceAllRegex", 2) => {
@@ -12551,15 +13028,19 @@ fn builtin_method_param_types(
             }
             (
                 "size" | "trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper" | "isEmpty"
-                | "nonEmpty",
+                | "nonEmpty" | "isBlank" | "lines",
                 0,
             ) => Some(Vec::new()),
             ("runeAt", 1) => Some(vec![ir::Type::Int]),
+            ("repeat", 1) => Some(vec![ir::Type::Int]),
             ("slice", 0) => Some(Vec::new()),
             ("slice", 1) => Some(vec![ir::Type::Int]),
             ("slice", 2) => Some(vec![ir::Type::Int, ir::Type::Int]),
             _ => None,
         };
+    }
+    if is_named_builtin(receiver, "Rune") && method == "repeat" && arg_len == 1 {
+        return Some(vec![ir::Type::Int]);
     }
     match receiver {
         ir::Type::Named { name, args }
@@ -12670,20 +13151,23 @@ fn builtin_method_return_type(
     }
     if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
         return match (method, arg_len) {
-            ("split" | "splitRegex", 1) => Some(ir::Type::list(ir::Type::Str)),
+            ("split" | "splitRegex", 1) | ("lines", 0) => Some(ir::Type::list(ir::Type::Str)),
             ("trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper", 0) => Some(ir::Type::Str),
             ("replaceFirst" | "replaceAll" | "replaceFirstRegex" | "replaceAllRegex", 2) => {
                 Some(ir::Type::Str)
             }
-            ("isEmpty" | "nonEmpty", 0) | ("contains" | "startsWith" | "endsWith", 1) => {
-                Some(ir::Type::Bool)
-            }
+            ("isEmpty" | "nonEmpty" | "isBlank", 0)
+            | ("contains" | "startsWith" | "endsWith", 1) => Some(ir::Type::Bool),
             ("size", 0) | ("compareTo", 1) => Some(ir::Type::Int),
-            ("indexOf", 1) => Some(ir::Type::option(ir::Type::Int)),
+            ("indexOf" | "lastIndexOf", 1) => Some(ir::Type::option(ir::Type::Int)),
+            ("repeat", 1) => Some(ir::Type::Str),
             ("runeAt", 1) => Some(ir::Type::option(ir::Type::named("Rune"))),
             ("slice", 0..=2) => Some(ir::Type::Str),
             _ => None,
         };
+    }
+    if is_named_builtin(receiver, "Rune") && method == "repeat" && arg_len == 1 {
+        return Some(ir::Type::Str);
     }
     match receiver {
         ir::Type::Named { name, .. }
@@ -13675,7 +14159,7 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
     if matches!(receiver, ir::Type::Str) {
         return match name {
             "size" => Some(ir::Type::Int),
-            "isEmpty" | "nonEmpty" => Some(ir::Type::Bool),
+            "isEmpty" | "nonEmpty" | "isBlank" => Some(ir::Type::Bool),
             _ => None,
         };
     }
@@ -13691,7 +14175,7 @@ fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type>
     match (type_name.as_str(), name) {
         ("Decimal", "scale") => Some(ir::Type::Int),
         ("Str", "size") => Some(ir::Type::Int),
-        ("Str", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
+        ("Str", "isEmpty" | "nonEmpty" | "isBlank") => Some(ir::Type::Bool),
         ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")
         | ("Result", "isOk" | "isSuccess" | "isErr")
         | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
@@ -13739,6 +14223,7 @@ fn java_known_getter_name(name: &str) -> bool {
             | "isSuccess"
             | "isEmpty"
             | "nonEmpty"
+            | "isBlank"
             | "isOk"
             | "isErr"
             | "isLeft"

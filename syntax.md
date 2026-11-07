@@ -641,6 +641,8 @@ Rules:
   `text[5:]`, and `text[:]`
 - `Str.isEmpty` reports whether the string contains no characters
 - `Str.nonEmpty` reports whether the string contains at least one character
+- `Str.isBlank` is a getter that reports whether the string is empty or contains
+  only Unicode whitespace (the Unicode `White_Space` property)
 - `Str.trim()` removes leading and trailing whitespace
 - `Str.trimLeft()` and `Str.trimRight()` remove whitespace from one side
 - `Str.toLower()` and `Str.toUpper()` use Unicode case conversion and are not
@@ -651,6 +653,17 @@ Rules:
   case-sensitive prefix and suffix checks
 - `Str.indexOf(part)` returns the zero-based Unicode-scalar index of the first
   literal match as `Some(index)`, or `None` when no match exists
+- `Str.lastIndexOf(part)` returns the index of the last literal match using the
+  same optional Unicode-scalar index contract; an empty `part` matches at
+  `size` (and at `0` for an empty string)
+- `Str.lines()` returns a fresh, growable `Vector[Str]`, splitting on LF, CRLF,
+  or CR and removing those terminators. Interior empty lines are preserved;
+  a final terminator does not add an extra line, and an empty string returns
+  an empty vector
+- `Str.repeat(count)` and `Rune.repeat(count)` return a `Str` containing the
+  receiver repeated `count` times. Zero returns `""`; a negative count is a
+  runtime error. Construction is subject to the runtime's string-size and
+  allocation limits
 - `Str.split(separator)` treats `separator` as literal text and returns a
   growable `Vector[Str]`
 - `Str.splitRegex(pattern)` explicitly interprets `pattern` as a regular

@@ -6,6 +6,7 @@ public interface Str with Comparable[Str] {
     get size Int
     get isEmpty Bool
     get nonEmpty Bool
+    get isBlank Bool
     fn compareTo(other Str) Int
     fn runeAt(index Int) Option[Rune]
     fn slice() Str
@@ -22,6 +23,9 @@ public interface Str with Comparable[Str] {
     fn startsWith(prefix Str) Bool
     fn endsWith(suffix Str) Bool
     fn indexOf(part Str) Option[Int]
+    fn lastIndexOf(part Str) Option[Int]
+    fn lines() Vector[Str]
+    fn repeat(count Int) Str
     fn replaceFirst(target Str, replacement Str) Str
     fn replaceAll(target Str, replacement Str) Str
     fn replaceFirstRegex(pattern Str, replacement Str) Str
