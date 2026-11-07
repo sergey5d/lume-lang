@@ -1,0 +1,110 @@
+# EXPECT:
+# Daily orders
+# Mira: orders=2, total=30.00
+# Noah: orders=1, total=8.75
+# Invalid orders: order 1: quantity must be positive
+
+module examples/readme_order_report
+
+use lume/json/{Json}
+
+public shape Order {
+    customer Str
+    quantity Int
+    unitPrice Decimal
+
+    get total Decimal = quantity.toDecimal() * unitPrice
+}
+
+public shape OrderBatch {
+    orders [Order]
+}
+
+shape CustomerSummary {
+    customer Str
+    orders Int = 0
+    total Decimal = 0d
+}
+
+interface OrderSource {
+    get name Str
+    fn load() Result[[Order], Str]
+}
+
+class JsonOrderSource with OrderSource {
+    name Str
+    text Str
+
+    fn load() Result[[Order], Str] {
+        batch = try Json.decode[OrderBatch](text)
+        Ok(batch.orders)
+    }
+}
+
+fn validate(order Order) Result[Order, Str] {
+    customer = order.customer.trim()
+    if customer.isEmpty {
+        return Err("customer is required")
+    }
+    if order.quantity <= 0 {
+        return Err("quantity must be positive")
+    }
+    if order.unitPrice < 0d {
+        return Err("unitPrice must be non-negative")
+    }
+    Ok(Order { ...order, customer })
+}
+
+fn summarize(source OrderSource) Result[[CustomerSummary], Str] {
+    orders = try source.load()
+    totals [Str: CustomerSummary] = []
+
+    for let (order, index) <- orders.zipWithIndex() {
+        clean = try validate(order).mapError(error => "order ${index + 1}: $error")
+        previous = totals[clean.customer] ?? CustomerSummary { customer: clean.customer }
+        totals[clean.customer] := CustomerSummary {
+            ...previous
+            orders: previous.orders + 1
+            total: previous.total + clean.total
+        }
+    }
+
+    rows = totals.values()
+    rows.sort((left, right) => {
+        if left.total == right.total {
+            return left.customer.compareTo(right.customer)
+        }
+        right.total.compareTo(left.total)
+    })
+    Ok(rows)
+}
+
+fn printReport(source OrderSource) {
+    match summarize(source) {
+        case Ok { value as rows } => {
+            println(source.name)
+            for row <- rows {
+                println("${row.customer}: orders=${row.orders}, total=${row.total}")
+            }
+        }
+        case Err { error } => println("${source.name}: $error")
+    }
+}
+
+fn main() {
+    source OrderSource = JsonOrderSource {
+        name: "Daily orders"
+        text: raw"""{"orders": [
+            {"customer": " Mira ", "quantity": 2, "unitPrice": 12.50},
+            {"customer": "Noah", "quantity": 1, "unitPrice": 8.75},
+            {"customer": "Mira", "quantity": 1, "unitPrice": 5.00}
+        ]}"""
+    }
+    printReport(source)
+
+    invalid OrderSource = JsonOrderSource {
+        name: "Invalid orders"
+        text: raw"""{"orders": [{"customer": "Mira", "quantity": 0, "unitPrice": 12.50}]}"""
+    }
+    printReport(invalid)
+}

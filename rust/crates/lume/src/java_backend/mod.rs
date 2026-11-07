@@ -5863,44 +5863,62 @@ fn main() {
                 .args(sources),
             "javac JSON runtime",
         );
-        let source = root.join("examples/features/decimal_json.lum");
-        let interpreted = run_path(&source, None).unwrap();
-        assert!(
-            interpreted.diagnostics.is_empty(),
-            "{:#?}",
-            interpreted.diagnostics
-        );
-        let expected = interpreter_stdout(interpreted);
-        let app = temp.join("app");
-        let generated = generate_java_path(
-            &source,
-            JavaBackendOptions::new(&app).with_classpath_entry(&classes),
-        )
-        .unwrap();
-        assert!(
-            generated.diagnostics.is_empty(),
-            "{:#?}",
-            generated.diagnostics
-        );
-        let mut sources = Vec::new();
-        collect_java_sources(&app, &mut sources).unwrap();
-        run_checked(
-            Command::new("javac")
-                .arg("-cp")
-                .arg(&classes)
-                .arg("-d")
-                .arg(&classes)
-                .args(sources),
-            "javac decimal JSON example",
-        );
-        let output = run_checked(
-            Command::new("java")
-                .arg("-cp")
-                .arg(&classes)
-                .arg("examples.decimal_json.Decimal_jsonMain"),
-            "java decimal JSON example",
-        );
-        assert_eq!(String::from_utf8(output.stdout).unwrap(), expected);
+        for (index, (file, entrypoint)) in [
+            (
+                "features/decimal_json.lum",
+                "examples.decimal_json.Decimal_jsonMain",
+            ),
+            (
+                "readme_order_report.lum",
+                "examples.readme_order_report.Readme_order_reportMain",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let source = root.join("examples").join(file);
+            let interpreted = run_path(&source, None).unwrap();
+            assert!(
+                interpreted.diagnostics.is_empty(),
+                "{file}: {:#?}",
+                interpreted.diagnostics
+            );
+            let expected = interpreter_stdout(interpreted);
+            let app = temp.join(format!("app-{index}"));
+            let generated = generate_java_path(
+                &source,
+                JavaBackendOptions::new(&app).with_classpath_entry(&classes),
+            )
+            .unwrap();
+            assert!(
+                generated.diagnostics.is_empty(),
+                "{file}: {:#?}",
+                generated.diagnostics
+            );
+            let mut sources = Vec::new();
+            collect_java_sources(&app, &mut sources).unwrap();
+            run_checked(
+                Command::new("javac")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg("-d")
+                    .arg(&classes)
+                    .args(sources),
+                "javac decimal JSON example",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg(entrypoint),
+                "java decimal JSON example",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                expected,
+                "{file}"
+            );
+        }
         let _ = fs::remove_dir_all(temp);
     }
 

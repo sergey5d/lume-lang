@@ -1,16 +1,34 @@
-# Lume
+# Lume Programming Language
 
-`Lume` is an experimental programming language implemented in Rust. The current
-repo focuses on the compiler/interpreter pipeline, language design notes,
-checked examples, a small stdlib, and VS Code editing support.
+Lume is an experimental, statically typed programming language. It aims to
+combine the flexibility of TypeScript and the power of Java while keeping code
+clear, concise, and easy to reason about.
 
-The language aims to stay direct and readable. It is designed around a few
-separate ideas rather than one large object model trying to do everything.
+The implementation is written in Rust and includes a compiler, interpreter,
+Java source backend, a small standard library, checked examples, and VS Code
+editing support.
 
 Start with the [Lume documentation](https://sergey5d.github.io/lume-lang/) for an
 overview and guided introduction. The complete language reference lives in
 [syntax.md](syntax.md). For implementation details, see
 [ARCHITECTURE.md](ARCHITECTURE.md) and [rust/README.md](rust/README.md).
+
+## Design Goals
+
+- **TypeScript-like flexibility.** Model data and behavior with structural
+  shapes, nominal classes, unions, interfaces, and ordinary functions, rather
+  than forcing every problem into one object model.
+- **Java-like power.** Support real application development and access to the
+  Java ecosystem without making everyday code carry unnecessary ceremony.
+- **Clarity and lower mental load.** Keep data flow and control flow visible,
+  rules locally predictable, and hidden behavior to a minimum. Reading code
+  should not require reconstructing what the compiler might mean.
+- **Concise and easy to learn.** Reduce boilerplate without replacing it with
+  cryptic shortcuts. Favor a small set of consistent, composable concepts over
+  special cases that must be memorized.
+
+These are design goals, not a claim that the experimental implementation
+already matches TypeScript's flexibility or Java's capabilities and maturity.
 
 ## Language Model
 
@@ -78,44 +96,153 @@ cargo test --manifest-path rust/Cargo.toml -p lume
 ./run_samples.sh
 ```
 
-## Small Taste
+## A Complete Example
 
-```txt
-shape Point {
-    x Int
-    y Int
+This small reporting pipeline loads typed JSON, validates and normalizes each
+order, groups totals by customer, and prints a sorted report. A second input
+shows the error path. All data is fictional and kept in memory; no database,
+server, or credentials are needed.
+
+<!-- readme-example: order-report -->
+```lume
+module examples/readme_order_report
+
+use lume/json/{Json}
+
+public shape Order {
+    customer Str
+    quantity Int
+    unitPrice Decimal
+
+    get total Decimal = quantity.toDecimal() * unitPrice
 }
 
-class User {
+public shape OrderBatch {
+    orders [Order]
+}
+
+shape CustomerSummary {
+    customer Str
+    orders Int = 0
+    total Decimal = 0d
+}
+
+interface OrderSource {
+    get name Str
+    fn load() Result[[Order], Str]
+}
+
+class JsonOrderSource with OrderSource {
     name Str
-    home Point
+    text Str
 
-    new(name Str, home Point) {
-        this.name = name
-        this.home = home
+    fn load() Result[[Order], Str] {
+        batch = try Json.decode[OrderBatch](text)
+        Ok(batch.orders)
     }
+}
 
-    new(label Str) = this(label, Point { x: 0, y: 0 })
+fn validate(order Order) Result[Order, Str] {
+    customer = order.customer.trim()
+    if customer.isEmpty {
+        return Err("customer is required")
+    }
+    if order.quantity <= 0 {
+        return Err("quantity must be positive")
+    }
+    if order.unitPrice < 0d {
+        return Err("unitPrice must be non-negative")
+    }
+    Ok(Order { ...order, customer })
+}
 
-    fn moved(dx Int, dy Int) User = User {
-        name: this.name
-        home: Point {
-            x: this.home.x + dx
-            y: this.home.y + dy
+fn summarize(source OrderSource) Result[[CustomerSummary], Str] {
+    orders = try source.load()
+    totals [Str: CustomerSummary] = []
+
+    for let (order, index) <- orders.zipWithIndex() {
+        clean = try validate(order).mapError(error => "order ${index + 1}: $error")
+        previous = totals[clean.customer] ?? CustomerSummary { customer: clean.customer }
+        totals[clean.customer] := CustomerSummary {
+            ...previous
+            orders: previous.orders + 1
+            total: previous.total + clean.total
         }
     }
+
+    rows = totals.values()
+    rows.sort((left, right) => {
+        if left.total == right.total {
+            return left.customer.compareTo(right.customer)
+        }
+        right.total.compareTo(left.total)
+    })
+    Ok(rows)
 }
 
-fn main() Unit {
-    user User = User { label: "Ada" }
-    moved = user.moved(3, 4)
+fn printReport(source OrderSource) {
+    match summarize(source) {
+        case Ok { value as rows } => {
+            println(source.name)
+            for row <- rows {
+                println("${row.customer}: orders=${row.orders}, total=${row.total}")
+            }
+        }
+        case Err { error } => println("${source.name}: $error")
+    }
+}
 
-    let { name, home } = moved
-    println(name, home.x, home.y)
+fn main() {
+    source OrderSource = JsonOrderSource {
+        name: "Daily orders"
+        text: raw"""{"orders": [
+            {"customer": " Mira ", "quantity": 2, "unitPrice": 12.50},
+            {"customer": "Noah", "quantity": 1, "unitPrice": 8.75},
+            {"customer": "Mira", "quantity": 1, "unitPrice": 5.00}
+        ]}"""
+    }
+    printReport(source)
+
+    invalid OrderSource = JsonOrderSource {
+        name: "Invalid orders"
+        text: raw"""{"orders": [{"customer": "Mira", "quantity": 0, "unitPrice": 12.50}]}"""
+    }
+    printReport(invalid)
 }
 ```
 
-More runnable examples live in [examples/](examples/).
+Output:
+
+```text
+Daily orders
+Mira: orders=2, total=30.00
+Noah: orders=1, total=8.75
+Invalid orders: order 1: quantity must be positive
+```
+
+Run the [same example](examples/readme_order_report.lum) with the interpreter:
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p lume -- run examples/readme_order_report.lum
+```
+
+The example keeps a few distinctions visible:
+
+- `OrderSource` describes behavior; `JsonOrderSource` supplies it. Its public
+  `name` field satisfies the interface's getter without a forwarding method.
+- The public `OrderBatch` and `Order` models are available to the JSON library.
+  `get total` computes a value without adding another stored field, and
+  `Order { ...order, customer }` constructs a normalized copy without changing
+  the input.
+- `try` propagates an error, `mapError` adds context, `??` supplies an absent
+  map entry, and `match` handles the final result explicitly.
+- `Decimal` preserves exact decimal amounts; `compareTo` states the intended
+  ordering directly.
+
+More runnable examples cover [stateful aggregation](examples/random_code/record_aggregator.lum),
+[generic aliases](examples/features/generic_type_aliases.lum),
+[mixins](examples/features/mixins.lum), [regular expressions](examples/features/regex_captures.lum),
+and [Java-backed HTTP services](examples/java_gradle_rest/README.md).
 
 ## Repository Layout
 

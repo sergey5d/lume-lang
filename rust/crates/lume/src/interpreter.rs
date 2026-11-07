@@ -10693,6 +10693,39 @@ $name
     }
 
     #[test]
+    fn readme_order_report_stays_in_sync_and_runs() {
+        let root = repo_root();
+        let path = root.join("examples/readme_order_report.lum");
+        let source = fs::read_to_string(&path).expect("read README example");
+        let readme = fs::read_to_string(root.join("README.md")).expect("read README");
+        let section = readme
+            .split_once("<!-- readme-example: order-report -->")
+            .expect("README example marker")
+            .1;
+        let code = section
+            .split_once("```lume\n")
+            .expect("README Lume code fence")
+            .1
+            .split_once("\n```")
+            .expect("README closing code fence")
+            .0;
+        let program = source.split_once("\n\n").expect("example header").1;
+        assert_eq!(code.trim(), program.trim(), "README example has drifted");
+        let expected = parse_comment_block(&source, "# EXPECT:").expect("example output");
+        let documented_output = section
+            .split_once("```text\n")
+            .expect("README output fence")
+            .1
+            .split_once("\n```")
+            .expect("README closing output fence")
+            .0;
+        assert_eq!(documented_output.trim(), expected.trim());
+        let run = run_path(&path, None).expect("run README example");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output.trim(), expected.trim());
+    }
+
+    #[test]
     fn runs_string_utilities() {
         let run = run_path(
             &repo_root().join("examples/features/string_utilities.lum"),
