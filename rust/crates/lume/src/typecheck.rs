@@ -4432,6 +4432,13 @@ impl<'a> Checker<'a> {
         } else {
             overlapping_whole_pattern_alias(&stmt.pattern)
         };
+        let flat_pattern = if stmt.clauses.is_empty() {
+            flat_value_fallback_pattern(&stmt.pattern)
+        } else {
+            stmt.clauses
+                .iter()
+                .all(|clause| flat_value_fallback_pattern(&clause.pattern))
+        };
         if !stmt.clauses.is_empty() {
             for clause in &stmt.clauses {
                 let value_ty = self.check_expr(&clause.value);
@@ -4457,7 +4464,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        self.check_let_else_fallback(&stmt.else_block, &bindings, overlapping_alias);
+        self.check_let_else_fallback(&stmt.else_block, &bindings, overlapping_alias, flat_pattern);
 
         if let Some(scope) = self.scopes.last_mut() {
             for (name, value) in bindings {
@@ -4471,22 +4478,25 @@ impl<'a> Checker<'a> {
         block: &Block,
         bindings: &[(String, ValueInfo)],
         overlapping_alias: Option<String>,
+        flat_pattern: bool,
     ) {
         if self.block_guarantees_control_exit(block) {
             self.check_block(block);
             return;
         }
 
-        if let Some(alias) = overlapping_alias {
-            self.check_block(block);
-            self.add_error(
-                "invalid_let_else_fallback",
-                format!(
+        if overlapping_alias.is_some() || !flat_pattern {
+            if matches!(self.check_block(block), Ty::Never) {
+                return;
+            }
+            let message = match overlapping_alias {
+                Some(alias) => format!(
                     "pattern alias '{}' binds a whole value and components inside it; its let else fallback must exit control flow instead of supplying independent replacement bindings",
                     alias
                 ),
-                block.span,
-            );
+                None => "nested destructuring requires an exiting let else fallback; value fallbacks are allowed only for flat patterns".to_string(),
+            };
+            self.add_error("invalid_let_else_fallback", message, block.span);
             return;
         }
 
@@ -14645,6 +14655,30 @@ fn overlapping_whole_pattern_alias(pattern: &Pattern) -> Option<String> {
     }
 }
 
+/// Value fallbacks may replace bindings from at most one unpacking layer.
+fn flat_value_fallback_pattern(pattern: &Pattern) -> bool {
+    fn leaf(pattern: &Pattern) -> bool {
+        match pattern_without_alias(pattern) {
+            Pattern::Wildcard { .. }
+            | Pattern::Binding { .. }
+            | Pattern::Type { .. }
+            | Pattern::Literal { .. } => true,
+            Pattern::Constructor { args, .. } => args.is_empty(),
+            _ => false,
+        }
+    }
+
+    match pattern_without_alias(pattern) {
+        Pattern::Extract { inner, .. } => leaf(inner),
+        Pattern::Tuple { elements, .. } | Pattern::List { elements, .. } => {
+            elements.iter().all(leaf)
+        }
+        Pattern::Record { fields, .. } => fields.iter().all(|field| leaf(&field.pattern)),
+        Pattern::Constructor { args, .. } => args.iter().all(leaf),
+        _ => true,
+    }
+}
+
 fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
     params
         .iter()
@@ -21620,7 +21654,7 @@ fn main() Unit {
     }
 
     #[test]
-    fn allows_exiting_alias_fallback_and_nested_single_binding_value_fallback() {
+    fn allows_exiting_alias_and_nested_pattern_fallbacks() {
         let program = parse_inline(
             r#"
 class User {
@@ -21632,10 +21666,139 @@ fn read(candidate Any) Str {
     name + user.name
 }
 
-fn main() Unit {
-    candidate Option[User] = None
-    let Some { value: User { name } } = candidate else "Unknown"
-    OS.println(name)
+fn readWrapped(candidate User?) Str {
+    let Some { value: User { name } } = candidate else return "Unknown"
+    name
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn rejects_value_fallbacks_for_nested_patterns() {
+        for (ty, head, fallback) in [
+            (
+                "User?",
+                "Some { value: User { name } } = candidate",
+                "\"Unknown\"",
+            ),
+            (
+                "User?",
+                "Some { value: User { name, age } } = candidate",
+                "{ name: \"Unknown\", age: 0 }",
+            ),
+            (
+                "User?",
+                "Some { value: User { name as displayName } } = candidate",
+                "\"Unknown\"",
+            ),
+            ("User?", "^User { name } = candidate", "\"Unknown\""),
+            ("User?", "User { name } <- candidate", "\"Unknown\""),
+            (
+                "Any",
+                "Envelope { user: User { name } } = candidate",
+                "\"Unknown\"",
+            ),
+            (
+                "((Str, Int), Int)",
+                "((name, _), _) = candidate",
+                "\"Unknown\"",
+            ),
+            ("[[Str]]", "[[name], _] = candidate", "\"Unknown\""),
+            (
+                "Option[(Str, Int)]",
+                "Some { value: (name, _) } = candidate",
+                "\"Unknown\"",
+            ),
+            (
+                "Option[[Str]]",
+                "Some { value: [name] } = candidate",
+                "\"Unknown\"",
+            ),
+            ("Option[Int?]", "^^number = candidate", "0"),
+        ] {
+            let source = format!(
+                "class User {{\n    name Str\n    age Int\n}}\nclass Envelope {{ user User }}\nfn read(candidate {ty}) {{\n    let {head} else {fallback}\n}}"
+            );
+            let result = check_program(&parse_inline(&source));
+            assert!(
+                result.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "invalid_let_else_fallback"
+                        && diagnostic
+                            .message
+                            .contains("nested destructuring requires an exiting")
+                }),
+                "{source}\n{:#?}",
+                result.diagnostics
+            );
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.code == "invalid_let_else_fallback"),
+                "{source}\n{:#?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_nested_value_fallbacks_in_any_grouped_clause() {
+        for clauses in [
+            "item <- other\nSome { value: User { name } } = candidate",
+            "Some { value: User { name } } = candidate\nitem <- other",
+        ] {
+            let source = format!(
+                "class User {{ name Str }}\nfn read(candidate User?, other Int?) {{\nlet {{\n{clauses}\n}} else {{ name: \"Unknown\", item: 0 }}\n}}"
+            );
+            let result = check_program(&parse_inline(&source));
+            assert_eq!(
+                result.diagnostics.len(),
+                1,
+                "{source}\n{:#?}",
+                result.diagnostics
+            );
+            assert_eq!(result.diagnostics[0].code, "invalid_let_else_fallback");
+            assert!(
+                result.diagnostics[0]
+                    .message
+                    .contains("nested destructuring requires an exiting")
+            );
+        }
+    }
+
+    #[test]
+    fn allows_flat_typed_and_sequence_value_fallbacks() {
+        let program = parse_inline(
+            r#"
+class User { name Str }
+
+fn read(candidate Any, maybe Int?, items [Any]) {
+    let user User = candidate else User("Unknown")
+    let User { name as displayName } = candidate else "Unknown"
+    let Some { value Int as number } = maybe else 0
+    let ^short = maybe else 0
+    let [first Int, ...rest] = items else { first: 0, rest: [] }
+    let (left, right) = (1, 2) else { left: 0, right: 0 }
+    let Some { value: _ as renamed } = maybe else 0
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn allows_never_expression_fallbacks_for_nested_patterns() {
+        let program = parse_inline(
+            r#"
+class User { name Str }
+fn stop() Never = panic("missing")
+
+fn read(candidate User?, flag Bool) {
+    let Some { value: User { name } } = candidate else if flag { stop() } else { stop() }
 }
 "#,
         );

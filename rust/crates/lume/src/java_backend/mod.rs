@@ -5219,6 +5219,96 @@ fn main() Int =
     }
 
     #[test]
+    fn runs_flat_let_else_fallbacks_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for (file, main_class) in [
+            (
+                "flat_let_else_fallbacks.lum",
+                "examples.flat_fallbacks.Flat_fallbacksMain",
+            ),
+            (
+                "let_else_fallback_values.lum",
+                "Let_else_fallback_valuesMain",
+            ),
+        ] {
+            let source = root.join("examples/features").join(file);
+            let interpreted = run_path(&source, None).expect("run let else fallbacks");
+            assert!(
+                interpreted.diagnostics.is_empty(),
+                "{file}: {:?}",
+                interpreted.diagnostics
+            );
+            let source_text = fs::read_to_string(&source).unwrap();
+            let expected = source_text
+                .lines()
+                .skip(1)
+                .take_while(|line| line.starts_with("# "))
+                .map(|line| format!("{}\n", &line[2..]))
+                .collect::<String>();
+            assert_eq!(interpreted.output, expected, "{file}");
+            if !command_available("javac") || !command_available("java") {
+                continue;
+            }
+            let temp = temp_path("lume-java-flat-let-else");
+            let out = temp.join("out");
+            let classes = temp.join("classes");
+            let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+            assert!(
+                generated.diagnostics.is_empty(),
+                "{file}: {:?}",
+                generated.diagnostics
+            );
+            let mut sources = core_runtime_sources();
+            collect_java_sources(&out, &mut sources).unwrap();
+            fs::create_dir_all(&classes).unwrap();
+            run_checked(
+                Command::new("javac").arg("-d").arg(&classes).args(&sources),
+                "javac flat let else",
+            );
+            let output = run_checked(
+                Command::new("java")
+                    .arg("-cp")
+                    .arg(&classes)
+                    .arg(main_class),
+                "java flat let else",
+            );
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                expected,
+                "{file}"
+            );
+            let _ = fs::remove_dir_all(temp);
+        }
+    }
+
+    #[test]
+    fn rejects_nested_value_fallbacks_before_java_emission() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let temp = temp_path("lume-java-reject-nested-fallbacks");
+        for file in [
+            "let_else_nested_pattern_value_fallback.lum",
+            "let_else_grouped_nested_pattern_value_fallback.lum",
+            "let_else_nested_extract_value_fallback.lum",
+        ] {
+            let source = root.join("examples/failures").join(file);
+            let generated = generate_java_path(&source, JavaBackendOptions::new(&temp)).unwrap();
+            assert!(
+                generated.diagnostics.iter().any(|diagnostic| {
+                    diagnostic.diagnostic.code == "invalid_let_else_fallback"
+                        && diagnostic
+                            .diagnostic
+                            .message
+                            .contains("nested destructuring")
+                }),
+                "{file}: {:?}",
+                generated.diagnostics
+            );
+            assert!(generated.written_files.is_empty(), "{file}");
+        }
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn readable_java_keeps_extract_or_defaults_structured_and_lazy() {
         let temp = temp_path("lume-java-readable-extract-or");
         let source = temp.join("extract_or.lum");

@@ -50,7 +50,7 @@ the surrogate range U+D800 through U+DFFF. It is not a byte, a UTF-16 code
 unit, or necessarily a user-perceived character (grapheme cluster).
 For example, precomposed `é` contains one scalar, while `e` followed by a
 combining acute accent contains two. String indexing continues to use scalar
-values, not grapheme clusters. `Str.charAt(index)` returns `Char?`.
+values, not grapheme clusters.
 
 Intrinsic collection types:
 
@@ -637,49 +637,6 @@ Rules:
 - `$name` interpolates a simple identifier expression
 - `${...}` interpolates a full expression
 - `\$` inserts a literal dollar sign
-- `Str.size` returns the number of Unicode scalar values as `Int`; it does not
-  count UTF-8 bytes or UTF-16 code units
-- `Str.charAt(index)` uses a zero-based Unicode-scalar index and returns `None`
-  when `index` is negative or outside the string; use `charAt(index) !` for
-  assertive extraction
-- `Str.slice()`, `Str.slice(start)`, and `Str.slice(start, end)` use zero-based
-  Unicode-scalar indexes and return the selected half-open range; string slice
-  brackets use the same operation, for example `text[:5]`, `text[1:5]`,
-  `text[5:]`, and `text[:]`
-- `Str.isEmpty` reports whether the string contains no characters
-- `Str.nonEmpty` reports whether the string contains at least one character
-- `Str.isBlank` is a getter that reports whether the string is empty or contains
-  only Unicode whitespace (the Unicode `White_Space` property)
-- `Str.trim()` removes leading and trailing whitespace
-- `Str.trimLeft()` and `Str.trimRight()` remove whitespace from one side
-- `Str.toLower()` and `Str.toUpper()` use Unicode case conversion and are not
-  locale-sensitive
-- `Str.contains(part)` performs literal substring membership; `contains` is the
-  common membership spelling for strings and collections
-- `Str.startsWith(prefix)` and `Str.endsWith(suffix)` perform literal,
-  case-sensitive prefix and suffix checks
-- `Str.indexOf(part)` returns the zero-based Unicode-scalar index of the first
-  literal match as `Some(index)`, or `None` when no match exists
-- `Str.lastIndexOf(part)` returns the index of the last literal match using the
-  same optional Unicode-scalar index contract; an empty `part` matches at
-  `size` (and at `0` for an empty string)
-- `Str.lines()` returns a fresh, growable `Vector[Str]`, splitting on LF, CRLF,
-  or CR and removing those terminators. Interior empty lines are preserved;
-  a final terminator does not add an extra line, and an empty string returns
-  an empty vector
-- `Str.repeat(count)` and `Char.repeat(count)` return a `Str` containing the
-  receiver repeated `count` times. Zero returns `""`; a negative count is a
-  runtime error. Construction is subject to the runtime's string-size and
-  allocation limits
-- `Str.split(separator)` treats `separator` as literal text and returns a
-  growable `Vector[Str]`
-- `Str.splitRegex(pattern)` explicitly interprets `pattern` as a regular
-  expression and returns a growable `Vector[Str]`
-- `Str.replaceFirst(target, replacement)` and
-  `Str.replaceAll(target, replacement)` replace literal text
-- `Str.replaceFirstRegex(pattern, replacement)` and
-  `Str.replaceAllRegex(pattern, replacement)` make regular-expression
-  replacement explicit in the method name
 
 Raw strings preserve their contents without escapes or interpolation:
 
@@ -694,6 +651,9 @@ Multiline strings use triple quotes and preserve their line breaks. Use
 Ordinary `"..."` and `raw"..."` strings cannot cross a physical newline; use
 the `\n` escape for a line break inside an ordinary string or triple quotes for
 multiline source text.
+
+String methods and getters are documented in the
+[string library reference](stdlib/str.md).
 
 ## Compiled Regular Expressions
 
@@ -1050,36 +1010,23 @@ Module declaration:
 module app
 ```
 
-Top-level forms:
+Top-level forms (EBNF outline; square brackets mark optional parts):
 
-- `fn`
-- `annotation`
-- `interface`
-- `mixin`
-- `class`
-- `shape`
-- `object`
-- `type`
-- `ext TypeName`
-- `name Type = expr`
-- `private fn`
-- `internal fn`
-- `private name Type = expr`
-- `internal name Type = expr`
-- `private annotation`
-- `internal annotation`
-- `private interface`
-- `internal interface`
-- `private mixin`
-- `internal mixin`
-- `private class`
-- `internal class`
-- `private shape`
-- `internal shape`
-- `private object`
-- `internal object`
-- `private type`
-- `internal type`
+```ebnf
+<top-level-form> ::= [<visibility>] <declaration>
+                   | "ext" <extension-definition>
+<visibility> ::= "public" | "internal" | "private"
+<declaration> ::= "fn" <function-definition>
+                | <type-keyword> <type-definition>
+                | <binding>
+<type-keyword> ::= "annotation" | "interface" | "mixin" | "class"
+                 | "shape" | "object" | "type"
+<binding> ::= <name> "=" <expression>
+            | <name> <type> "=" <expression>
+```
+
+Omitted visibility defaults to `private`. Extension blocks do not accept
+visibility modifiers. Annotation placement follows the target rules above.
 
 Examples:
 
@@ -1348,9 +1295,8 @@ text = "lume"
 prefixText = text[:2]    # text.slice(0, 2)
 ```
 
-For a `Vector`, `slice()`, `slice(start)`, and `slice(start, end)` return a fresh
-shallow `Vector`. For a `Str`, they return a string selected by Unicode-scalar
-index. Both evaluate the receiver once. Bounds must satisfy
+A vector slice returns a fresh shallow `Vector`. A string slice selects text
+by Unicode-scalar index. Both evaluate the receiver once. Bounds must satisfy
 `0 <= start <= end <= value.size`; an invalid range panics. Slice brackets are
 available on `Vector` and `Str`; step syntax such as `values[1:5:2]` is not
 supported. At expression start, `[]` remains the contextual empty vector/map
@@ -4358,9 +4304,16 @@ let {
 }
 ```
 
+Value-producing fallbacks require a **flat pattern**: at most one layer of
+unpacking, with only direct bindings, typed bindings, field renames, wildcards,
+literal checks, or singleton cases inside it. Another record, tuple, sequence,
+or payload pattern inside that layer is nested destructuring and requires an
+exiting fallback instead. `<-` extraction and `^pattern` each count as an
+unpacking layer. In grouped `let`, every clause must satisfy the same rule.
+
 When the fallback supplies a value, it is evaluated lazily only after a failed
-match. A pattern with one binding accepts one assignable fallback value. A tuple
-is still one value when that binding itself has a tuple type:
+match. A flat pattern with one binding accepts one assignable fallback value.
+A tuple is still one value when that binding itself has a tuple type:
 
 ```txt
 let item <- maybeItem else defaultItem
@@ -4368,8 +4321,8 @@ let item <- maybeItem else defaultItem
 let Some { value as pair } = maybePair else (1, 2)
 ```
 
-A pattern or grouped extraction with multiple bindings requires a shape whose
-fields exactly match the introduced local names:
+A flat pattern or grouped extraction with multiple bindings requires a shape
+whose fields exactly match the introduced local names:
 
 ```txt
 let User { name, label as title } = value else {
@@ -4402,6 +4355,24 @@ let User { name, value } = candidate else (defaultName, defaultValue)
 # error: use a shape with fields {name, value}
 ```
 
+Nested patterns remain valid with an exiting fallback, regardless of how many
+bindings they introduce:
+
+```txt
+let Some { value: User { name } } = candidate else return # valid
+let Some { value: User { name } } = candidate else "Unknown" # invalid
+let User { name } <- maybeUser else "Unknown" # invalid: extraction plus destructuring
+```
+
+Use `match` when a nested match needs a default result:
+
+```txt
+name = match candidate {
+    case Some { value: User { name } } => name
+    case _ => "Unknown"
+}
+```
+
 When a pattern aliases a whole value and also binds components inside that
 value, its fallback must exit control flow. A value fallback could otherwise
 initialize the whole and its components independently, breaking the
@@ -4409,7 +4380,6 @@ relationship expressed by the successful pattern:
 
 ```txt
 let User { name } as user = candidate else return       # valid
-let Some { value: User { name } } = candidate else "Unknown"      # valid: one binding
 
 let User { name } as user = candidate else {            # invalid
     name: "Unknown"
@@ -4428,7 +4398,7 @@ let { name } = user
 - the pattern is matched against the right-hand value
 - if the match succeeds, bindings remain visible after the statement
 - if the match fails, the `else` body is evaluated lazily
-- the fallback must either initialize every introduced binding or exit the current control-flow path with `return`, `break`, `continue`, or a call whose return type is `Never`
+- a value fallback requires flat patterns and must initialize every introduced binding; otherwise it must exit the current control-flow path with `return`, `break`, `continue`, or an expression whose type is `Never`
 
 Success-case extraction shorthand in `let` always requires an explicit
 fallback, even when the source expression visibly constructs a successful

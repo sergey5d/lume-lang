@@ -1,0 +1,10 @@
+# FAIL_REGEX:
+# invalid_let_else_fallback at .*: nested destructuring requires an exiting let else fallback; value fallbacks are allowed only for flat patterns
+
+class User { name Str }
+
+fn main() {
+    candidate User? = None
+    let Some { value: User { name } } = candidate else "Unknown"
+    println(name)
+}

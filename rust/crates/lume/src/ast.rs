@@ -482,7 +482,7 @@ pub struct ForStmt {
 
 /// A `let PATTERN = expr else ...` statement, or grouped `let { ... } else ...`.
 /// The fallback either exits the current control-flow path or supplies values
-/// for every binding produced by the pattern.
+/// for every binding produced by a flat pattern (or flat grouped clauses).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetElseStmt {
     pub clauses: Vec<RefutableClause>,

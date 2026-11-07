@@ -1,0 +1,93 @@
+# EXPECT:
+# flat fallbacks ok
+
+module examples/flat_fallbacks
+
+class User { name Str }
+
+class Counter { var value Int = 0 }
+
+fn read(candidate User?) Str {
+    let Some { value: User { name } } = candidate else return "Unknown"
+    name
+}
+
+fn readGrouped(candidate User?, other Int?) Str {
+    let {
+        number <- other
+        Some { value: User { name } } = candidate
+    } else return "missing"
+    name + number.toStr()
+}
+
+fn countUntilMissing(candidates [User?]) Int {
+    var count = 0
+    for candidate <- candidates {
+        let Some { value: User { name } } = candidate else break
+        count += name.size
+    }
+    count
+}
+
+fn countPresent(candidates [User?]) Int {
+    var count = 0
+    for candidate <- candidates {
+        let Some { value: User { name } } = candidate else continue
+        count += name.size
+    }
+    count
+}
+
+fn requireName(candidate User?) Str {
+    let Some { value: User { name } } = candidate else panic("missing user")
+    name
+}
+
+fn replace(calls Counter) Str {
+    calls.value += 1
+    "replacement"
+}
+
+fn main() {
+    missing User? = None
+    let Some { value as user } = missing else User("fallback")
+    assert(user.name == "fallback")
+
+    candidate Any = 0
+    let User { name as displayName } = candidate else "Unknown"
+    assert(displayName == "Unknown")
+
+    maybePair Option[(Int, Int)] = None
+    let Some { value as pair } = maybePair else (1, 2)
+    assert(pair[0] == 1 && pair[1] == 2)
+
+    values [Int] = []
+    let [first, ...rest] = values else { first: 3, rest: [4] }
+    assert(first == 3 && rest[0] == 4)
+
+    other Int? = None
+    let {
+        left <- other
+        right <- other
+    } else new { left: 5, right: 6 }
+    assert(left == 5 && right == 6)
+
+    calls = Counter()
+    present Str? = Some("present")
+    let ^text = present else replace(calls)
+    assert(text == "present" && calls.value == 0)
+    absent Str? = None
+    let ^replacement = absent else replace(calls)
+    assert(replacement == "replacement" && calls.value == 1)
+
+    assert(read(None) == "Unknown")
+    assert(read(Some(User("Ada"))) == "Ada")
+    assert(readGrouped(Some(User("Ada")), Some(7)) == "Ada7")
+    assert(readGrouped(None, Some(7)) == "missing")
+    assert(readGrouped(Some(User("Ada")), None) == "missing")
+    users [User?] = [Some(User("Ada")), None, Some(User("Bo"))]
+    assert(countUntilMissing(users) == 3)
+    assert(countPresent(users) == 5)
+    assert(requireName(Some(User("Ada"))) == "Ada")
+    println("flat fallbacks ok")
+}
