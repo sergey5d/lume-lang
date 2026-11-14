@@ -6366,6 +6366,12 @@ impl<'a> Checker<'a> {
                             );
                         }
                     }
+                    if let Some(expected_fields) = expected_fields {
+                        // Only an explicit construction may discard spread-provided fields.
+                        actual_fields.retain(|(name, _)| {
+                            expected_fields.iter().any(|(expected, _)| expected == name)
+                        });
+                    }
                     return Ty::Record(actual_fields);
                 }
                 if let Ty::Record(expected_fields) = expected {
@@ -12470,8 +12476,34 @@ impl<'a> Checker<'a> {
     }
 
     fn arg_matches_expected(&self, arg: &crate::ast::CallArg, actual: &Ty, expected: &Ty) -> bool {
-        let _ = arg;
-        self.is_assignable(actual, expected)
+        if self.is_assignable(actual, expected) {
+            return true;
+        }
+        let Some(Expr::RecordLiteral { fields, values, .. }) =
+            contextual_construction_expr(&arg.value)
+        else {
+            return false;
+        };
+        let (Some(target_fields), Some(actual_fields)) = (
+            self.shape_target_fields(expected),
+            self.structural_fields_for_type(actual),
+        ) else {
+            return false;
+        };
+        // Overload probes must distinguish constructing from fields from assigning
+        // an existing wider value. Full checking still validates the chosen target.
+        values.is_empty()
+            && fields
+                .iter()
+                .filter_map(|field| field.name.as_ref())
+                .all(|name| target_fields.iter().any(|field| &field.name == name))
+            && target_fields.iter().all(|target| {
+                actual_fields
+                    .iter()
+                    .find(|(name, _)| name == &target.name)
+                    .map(|(_, actual)| self.is_assignable(actual, &target.ty))
+                    .unwrap_or(target.has_initializer)
+            })
     }
 
     fn probe_expr_type(&self, expr: &Expr) -> Ty {
@@ -12554,6 +12586,10 @@ impl<'a> Checker<'a> {
                     .collect(),
             ),
             Expr::RecordLiteral { fields, .. } => {
+                let explicit_names = fields
+                    .iter()
+                    .filter_map(|field| field.name.as_ref())
+                    .collect::<HashSet<_>>();
                 let mut out = Vec::new();
                 for field in fields {
                     if let Some(name) = &field.name {
@@ -12565,11 +12601,13 @@ impl<'a> Checker<'a> {
                                 self.probe_expr_type_with_locals(&field.value, locals)
                             });
                         upsert_shape_field(&mut out, name.clone(), ty);
-                    } else if let Ty::Record(spread_fields) =
-                        self.probe_expr_type_with_locals(&field.value, locals)
-                    {
+                    } else if let Some(spread_fields) = self.structural_fields_for_type(
+                        &self.probe_expr_type_with_locals(&field.value, locals),
+                    ) {
                         for (name, ty) in spread_fields {
-                            upsert_shape_field(&mut out, name, ty);
+                            if !explicit_names.contains(&name) {
+                                upsert_shape_field(&mut out, name, ty);
+                            }
                         }
                     }
                 }
@@ -14104,7 +14142,13 @@ impl<'a> Checker<'a> {
             return;
         }
         if !self.is_assignable(actual, expected) {
-            self.add_error(code, message, span);
+            let mut diagnostic = Diagnostic::error(code, message, span);
+            if self.requires_shape_field_projection(actual, expected) {
+                diagnostic = diagnostic.with_help(
+                    "dropping fields from an existing shape requires explicit construction; use 'Target { ...value }' or a typed initializer such as 'result Target = { ...value }'",
+                );
+            }
+            self.diagnostics.push(diagnostic);
         }
     }
 
@@ -14268,13 +14312,59 @@ impl<'a> Checker<'a> {
             return false;
         };
 
-        expected_fields.iter().all(|expected| {
-            actual_fields
+        actual_fields.len() == expected_fields.len()
+            && self.shape_field_count(actual) == Some(actual_fields.len())
+            && self.shape_field_count(expected) == Some(expected_fields.len())
+            && expected_fields.iter().all(|expected| {
+                actual_fields
+                    .iter()
+                    .find(|(actual_name, _)| actual_name == &expected.name)
+                    .map(|(_, actual_ty)| self.is_assignable(actual_ty, &expected.ty))
+                    .unwrap_or(false)
+            })
+    }
+
+    fn shape_field_count(&self, ty: &Ty) -> Option<usize> {
+        match ty {
+            Ty::Record(fields) => Some(fields.len()),
+            Ty::Named(name, _) => self
+                .lookup_any_type(name)
+                .filter(|sig| sig.kind == TypeKind::Record)
+                .map(|sig| sig.fields.len()),
+            _ => None,
+        }
+    }
+
+    fn requires_shape_field_projection(&self, actual: &Ty, expected: &Ty) -> bool {
+        if let Ty::Union(members) = actual {
+            return members
                 .iter()
-                .find(|(actual_name, _)| actual_name == &expected.name)
-                .map(|(_, actual_ty)| self.is_assignable(actual_ty, &expected.ty))
-                .unwrap_or(false)
-        })
+                .any(|member| self.requires_shape_field_projection(member, expected));
+        }
+        if let Ty::Union(members) = expected {
+            return members
+                .iter()
+                .any(|member| self.requires_shape_field_projection(actual, member));
+        }
+        let (Some(actual_count), Some(expected_count)) = (
+            self.shape_field_count(actual),
+            self.shape_field_count(expected),
+        ) else {
+            return false;
+        };
+        actual_count > expected_count
+            && self
+                .structural_fields_for_type(actual)
+                .is_some_and(|actual_fields| {
+                    self.shape_target_fields(expected)
+                        .is_some_and(|expected_fields| {
+                            expected_fields.iter().all(|expected| {
+                                actual_fields.iter().any(|(name, ty)| {
+                                    name == &expected.name && self.is_assignable(ty, &expected.ty)
+                                })
+                            })
+                        })
+                })
     }
 
     fn shape_fields_match_exactly(&self, left: &Ty, right: &Ty) -> bool {
@@ -16492,11 +16582,14 @@ fn is_assignable(actual: &Ty, expected: &Ty) -> bool {
                     .zip(right.iter())
                     .all(|(left, right)| is_assignable(left, right))
         }
-        (Ty::Record(left), Ty::Record(right)) => right.iter().all(|(name, right_ty)| {
-            left.iter()
-                .find(|(left_name, _)| left_name == name)
-                .is_some_and(|(_, left_ty)| is_assignable(left_ty, right_ty))
-        }),
+        (Ty::Record(left), Ty::Record(right)) => {
+            left.len() == right.len()
+                && right.iter().all(|(name, right_ty)| {
+                    left.iter()
+                        .find(|(left_name, _)| left_name == name)
+                        .is_some_and(|(_, left_ty)| is_assignable(left_ty, right_ty))
+                })
+        }
         (Ty::Function(left_params, left_ret), Ty::Function(right_params, right_ret)) => {
             left_params.len() == right_params.len()
                 && left_params
@@ -20235,9 +20328,8 @@ fn main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "invalid_binding_type"
-                    && diagnostic.message.contains("y Int")
-                    && diagnostic.message.contains("z Int")
+                diagnostic.code == "invalid_contextual_construction"
+                    && diagnostic.message.contains("no construction field 'y'")
             }),
             "{:#?}",
             result.diagnostics
@@ -21167,7 +21259,7 @@ fn main() Unit {
             r#"
 fn main() Unit {
     wider = { x: 1, y: 2, z: 3 }
-    assigned { x Int, y Int } = wider
+    assigned { x Int, y Int } = { ...wider }
     spread { x Int, y Int } = { ...wider }
 
     typo { x Int, y Int } = { x: 1, y: 2, yy: 3 }
@@ -21188,6 +21280,91 @@ fn main() Unit {
             .count();
         assert_eq!(unknown_fields, 2, "{:#?}", result.diagnostics);
         assert_eq!(result.diagnostics.len(), 2, "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn shape_width_changes_require_explicit_construction_at_value_boundaries() {
+        let declarations = r#"
+shape Point {
+    x Int
+    y Int
+}
+shape Point3D {
+    x Int
+    y Int
+    z Int
+}
+shape Label { label Str }
+fn consume(value Point) Int = value.x
+fn consumeAnonymous(value { x Int, y Int }) Int = value.x
+"#;
+        for source in [
+            "fn main() { original = Point3D(1, 2, 3)\npoint Point = original }",
+            "fn main() { point Point = Point3D(1, 2, 3) }",
+            "fn main() { original = { x: 1, y: 2, z: 3 }\npoint Point = original }",
+            "fn main() { original = Point3D(1, 2, 3)\npoint { x Int, y Int } = original }",
+            "fn main() { original = { x: 1, y: 2, z: 3 }\npoint { x Int, y Int } = original }",
+            "fn main() { original = Point3D(1, 2, 3)\nvar point = Point(0, 0)\npoint := original }",
+            "fn main() { consume(Point3D(1, 2, 3)) }",
+            "fn main() { consumeAnonymous(Point3D(1, 2, 3)) }",
+            "fn project(value Point3D) Point = value",
+            "fn project(value Point3D) { x Int, y Int } = value",
+            "fn main() { points [Point] = [Point3D(1, 2, 3)] }",
+            "fn main() { points Set[Point] = Set()\npoints.add(Point3D(1, 2, 3)) }",
+            "fn main() { values [Point: Str] = []\nvalues[Point3D(1, 2, 3)] := \"invalid\" }",
+            "fn main() { original = Point3D(1, 2, 3)\npoint Point | Label = original }",
+            "fn main() { original = Point3D(1, 2, 3)\npair (Point, Int) = (original, 0) }",
+            "fn main() { original = Point3D(1, 2, 3)\ncontainer { point { x Int, y Int } } = { point: original } }",
+        ] {
+            let result = check_program(&parse_inline(&format!("{declarations}\n{source}")));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.contains("Point3D")
+                        || diagnostic.message.contains("z Int")),
+                "expected a shape-width type error for {source}: {:#?}",
+                result.diagnostics,
+            );
+        }
+
+        let accepted = check_program(&parse_inline(&format!(
+            r#"{declarations}
+shape Position {{
+    y Int
+    x Int
+}}
+class Consumer {{
+    fn consume(value Str) Int = 0
+    fn consume(value Point) Int = value.x
+}}
+fn project(value Point3D) Point = {{ ...value }}
+fn main() {{
+    original = Point3D(1, 2, 3)
+    named = Point {{ ...original }}
+    typed Point = {{ ...original }}
+    forced Point = new {{ ...original }}
+    anonymous {{ x Int, y Int }} = {{ ...original }}
+    empty {{}} = {{ ...original }}
+    identical Point = Position(2, 1)
+    anonymousSource = {{ y: 2, x: 1 }}
+    anonymousSame {{ x Int, y Int }} = anonymousSource
+    namedSame Point = anonymousSource
+    consume({{ ...original }})
+    consumer = Consumer()
+    consumer.consume({{ ...original }})
+    anonymousWide = {{ x: 1, y: 2, z: 3 }}
+    consumer.consume(({{ ...anonymousWide }}))
+    consumeAnonymous({{ ...original }})
+    points [Point] = [{{ ...original }}]
+}}
+"#
+        )));
+        assert!(
+            accepted.diagnostics.is_empty(),
+            "{:#?}",
+            accepted.diagnostics
+        );
     }
 
     #[test]
@@ -24021,7 +24198,7 @@ fn copy(value { position Str }) { position Str } = value
 
 fn main() Unit {
     session Session = Session("engineer", 10, 30)
-    view { position Str } = project(session)
+    view { position Str } = project({ ...session })
     copied { position Str } = copy(view)
     println(copied.position, session.duration())
 }
@@ -24054,7 +24231,7 @@ fn narrow(value Cat | Dog) Dog | Bird = value
     }
 
     #[test]
-    fn rejects_ambiguous_shape_projection_into_union() {
+    fn rejects_implicit_width_projection_into_union() {
         let program = parse_inline(
             r#"
 shape XY {
@@ -24085,7 +24262,7 @@ fn main() Unit {
             result
                 .diagnostics
                 .iter()
-                .filter(|diagnostic| diagnostic.code == "ambiguous_shape_union_projection")
+                .filter(|diagnostic| diagnostic.code == "invalid_binding_type")
                 .count(),
             2,
             "{:#?}",
@@ -24094,21 +24271,22 @@ fn main() Unit {
         let diagnostic = result
             .diagnostics
             .iter()
-            .find(|diagnostic| diagnostic.code == "ambiguous_shape_union_projection")
-            .expect("ambiguous projection diagnostic");
+            .find(|diagnostic| diagnostic.code == "invalid_binding_type")
+            .expect("implicit projection diagnostic");
         assert!(diagnostic.message.contains("XYZ"), "{diagnostic:#?}");
         assert!(diagnostic.message.contains("XY"), "{diagnostic:#?}");
         assert!(diagnostic.message.contains("XZ"), "{diagnostic:#?}");
         assert!(
             diagnostic
-                .message
-                .contains("construct the intended shape explicitly"),
+                .helps
+                .iter()
+                .any(|help| help.contains("requires explicit construction")),
             "{diagnostic:#?}"
         );
     }
 
     #[test]
-    fn selects_exact_or_unique_shape_projection_into_union() {
+    fn selects_exact_or_explicit_shape_construction_into_union() {
         let program = parse_inline(
             r#"
 shape X {
@@ -24140,11 +24318,14 @@ shape Label {
     label Str
 }
 
-fn project(value XYZ | Label) XY | Label = value
+fn project(value XYZ | Label) XY | Label = match value {
+    case XYZ { x, y } => XY { x, y }
+    case label Label => label
+}
 
 fn main() Unit {
     original = XYZ(1, 2, 3)
-    unique XY | Label = original
+    unique XY | Label = XY { ...original }
     exact XY | X = Position(2, 1)
     resolved XY | XZ = XY { ...original }
     dynamic XY | Label = project(original)

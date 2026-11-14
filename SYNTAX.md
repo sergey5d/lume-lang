@@ -281,13 +281,13 @@ assignable to that type. Narrow a union with `match` or `is` before using
 members that are not shared by its alternatives. A union itself is not a
 runtime type-test target.
 
-Shape projection into a union must select one deterministic target. An exact
-member type is kept without projection. Otherwise, an exact structural schema
-is preferred; if there is no exact schema, exactly one wider-to-narrower shape
-projection must be possible. Multiple exact schemas or multiple projection
-targets are ambiguous and rejected. This rule is applied independently to
-every concrete alternative of a source union, and union-member order never
-breaks a tie.
+Shape assignment into a union cannot drop fields. An exact member type is kept;
+otherwise, an exact structural schema is preferred. If none matches exactly,
+one compatible target with the same complete field-name set is required.
+Multiple equally preferred schemas are ambiguous and rejected. This rule is
+applied independently to every concrete alternative of a source union, and
+union-member order never breaks a tie. Construct a narrower shape explicitly
+before assigning it to the union.
 
 ```txt
 shape XY {
@@ -305,7 +305,7 @@ shape XYZ {
 }
 
 original = XYZ(1, 2, 3)
-selected XY | XZ = original                 # error: two projection targets
+selected XY | XZ = original                 # error: assignment would drop fields
 selected XY | XZ = XY { ...original }       # valid: target chosen explicitly
 ```
 
@@ -1789,12 +1789,14 @@ fn contextualNew() Rollup? = source().map(r => new { ...r })
 required target fields must exist with assignable types; extra source fields
 are discarded rather than copied into the narrower result.
 
-Assignment from a wider shape materializes a new value of the target shape. It
-copies only the target fields by name and permanently discards extra fields:
+Dropping fields from an existing shape requires explicit construction. Either
+name the target directly or supply it through an expected type:
 
 ```txt
 stored = StoredRollup { total: 7, label: "week", internalId: 99 }
-rollup Rollup = stored
+implicit Rollup = stored        # error: assignment cannot discard internalId
+rollup = Rollup { ...stored }   # explicit target
+contextual Rollup = { ...stored } # expected target
 
 rollup.total       # valid
 rollup.internalId  # error: not present in Rollup
@@ -1805,9 +1807,10 @@ Projection is a shallow copy. Field bindings are copied into the new shape;
 nested classes and mutable collections retain their existing references. The
 source value itself is unchanged.
 
-Structural assignment requires every target field to exist in the source with
-an assignable type. A target field's construction default is used only during
-explicit construction; it does not create missing data during assignment:
+Structural assignment requires the same complete field-name set, with assignable
+field types. Field order and shape declaration names may differ. It neither
+drops extra fields nor creates missing ones. A target field's construction
+default is used only during explicit construction:
 
 ```txt
 shape Small { x Int }
@@ -1829,12 +1832,13 @@ An anonymous shape literal can still be supplied as an ordinary call argument,
 for example `describe({ name: "Cara", age: 14 })`, when the parameter provides
 the expected shape schema.
 
-The same projection rule applies to parameter passing, returns, casts, and
-collection storage. The projected value has no hidden source shape and cannot
-later be narrowed back to it:
+Parameter passing, returns, and collection storage also reject implicit field
+dropping. Use explicit construction at each such boundary. A projected value has
+no hidden source shape and cannot later be narrowed back to it:
 
 ```txt
-point Point = Point3D(1, 2, 3)
+original = Point3D(1, 2, 3)
+point Point = { ...original }
 point.z # error: Point does not expose z
 
 match point {
@@ -1865,8 +1869,9 @@ anonymous { x Int, y Int } = {
 ```
 
 This restriction applies equally to named and anonymous target schemas. It
-checks only explicitly written construction entries; assigning an existing
-wider shape or supplying it through a spread remains a valid projection.
+checks only explicitly written construction entries. A wider source supplied
+through a spread may provide extra fields that construction discards; assigning
+the wider value directly is not a projection operation.
 
 A member expression in a construction entry must have an explicit field label:
 
@@ -2079,8 +2084,8 @@ Shape equality is structural across shape declarations:
 - comparing two implicitly equality-capable shapes with `==`, `!=`, or `equals(...)` requires the same complete set of field names and normalized field types
 - field declaration order may differ
 - the right operand is converted to the left operand's shape by field name, then ordinary value equality is applied
-- unlike shape assignment, equality does not ignore extra fields
-- width-compatible shapes must first be projected through a narrower typed binding, parameter, return, cast, or collection element type
+- neither equality nor ordinary assignment ignores extra fields
+- width-compatible shapes must first be projected through explicit construction, such as `Point { ...value }` or `point Point = { ...value }`
 - generated Java for implicit shape equality compares fields through their equality contracts; hash inputs are ordered by field name so declaration order does not change the hash
 
 ```txt
@@ -2091,7 +2096,8 @@ shape Point3D { x Int, y Int, z Int }
 Point(1, 2) == Position(2, 1) # true: fields match by name
 Point(1, 2) == Point3D(1, 2, 3) # error: schemas differ
 
-point2d Point = Point3D(1, 2, 3)
+point3d = Point3D(1, 2, 3)
+point2d Point = { ...point3d }
 point2d.runtimeType.name ! # Point
 point2d == Point(1, 2)     # true
 point2d is Point3D         # false: z was discarded
@@ -4158,6 +4164,13 @@ result = if value > 0 {
 }
 ```
 
+The body after `else` may begin on the next line without changing its scope:
+
+```txt
+result = if value > 0 { 1 } else
+    0
+```
+
 Statement `if`, expression `if`, and `while` use the same condition grammar.
 Boolean expressions keep the ordinary operator precedence in every context,
 so a Boolean-only condition such as `a || b && c` means `a || (b && c)`.
@@ -4950,11 +4963,17 @@ The single statement is the entire loop body; indentation does not extend its
 scope. `do` does not create a lambda, so `return`, `break`, and `continue` keep
 their ordinary control-flow meaning.
 
-`yield` also accepts a same-line expression:
+`yield` accepts one expression, beginning on the same line or after a newline:
 
 ```txt
 items = for item <- [1, 2, 3] yield item * 2
+
+items = for item <- [1, 2, 3] yield
+    item * 2
 ```
+
+The same rule applies after grouped headers. Multiple statements in the body
+require an explicit block; indentation does not extend the body.
 
 A leading brace body is the first primary expression of the yielded value; it
 does not terminate that expression. Postfix and infix operations following the
@@ -5953,7 +5972,10 @@ Newline continuation:
 - A named function or method without an explicit return type returns `Unit` in all three forms. Non-`Unit` return types are never inferred from named callable bodies.
 - Getter declarations begin with `get`, omit a parameter list, require a return type, and use the same block or expression body forms.
 - Constructor declarations begin with `new` and use the constructor body forms documented above.
-- Inline-body introducers such as `else` and `yield` may take a same-line body without braces; if that body moves to the next line, a `{ ... }` block is required.
+- A newline after `else` or `yield` is layout. `yield` takes one expression;
+  expression `else` takes one expression, while statement `else` and
+  `let ... else` take one statement or their permitted brace body. Multiple
+  statements require an explicit block; indentation does not determine scope.
 - So this is valid:
 
 ```txt

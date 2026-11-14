@@ -1,0 +1,44 @@
+# EXPECT:
+# 1 0 -1
+# 7 -1
+# 9
+# 10 fallback
+# else
+# after
+
+shape Summary {
+    count Int
+    label Str
+}
+
+fn sign(value Int) Int =
+    if value > 0 { 1 } else
+    if value == 0 { 0 } else
+    { -1 }
+
+fn unwrap(maybe Int?) Int {
+    let Some { value } = maybe else
+        return -1
+    value
+}
+
+fn main() {
+    println(sign(5), sign(0), sign(-5))
+    println(unwrap(^7), unwrap(None))
+
+    missing Int? = None
+    let Some { value } = missing else
+        9
+    println(value)
+
+    candidate Any = ()
+    let Summary { count, label } = candidate else
+        { count: 10, label: "fallback" }
+    println(count, label)
+
+    if false {
+        println("then")
+    } else
+        println("else")
+    println("after")
+}

@@ -6731,6 +6731,116 @@ fn run(maybe Int?, values [Int], pairs [(Int, Int)]) Unit {
 }
 
 #[test]
+fn parses_newline_after_yield_without_extending_body() {
+    for header in ["item <- [1, 2]", "{ item <- [1, 2] }"] {
+        for expression in [
+            "item * 2",
+            "{ value: item }.value",
+            "{ next = item + 1\nnext * 2 }",
+        ] {
+            let source = format!(
+                "fn run() {{\n    values = for {header} yield\n        # body starts after layout\n        {expression}\n        after = 3\n}}"
+            );
+            let result = parse(&source);
+            assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+            let program = result.program.unwrap();
+            let Item::Function(function) = &program.items[0] else {
+                panic!("expected function");
+            };
+            let CallableBody::Block(body) = &function.body else {
+                panic!("expected block body");
+            };
+            assert_eq!(body.statements.len(), 2);
+            let Stmt::Binding(binding) = &body.statements[0] else {
+                panic!("expected values binding");
+            };
+            let Expr::ForYield { yield_body, .. } = &binding.values[0] else {
+                panic!("expected comprehension");
+            };
+            let expected_statements = if expression.starts_with("{ next") {
+                2
+            } else {
+                1
+            };
+            assert_eq!(yield_body.statements.len(), expected_statements);
+            assert!(matches!(
+                &body.statements[1],
+                Stmt::Binding(binding) if binding.bindings[0].name == "after"
+            ));
+        }
+    }
+}
+
+#[test]
+fn parses_newline_after_expression_else() {
+    for fallback in ["2", "{ 2 }", "if other { 2 } else\n3"] {
+        let source = format!(
+            "fn pick(flag Bool, other Bool) Int = if flag {{ 1 }} else\n    # body starts after layout\n    {fallback}\n"
+        );
+        let result = parse(&source);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let program = result.program.unwrap();
+        assert!(matches!(
+            &program.items[0],
+            Item::Function(FunctionDecl {
+                body: CallableBody::Expr(Expr::If { .. }),
+                ..
+            })
+        ));
+    }
+}
+
+#[test]
+fn parses_newline_after_statement_and_let_else_without_extending_body() {
+    let result = parse(
+        r#"
+fn run(flag Bool, maybe Int?, candidate Any) {
+    if flag { println("then") } else
+        if flag { println("other") } else
+            println("else")
+            after = 1
+    let Some { value } = maybe else
+        return
+        following = 2
+    let { count Int, label Str } = candidate else
+        { count: 0, label: "missing" }
+        last = 3
+}
+"#,
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.unwrap();
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function");
+    };
+    let CallableBody::Block(body) = &function.body else {
+        panic!("expected block body");
+    };
+    assert_eq!(body.statements.len(), 6);
+    let Stmt::If(condition) = &body.statements[0] else {
+        panic!("expected statement if");
+    };
+    assert!(matches!(&condition.else_branch, Some(ElseBranch::If(_))));
+    let Stmt::LetElse(binding) = &body.statements[2] else {
+        panic!("expected let else");
+    };
+    assert!(matches!(
+        binding.else_block.statements.as_slice(),
+        [Stmt::Return(ReturnStmt { value: None, .. })]
+    ));
+    let Stmt::LetElse(binding) = &body.statements[4] else {
+        panic!("expected let else with construction fallback");
+    };
+    assert!(matches!(
+        binding.else_block.statements.as_slice(),
+        [Stmt::Expr(ExprStmt {
+            expr: Expr::RecordLiteral { .. },
+            ..
+        })]
+    ));
+}
+
+#[test]
 fn rejects_newline_continuation_before_non_postfix_operators() {
     let leading_operator = parse(
         r#"

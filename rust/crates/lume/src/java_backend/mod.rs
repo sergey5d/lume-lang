@@ -8667,7 +8667,7 @@ fn main() Unit {
     }
 
     #[test]
-    fn generated_java_materializes_shape_width_projection() {
+    fn generated_java_materializes_explicit_shape_projection() {
         if !command_available("javac") || !command_available("java") {
             eprintln!("skipping Java shape-projection test because javac/java is not available");
             return;
@@ -8728,13 +8728,16 @@ shape Label {
 }
 
 fn view(point Point) Point = point
-fn project(value Point3D | Label) Point | Label = value
+fn project(value Point3D | Label) Point | Label = match value {
+    case Point3D { x, y } => Point { x, y }
+    case label Label => label
+}
 
 fn main() Unit {
     first3d = Point3D(1, 2, 3)
     second3d = Point3D(1, 2, 99)
-    first Point = view(first3d)
-    second Point = second3d
+    first Point = view(Point { ...first3d })
+    second Point = { ...second3d }
     concrete = Point(1, 2)
 
     println(first == second)
@@ -8751,15 +8754,15 @@ fn main() Unit {
     }
 
     values [Point: Str] = []
-    values[first3d] := "first"
-    values[second3d] := "second"
-    println(values.size, values[first3d]!)
+    values[Point { ...first3d }] := "first"
+    values[Point { ...second3d }] := "second"
+    println(values.size, values[Point { ...first3d }]!)
 
     points Set[Point] = Set()
-    points.add(first3d)
-    points.add(second3d)
+    points.add(Point { ...first3d })
+    points.add(Point { ...second3d })
     println(points.size)
-    println(values.contains(first3d))
+    println(values.contains(Point { ...first3d }))
 
     projected Point = Point { ...first }
     contextual Point = { ...first }
@@ -8771,7 +8774,7 @@ fn main() Unit {
     println(updated == Point(4, 2))
 
     wider = WiderItems(1, [1], 3)
-    items Items = wider
+    items Items = { ...wider }
     wider.items.add(2)
     println(items.items.size)
 
@@ -8779,7 +8782,7 @@ fn main() Unit {
     full Full = Full { ...source }
     println(full.x, full.y)
 
-    unique Point | Label = first3d
+    unique Point | Label = Point { ...first3d }
     exact Point | X = Position(4, 5)
     dynamic = project(first3d)
     match unique {

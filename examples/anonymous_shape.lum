@@ -44,13 +44,13 @@ fn main() Unit {
     mixedShape = { name: "Ada",
         age: 10
     }
-    narrow { name Str, age Int } = full
+    narrow { name Str, age Int } = { ...full }
     positional { name Str, age Int } = { name: "Ben", age: 12 }
     name = "Cara"
     age = 14
     contextual { name Str, age Int } = new { name, age }
 
-    println(describe(full))
+    println(describe({ ...full }))
     println(describe(smaller))
     println(inferred.count)
     println(mixed.a + mixed.b + mixed.c)

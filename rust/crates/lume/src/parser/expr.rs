@@ -148,13 +148,7 @@ impl<'a> Parser<'a> {
             );
             return None;
         }
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "unexpected_token",
-                "else body must stay on the same line unless it uses '{ ... }'",
-            );
-            return None;
-        }
+        self.skip_newlines();
         let else_branch = if self.at_keyword(Keyword::If) {
             let else_start = self.consume_keyword(Keyword::If, "expected 'if'")?;
             let else_if = self.parse_if_expr(else_start)?;
@@ -347,17 +341,11 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_yield_body_block(&mut self) -> Option<Block> {
+        self.skip_newlines();
         if self.at(TokenKind::LBrace) {
             self.parse_expression_brace_body_with_continuation()
                 .map(ExpressionBraceBody::into_block)
         } else {
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "unexpected_token",
-                    "yield body must stay on the same line unless it uses '{ ... }'",
-                );
-                return None;
-            }
             let expr = self.parse_expr()?;
             let span = expr.span();
             Some(Block {
@@ -1061,15 +1049,9 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_block_or_inline_stmt_body(&mut self, owner: &'static str) -> Option<Block> {
+        self.skip_newlines();
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
-        }
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "unexpected_token",
-                format!("{owner} body must stay on the same line unless it uses '{{ ... }}'"),
-            );
-            return None;
         }
         if self.at(TokenKind::Eof) {
             self.error_at_current(
@@ -1087,6 +1069,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_let_else_body(&mut self) -> Option<Block> {
+        self.skip_newlines();
         if self.at(TokenKind::LBrace) {
             return self
                 .parse_expression_brace_body()
@@ -1109,15 +1092,9 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn parse_block_or_inline_expr_body(&mut self, owner: &'static str) -> Option<Block> {
+        self.skip_newlines();
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
-        }
-        if self.at(TokenKind::Newline) {
-            self.error_at_current(
-                "unexpected_token",
-                format!("{owner} body must stay on the same line unless it uses '{{ ... }}'"),
-            );
-            return None;
         }
         if self.at(TokenKind::Eof) {
             self.error_at_current(

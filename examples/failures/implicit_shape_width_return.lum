@@ -1,0 +1,15 @@
+# FAIL_REGEX:
+# .*function 'project' returns 'Point3D' but is declared as 'Point'.*
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Point3D {
+    x Int
+    y Int
+    z Int
+}
+
+fn project(original Point3D) Point = original

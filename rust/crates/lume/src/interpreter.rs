@@ -10008,7 +10008,7 @@ mod tests {
     }
 
     #[test]
-    fn shape_width_assignment_materializes_projected_shape() {
+    fn explicit_shape_construction_materializes_projected_shape() {
         let program = lower_inline(
             r#"
             shape Point {
@@ -10047,8 +10047,8 @@ mod tests {
             fn main() Unit {
                 first3d = Point3D(1, 2, 3)
                 second3d = Point3D(1, 2, 99)
-                first Point = view(first3d)
-                second Point = second3d
+                first Point = view(Point { ...first3d })
+                second Point = { ...second3d }
                 concrete = Point(1, 2)
 
                 println(first == second)
@@ -10065,15 +10065,15 @@ mod tests {
                 }
 
                 values [Point: Str] = []
-                values[first3d] := "first"
-                values[second3d] := "second"
-                println(values.size, values[first3d]!)
+                values[Point { ...first3d }] := "first"
+                values[Point { ...second3d }] := "second"
+                println(values.size, values[Point { ...first3d }]!)
 
                 points Set[Point] = Set()
-                points.add(first3d)
-                points.add(second3d)
+                points.add(Point { ...first3d })
+                points.add(Point { ...second3d })
                 println(points.size)
-                println(values.contains(first3d))
+                println(values.contains(Point { ...first3d }))
 
                 projected Point = Point { ...first }
                 contextual Point = { ...first }
@@ -10085,7 +10085,7 @@ mod tests {
                 println(updated == Point(4, 2))
 
                 wider = WiderItems(1, [1], 3)
-                items Items = wider
+                items Items = { ...wider }
                 wider.items.add(2)
                 println(items.items.size)
 
@@ -10105,7 +10105,7 @@ mod tests {
     }
 
     #[test]
-    fn shape_union_projection_prefers_exact_schema_then_unique_target() {
+    fn shape_unions_accept_exact_schemas_and_explicit_projection() {
         let program = lower_inline(
             r#"
             shape X {
@@ -10132,7 +10132,10 @@ mod tests {
                 label Str
             }
 
-            fn project(value XYZ | Label) XY | Label = value
+            fn project(value XYZ | Label) XY | Label = match value {
+                case XYZ { x, y } => XY { x, y }
+                case label Label => label
+            }
 
             fn printSelected(value XY | X) Unit {
                 match value {
@@ -10143,7 +10146,7 @@ mod tests {
 
             fn main() Unit {
                 wider = XYZ(1, 2, 3)
-                unique XY | Label = wider
+                unique XY | Label = XY { ...wider }
                 exact XY | X = Position(4, 5)
                 dynamic = project(wider)
 

@@ -21,7 +21,7 @@ fn main() Unit {
         age: 41
         city: "Tampa"
     }
-    narrowed Profile = widerAnonymous
+    narrowed Profile = { ...widerAnonymous }
 
     println(profile.label())
     println(narrowed.label())

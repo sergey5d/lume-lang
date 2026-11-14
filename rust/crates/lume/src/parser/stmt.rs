@@ -608,13 +608,7 @@ impl<'a> Parser<'a> {
         };
         let then_block = self.parse_if_body_block()?;
         let else_branch = if self.match_keyword(Keyword::Else) {
-            if self.at(TokenKind::Newline) {
-                self.error_at_current(
-                    "unexpected_token",
-                    "else body must stay on the same line unless it uses '{ ... }'",
-                );
-                return None;
-            }
+            self.skip_newlines();
             if self.at_keyword(Keyword::If) {
                 Some(ElseBranch::If(Box::new(self.parse_if_stmt()?)))
             } else {

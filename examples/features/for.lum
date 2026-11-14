@@ -8,5 +8,11 @@ fn main() Unit {
         total := total + value
     }
 
+    for value <- [1, 2, 3] do 
+        crap(value)
+
+    for value <- [1, 2, 3] do 
+        yield if value == 1 then 5 else 7
+
     println("for", total)
 }

@@ -1,0 +1,28 @@
+# EXPECT:
+# 2,4
+# 11,12
+# 4,6
+# 1
+
+fn main() {
+    var after Int = 0
+    values = for item <- [1, 2] yield
+        item * 2
+    after += 1
+
+    grouped = for {
+        item <- [1, 2]
+    } yield
+        { value: item + 10 }.value
+
+    blocks = for item <- [1, 2] yield
+        {
+            next = item + 1
+            next * 2
+        }
+
+    println(values.makeStr(","))
+    println(grouped.makeStr(","))
+    println(blocks.makeStr(","))
+    println(after)
+}

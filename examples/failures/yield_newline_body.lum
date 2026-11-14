@@ -1,6 +1,0 @@
-# FAIL_REGEX:
-# yield body must stay on the same line unless it uses '\{ \.\.\. \}'
-
-fn main() [Int] =
-    for item <- [1, 2] yield
-        item

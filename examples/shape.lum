@@ -54,6 +54,6 @@ fn main() Unit {
     println("positional", positional.x, positional.y, positional.sum())
     println("fromClass", fromClass.x, fromClass.y, fromClass.sum())
     println("profile", profile.name, profile.age)
-    println("narrowed", horizontal(named))
+    println("narrowed", horizontal({ ...named }))
     println("moved", moved.x, moved.y, moved.sum())
 }

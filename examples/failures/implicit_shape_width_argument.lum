@@ -1,0 +1,19 @@
+# FAIL_REGEX:
+# .*argument has type 'Point3D' but parameter expects 'Point'.*
+
+shape Point {
+    x Int
+    y Int
+}
+
+shape Point3D {
+    x Int
+    y Int
+    z Int
+}
+
+fn consume(point Point) Int = point.x
+
+fn main() {
+    consume(Point3D(1, 2, 3))
+}

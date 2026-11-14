@@ -38,7 +38,9 @@ Lume separates the main concepts deliberately:
   class construction.
 - `shape` is structural data with visible, shallowly read-only field bindings:
   fields cannot be replaced, while referenced values retain their own
-  mutability rules.
+  mutability rules. Assignment preserves the complete field-name set; dropping
+  fields requires explicit construction, such as `Point { ...original }` or
+  `point Point = { ...original }`.
 - `type Name = class ... | shape ... | object ...` declares a closed union of
   alternatives, while a standalone named `object` declares one shared object
   value with optional fields and methods. `object { ... }` creates an anonymous

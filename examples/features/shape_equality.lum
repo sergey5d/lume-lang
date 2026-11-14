@@ -29,7 +29,7 @@ fn main() Unit {
     same = Position(2, 1)
     different = Position(1, 2)
     point3d = Point3D(1, 2, 3)
-    point2d Point = point3d
+    point2d Point = { ...point3d }
 
     println(point == same)
     println(point == different)

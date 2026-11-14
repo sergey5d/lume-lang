@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*cannot assign value of type.*y Int.*to binding 'point'.*z Int.*
+# .*anonymous shape target has no construction field 'y'.*
 
 fn main() Unit {
     x = 1
