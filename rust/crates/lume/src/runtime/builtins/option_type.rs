@@ -18,6 +18,7 @@ pub(super) fn define() -> RuntimeType {
         name: "Option".to_string(),
         fields: Vec::new(),
         field_init: None,
+        mixin_init: None,
         methods: vec![
             builtin_method(0, "isSet", Vec::new(), option_is_set),
             builtin_method(1, "isEmpty", Vec::new(), option_is_empty),
@@ -65,6 +66,7 @@ pub(super) fn define() -> RuntimeType {
                 id: RuntimeEnumCaseId(1),
                 name: "Some".to_string(),
                 fields: vec![RuntimeField {
+                    from_mixin: false,
                     slot: RuntimeFieldSlot(0),
                     name: "value".to_string(),
                     ty: ir::Type::Unknown,

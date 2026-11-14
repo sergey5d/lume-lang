@@ -136,6 +136,7 @@ fn is_java_library_placeholder_type(ty: &ir::TypeDef) -> bool {
         && ty.with_bounds.is_empty()
         && ty.fields.is_empty()
         && ty.field_init.is_none()
+        && ty.mixin_init.is_none()
         && ty.methods.is_empty()
         && ty.enum_cases.is_empty()
 }
@@ -263,6 +264,7 @@ fn render_class(
     push_runtime_type_method(&mut out, false);
     push_fields(&mut out, ty, names);
     push_class_field_initializer(&mut out, bundle, ty, names);
+    push_class_mixin_initializer(&mut out, bundle, ty, names);
     push_class_constructors(&mut out, bundle, ty, names);
     push_instance_methods(&mut out, bundle, ty, MethodShell::StubBody, names);
     push_class_equality_bridge(&mut out, bundle, ty, names);
@@ -2062,14 +2064,35 @@ fn structured_source_constructor_body(
         return None;
     };
     let owner = bundle.ir.types.get(owner.0)?;
-    let mut emitted = SourceBodyEmitter {
+    let emitter = SourceBodyEmitter {
         bundle,
         function,
         names,
         owner: Some(owner),
         synthetic_names: Rc::new(RefCell::new(HashMap::new())),
+    };
+    if let core::CallableBody::Expr(expr) = body {
+        if let core::Expr::Call {
+            callee, args, span, ..
+        } = expr
+            && matches!(callee.as_ref(), core::Expr::Identifier { name, .. } if name == "this")
+        {
+            let call = emitter.source_call(*span)?;
+            let ordered = emitter.ordered_source_args(args, call)?;
+            let mut specs = JavaIrSupport::new(bundle, function, names)
+                .constructor_param_specs(&owner.name, &call.lowered_args)?;
+            for (spec, source) in specs.iter_mut().zip(&call.param_specs) {
+                if let Some(source) = source {
+                    spec.ty = source.ty.clone();
+                }
+            }
+            let arguments = emitter
+                .emit_source_args_for_param_specs(&ordered, &specs, &HashMap::new())?
+                .join(", ");
+            return Some(format!(" {{\n        this({arguments});\n    }}\n"));
+        }
     }
-    .emit_body(body)?;
+    let mut emitted = emitter.emit_body(body)?;
     if let Some(prologue) = prologue {
         emitted.insert_str(3, &format!("        {prologue}\n"));
     }
@@ -8546,7 +8569,7 @@ impl<'a> SourceBodyEmitter<'a> {
                     .iter()
                     .filter(|field| {
                         type_def.kind != TypeKind::Class
-                            || field.visibility == ast::Visibility::Default
+                            || (!field.from_mixin && field.visibility == ast::Visibility::Default)
                     })
                     .map(|field| {
                         (
@@ -8722,7 +8745,8 @@ impl<'a> SourceBodyEmitter<'a> {
             .fields
             .iter()
             .filter(|field| {
-                type_def.kind != TypeKind::Class || field.visibility == ast::Visibility::Default
+                type_def.kind != TypeKind::Class
+                    || (!field.from_mixin && field.visibility == ast::Visibility::Default)
             })
             .collect::<Vec<_>>();
         let mut constructor_args = Vec::with_capacity(constructor_fields.len());
@@ -11211,6 +11235,23 @@ fn push_class_constructors(
     push_implicit_class_constructors(out, ty, names);
 }
 
+fn push_class_mixin_initializer(
+    out: &mut String,
+    bundle: &BackendBundle,
+    ty: &ir::TypeDef,
+    names: &JavaNames,
+) {
+    let Some(function) = ty.mixin_init.and_then(|id| bundle.ir.function(id)) else {
+        return;
+    };
+    out.push_str("\n    private void __lume_mixin_init()");
+    if let Some(body) = structured_source_function_body(bundle, function, names) {
+        out.push_str(&body);
+    } else {
+        push_stub_body(out);
+    }
+}
+
 fn push_explicit_class_constructor(
     out: &mut String,
     bundle: &BackendBundle,
@@ -11225,11 +11266,19 @@ fn push_explicit_class_constructor(
     out.push('(');
     out.push_str(&java_param_list(function, names, true));
     out.push(')');
+    let initialization = [
+        ty.field_init.map(|_| "this.__lume_field_init();"),
+        ty.mixin_init.map(|_| "this.__lume_mixin_init();"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("\n        ");
     match structured_source_constructor_body(
         bundle,
         function,
         names,
-        ty.field_init.map(|_| "this.__lume_field_init();"),
+        (!initialization.is_empty()).then_some(initialization.as_str()),
     ) {
         Some(body) => out.push_str(&body),
         None => push_stub_body(out),
@@ -11242,7 +11291,7 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
     let public_fields = ty
         .fields
         .iter()
-        .filter(|field| field.visibility == Visibility::Default)
+        .filter(|field| !field.from_mixin && field.visibility == Visibility::Default)
         .collect::<Vec<_>>();
     for arity in 0..=public_fields.len() {
         if public_fields[arity..]
@@ -11279,6 +11328,9 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
             out.push_str(" = ");
             out.push_str(&constructor_param_name(field, index));
             out.push_str(";\n");
+        }
+        if ty.mixin_init.is_some() {
+            out.push_str("        this.__lume_mixin_init();\n");
         }
         out.push_str("    }\n");
     }
@@ -11693,7 +11745,7 @@ impl<'a> JavaIrSupport<'a> {
             .iter()
             .filter(|field| {
                 if ty.kind == TypeKind::Class {
-                    field.visibility == Visibility::Default
+                    !field.from_mixin && field.visibility == Visibility::Default
                 } else {
                     field.visibility != Visibility::Private
                 }

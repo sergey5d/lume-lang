@@ -419,6 +419,7 @@ fn java_library_local_placeholder_items(
                 type_conditions: Vec::new(),
                 with_bounds: Vec::new(),
                 mixins: Vec::new(),
+                mixin_initializers: Vec::new(),
                 members: Vec::new(),
                 span,
             })
@@ -456,6 +457,7 @@ fn java_library_type_decl(
             .collect(),
         members: java_library_members(external_class, exposed_names, span),
         mixins: Vec::new(),
+        mixin_initializers: Vec::new(),
         span,
     }
 }
@@ -802,6 +804,7 @@ fn java_library_annotation_field(
         return None;
     }
     Some(TypeMember::Field(FieldDecl {
+        from_mixin: false,
         annotations: Vec::new(),
         visibility: Visibility::Default,
         mutable: false,
@@ -818,6 +821,7 @@ fn java_library_field(
     span: crate::source::Span,
 ) -> TypeMember {
     TypeMember::Field(FieldDecl {
+        from_mixin: false,
         annotations: Vec::new(),
         visibility: Visibility::Default,
         mutable: false,
@@ -2284,12 +2288,17 @@ mod tests {
     };
 
     #[test]
-    fn runs_stateless_mixins_on_java_and_interpreter() {
+    fn runs_mixins_on_java_and_interpreter() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../..")
             .canonicalize()
             .unwrap();
         for (path, entrypoint, expected) in [
+            (
+                "examples/features/mixin_constructors.lum",
+                "examples.mixin_constructors.Mixin_constructorsMain",
+                "mixin constructors ok\n",
+            ),
             (
                 "examples/features/mixins.lum",
                 "examples.mixins.MixinsMain",

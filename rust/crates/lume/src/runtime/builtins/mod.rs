@@ -83,6 +83,7 @@ fn empty_builtin_type(name: &str) -> RuntimeType {
         name: name.to_string(),
         fields: Vec::new(),
         field_init: None,
+        mixin_init: None,
         methods: Vec::new(),
         enum_cases: Vec::new(),
         with_bounds: Vec::new(),

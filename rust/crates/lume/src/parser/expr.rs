@@ -834,6 +834,7 @@ impl<'a> Parser<'a> {
                 field_names.push((name.clone(), field_span));
             }
             fields.push(FieldDecl {
+                from_mixin: false,
                 annotations,
                 visibility,
                 mutable: false,

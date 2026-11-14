@@ -17,15 +17,13 @@ fn parse(src: &str) -> ParseResult {
 }
 
 #[test]
-fn parses_stateless_mixins_and_rejects_storage_and_nonclass_adoption() {
+fn parses_mixins_and_rejects_nonclass_adoption() {
     let parsed = parse("mixin Parts { get count Int = 0 }\nclass Bag { use Parts }");
     assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
     let program = parsed.program.unwrap();
     assert!(matches!(&program.items[0], Item::Type(decl) if decl.kind == TypeKind::Mixin));
     assert!(matches!(&program.items[1], Item::Type(decl) if decl.mixins.len() == 1));
     for (source, code) in [
-        ("mixin Parts { value Int }", "mixin_storage"),
-        ("mixin Parts { new() {} }", "invalid_constructor_decl"),
         ("shape S { use Parts }", "invalid_mixin_use"),
         ("interface I { use Parts }", "invalid_mixin_use"),
         (
@@ -43,6 +41,22 @@ fn parses_stateless_mixins_and_rejects_storage_and_nonclass_adoption() {
             parsed.diagnostics
         );
     }
+}
+
+#[test]
+fn parses_mixin_constructor_adoption_forms() {
+    let parsed = parse(
+        "mixin Parts { value Int\nnew(value Int) { this.value = value } }\nclass C {\nuse Parts\nuse Parts()\nuse Parts(1)\nuse Parts { value: 2 }\n}",
+    );
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let Item::Type(class) = &parsed.program.unwrap().items[1] else {
+        panic!("class")
+    };
+    assert_eq!(class.mixins.len(), 4);
+    assert!(class.mixins[0].args.is_empty());
+    assert!(class.mixins[1].args.is_empty());
+    assert_eq!(class.mixins[2].args.len(), 1);
+    assert!(class.mixins[3].uses_brace_syntax);
 }
 
 #[test]

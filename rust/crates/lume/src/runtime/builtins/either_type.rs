@@ -18,6 +18,7 @@ pub(super) fn define() -> RuntimeType {
         name: "Either".to_string(),
         fields: Vec::new(),
         field_init: None,
+        mixin_init: None,
         methods: vec![
             builtin_method(0, "isLeft", Vec::new(), either_is_left),
             builtin_method(1, "isRight", Vec::new(), either_is_right),
@@ -61,6 +62,7 @@ pub(super) fn define() -> RuntimeType {
                 id: RuntimeEnumCaseId(0),
                 name: "Left".to_string(),
                 fields: vec![RuntimeField {
+                    from_mixin: false,
                     slot: RuntimeFieldSlot(0),
                     name: "value".to_string(),
                     ty: ir::Type::Unknown,
@@ -74,6 +76,7 @@ pub(super) fn define() -> RuntimeType {
                 id: RuntimeEnumCaseId(1),
                 name: "Right".to_string(),
                 fields: vec![RuntimeField {
+                    from_mixin: false,
                     slot: RuntimeFieldSlot(0),
                     name: "value".to_string(),
                     ty: ir::Type::Unknown,

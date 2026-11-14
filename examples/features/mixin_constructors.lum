@@ -1,0 +1,214 @@
+# EXPECT:
+# mixin constructors ok
+
+module examples/mixin_constructors
+
+object Trace {
+    var text Str = ""
+    fn add(value Str) { text := text + value }
+}
+
+fn marked(label Str, value Int) Int {
+    Trace.add(label)
+    value
+}
+
+mixin Offset {
+    amount Int
+    get adjusted Int = amount + 1
+}
+
+class ImplicitOwner {
+    base Int
+    use Offset(this.base)
+}
+
+mixin Defaults {
+    value Int = marked("D", 3)
+    items [Int] = []
+    fn add(value Int) { items.add(value) }
+}
+
+class DefaultOwner { use Defaults }
+class ReplacedOwner { use Defaults { value: marked("V", 9) } }
+
+mixin Interleaved {
+    first Int = 7
+    required Int
+    last Int = 8
+    get total Int = first + required + last
+}
+
+class NamedOwner { use Interleaved { required: 2 } }
+class PositionalOwner { use Interleaved(1, 2) }
+
+interface Labeled { get label Str }
+
+internal mixin Configured with Labeled {
+    private stored Int
+
+    new(value Int = 4) {
+        this.stored = value
+        Trace.add("M")
+        Trace.add(this.describe())
+    }
+
+    get doubled Int = stored * 2
+    fn describe() Str = this.label
+}
+
+fn initialLabel() Str {
+    Trace.add("F")
+    "label"
+}
+
+class ExplicitOwner with Labeled {
+    label Str = initialLabel()
+    use Configured(marked("A", 5))
+    fn describe() Str = "O"
+
+    new() {
+        assert(this.doubled == 10)
+        Trace.add("C")
+    }
+}
+
+class BareExplicitOwner with Labeled {
+    label Str = "label"
+    use Configured
+}
+
+mixin First {
+    new() { Trace.add("A") }
+}
+
+mixin Second {
+    new() { Trace.add("B") }
+}
+
+class ConstructionOrder {
+    field Int = marked("F", 1)
+    use First
+    use Second()
+    new() { Trace.add("C") }
+}
+
+class DelegatingOwner {
+    use First
+    new() = this(9)
+    new(_unused Int) { Trace.add("C") }
+}
+
+mixin DelegatingParts {
+    private storedValue Int
+    new() = this(12)
+    new(value Int) {
+        this.storedValue = value
+        Trace.add("I")
+    }
+    get result Int = storedValue
+}
+
+class DelegatingMixinOwner { use DelegatingParts }
+
+mixin NamedDelegatingParts {
+    private stored Int
+    new() = this { value: 14 }
+    new(value Int) { this.stored = value }
+    get result Int = stored
+}
+
+class NamedDelegatingOwner {
+    use NamedDelegatingParts
+    new() = this { unused: 9 }
+    new(unused Int) { assert(unused == 9) }
+}
+
+mixin Cached[T] { cached T }
+
+class GenericOwner[T] {
+    value T
+    use Cached[T](this.value)
+}
+
+mixin PairParts {
+    left Int
+    right Int
+}
+
+class WrittenOrder {
+    use PairParts { right: marked("R", 2), left: marked("L", 1) }
+}
+
+class EarlierMixin {
+    use Offset(4)
+    use Cached[Int](this.adjusted)
+}
+
+mixin ShadowedInitializer {
+    first Int = 2
+    second Int = first
+    new(first Int) { assert(first == 99) }
+}
+
+class ShadowedOwner { use ShadowedInitializer(99) }
+
+interface Counted { get count Int }
+
+mixin CounterParts {
+    var count Int
+    new(start Int = 0) { this.count = start }
+    fn increment() { count := count + 1 }
+}
+
+class Counter with Counted { use CounterParts }
+
+fn main() {
+    owner = ImplicitOwner(5)
+    assert(owner.base == 5 && owner.amount == 5 && owner.adjusted == 6)
+    named ImplicitOwner = new { base: 8 }
+    assert(named.amount == 8)
+
+    Trace.text := ""
+    first = DefaultOwner()
+    second = DefaultOwner()
+    first.add(7)
+    assert(first.items.size == 1 && second.items.isEmpty)
+    assert(first.value == 3 && Trace.text == "DD")
+    replaced = ReplacedOwner()
+    assert(replaced.value == 9 && Trace.text == "DDV")
+    assert(NamedOwner().total == 17)
+    assert(PositionalOwner().total == 11)
+
+    Trace.text := ""
+    explicit = ExplicitOwner()
+    assert(explicit.doubled == 10 && Trace.text == "FAMOC")
+    bare = BareExplicitOwner()
+    assert(bare.doubled == 8)
+
+    Trace.text := ""
+    ordered = ConstructionOrder()
+    assert(ordered.field == 1 && Trace.text == "FABC")
+    Trace.text := ""
+    delegated = DelegatingOwner()
+    assert(Trace.text == "AC")
+    Trace.text := ""
+    delegatedMixin = DelegatingMixinOwner()
+    assert(delegatedMixin.result == 12 && Trace.text == "I")
+    assert(NamedDelegatingOwner().result == 14)
+
+    generic = GenericOwner[Int](42)
+    inferred = GenericOwner("text")
+    assert(generic.cached == 42 && inferred.cached == "text")
+    Trace.text := ""
+    written = WrittenOrder()
+    assert(written.left == 1 && written.right == 2 && Trace.text == "RL")
+    assert(EarlierMixin().cached == 5)
+    shadowed = ShadowedOwner()
+    assert(shadowed.first == 2 && shadowed.second == 2)
+    counter = Counter()
+    counter.increment()
+    counted Counted = counter
+    assert(counted.count == 1)
+    println("mixin constructors ok")
+}

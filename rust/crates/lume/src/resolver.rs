@@ -1302,7 +1302,7 @@ fn summarize_type(decl: &TypeDecl) -> TypeInfo {
         bounds: decl
             .with_bounds
             .iter()
-            .chain(&decl.mixins)
+            .chain(decl.mixins.iter().map(|mixin| &mixin.target))
             .filter_map(type_ref_name)
             .map(str::to_string)
             .collect(),
@@ -1930,7 +1930,7 @@ impl<'a> Resolver<'a> {
             self.resolve_type_ref(Some(bound));
         }
         for mixin in &decl.mixins {
-            self.resolve_type_ref_with_mixin(Some(mixin), true);
+            self.resolve_type_ref_with_mixin(Some(&mixin.target), true);
         }
         for member in &decl.members {
             match member {
@@ -1977,6 +1977,11 @@ impl<'a> Resolver<'a> {
                     }
                 }
             }
+            for mixin in &decl.mixins {
+                for arg in &mixin.args {
+                    self.resolve_expr(&arg.value);
+                }
+            }
         }
         if decl.kind == TypeKind::Enum {
             for member in &decl.members {
@@ -1997,7 +2002,7 @@ impl<'a> Resolver<'a> {
         let mut pending = decl
             .with_bounds
             .iter()
-            .chain(&decl.mixins)
+            .chain(decl.mixins.iter().map(|mixin| &mixin.target))
             .filter_map(type_ref_name)
             .map(str::to_string)
             .collect::<Vec<_>>();

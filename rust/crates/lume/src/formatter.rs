@@ -296,7 +296,10 @@ fn collect_program_rewrites(
                     collect_annotation_rewrites(annotation, tokens, rewrites);
                 }
                 for mixin in &decl.mixins {
-                    collect_type_rewrites(mixin, tokens, rewrites);
+                    collect_type_rewrites(&mixin.target, tokens, rewrites);
+                    for arg in &mixin.args {
+                        collect_expr_rewrites(&arg.value, tokens, rewrites);
+                    }
                 }
                 for member in &decl.members {
                     match member {
@@ -1745,6 +1748,14 @@ fn main() {
         assert!(!result.text.contains("private mixin"));
         assert!(result.text.contains("    use Parts[Int?]"));
         assert_eq!(format(&result.text).text, result.text);
+    }
+
+    #[test]
+    fn formats_mixin_constructor_arguments() {
+        assert_formatted(
+            "class Owner {\nuse Parts(1,2)\nuse Named {value:calculate( 3 )}\nuse Generic[Option[Int]](None)\n}\n",
+            "class Owner {\n    use Parts(1, 2)\n    use Named { value: calculate(3) }\n    use Generic[Int?](None)\n}\n",
+        );
     }
 
     #[test]

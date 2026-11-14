@@ -407,7 +407,10 @@ fn rewrite_type_decl_for_runtime(
         rewrite_type_ref_for_runtime(bound, module);
     }
     for mixin in &mut decl.mixins {
-        rewrite_type_ref_for_runtime(mixin, module);
+        rewrite_type_ref_for_runtime(&mut mixin.target, module);
+        for arg in &mut mixin.args {
+            rewrite_expr_for_runtime(&mut arg.value, module, graph);
+        }
     }
     for member in &mut decl.members {
         match member {
@@ -3686,6 +3689,7 @@ impl<'a> Interpreter<'a> {
                 if let Some(init) =
                     self.find_method_overload_for_kind(type_name, ty.kind, "new", &constructor_args)
                 {
+                    self.initialize_mixins(&ty, &instance, span)?;
                     let receiver = instance.clone();
                     let _ =
                         self.call_function(init, Some(receiver), None, constructor_args, span)?;
@@ -3705,6 +3709,7 @@ impl<'a> Interpreter<'a> {
                 [Value::Record(values)] => {
                     let values = values.borrow();
                     self.apply_named_record_constructor(&instance, &ty, &values, span)?;
+                    self.initialize_mixins(&ty, &instance, span)?;
                     return Ok(Some(instance));
                 }
                 _ => {
@@ -3720,6 +3725,7 @@ impl<'a> Interpreter<'a> {
         }
 
         if let Some(init) = self.find_method_overload_for_kind(type_name, ty.kind, "new", &args) {
+            self.initialize_mixins(&ty, &instance, span)?;
             let receiver = instance.clone();
             let _ = self.call_function(init, Some(receiver), None, args, span)?;
             return Ok(Some(instance));
@@ -3737,7 +3743,20 @@ impl<'a> Interpreter<'a> {
         }
 
         self.apply_positional_record_constructor(&instance, &ty, &args, span)?;
+        self.initialize_mixins(&ty, &instance, span)?;
         Ok(Some(instance))
+    }
+
+    fn initialize_mixins(
+        &mut self,
+        ty: &runtime::RuntimeType,
+        instance: &Value,
+        span: Option<Span>,
+    ) -> Result<(), Diagnostic> {
+        if let Some(initializer) = ty.mixin_init {
+            self.call_function(initializer, Some(instance.clone()), None, Vec::new(), span)?;
+        }
+        Ok(())
     }
 
     fn apply_named_record_constructor(
@@ -3764,7 +3783,7 @@ impl<'a> Interpreter<'a> {
         let public_fields = ty
             .fields
             .iter()
-            .filter(|field| field.visibility == ast::Visibility::Default)
+            .filter(|field| !field.from_mixin && field.visibility == ast::Visibility::Default)
             .collect::<Vec<_>>();
         let mut aggregate = match instance {
             Value::Aggregate(value) => value.borrow_mut(),
@@ -3816,7 +3835,7 @@ impl<'a> Interpreter<'a> {
         let public_fields = ty
             .fields
             .iter()
-            .filter(|field| field.visibility == ast::Visibility::Default)
+            .filter(|field| !field.from_mixin && field.visibility == ast::Visibility::Default)
             .collect::<Vec<_>>();
         if values.len() > public_fields.len()
             || public_fields[values.len()..]

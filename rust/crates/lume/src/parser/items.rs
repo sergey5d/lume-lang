@@ -483,6 +483,7 @@ impl<'a> Parser<'a> {
             type_conditions: generic_clause.conditions,
             with_bounds,
             mixins: Vec::new(),
+            mixin_initializers: Vec::new(),
             members,
             span: start.cover(end),
         }))
@@ -726,7 +727,35 @@ impl<'a> Parser<'a> {
                             start,
                         ));
                     }
-                    mixins.push(self.parse_type_ref()?);
+                    let target = self.parse_type_ref()?;
+                    let (args, uses_brace_syntax, end) = if self.match_token(TokenKind::LParen) {
+                        let args = self.parse_call_args()?;
+                        let end =
+                            self.consume(TokenKind::RParen, "expected ')' after mixin arguments")?;
+                        (args, false, end)
+                    } else if self.at(TokenKind::LBrace) {
+                        let value = self.parse_brace_record_literal_expr()?;
+                        let end = value.span();
+                        (
+                            vec![CallArg {
+                                from_shape_spread: false,
+                                name: None,
+                                ty: None,
+                                span: end,
+                                value,
+                            }],
+                            true,
+                            end,
+                        )
+                    } else {
+                        (Vec::new(), false, target.span())
+                    };
+                    mixins.push(MixinUse {
+                        target,
+                        args,
+                        uses_brace_syntax,
+                        span: start.cover(end),
+                    });
                 }
                 TokenKind::Keyword(Keyword::Type) if self.starts_type_alias_decl() => {
                     if kind == TypeKind::Interface {
@@ -739,7 +768,7 @@ impl<'a> Parser<'a> {
                     if kind == TypeKind::Mixin {
                         self.error_at_current(
                             "mixin_nested_declaration",
-                            "mixin bodies contain methods and getters, not nested declarations",
+                            "mixins cannot contain nested declarations",
                         );
                     }
                     let nested =
@@ -762,7 +791,7 @@ impl<'a> Parser<'a> {
                     if kind == TypeKind::Mixin {
                         self.error_at_current(
                             "mixin_nested_declaration",
-                            "mixin bodies contain methods and getters, not nested declarations",
+                            "mixins cannot contain nested declarations",
                         );
                     }
                     let nested = self.parse_type_decl(member_annotations, member_visibility)?;
@@ -774,7 +803,7 @@ impl<'a> Parser<'a> {
                 {
                     let constructor =
                         self.parse_constructor_decl(member_annotations, member_visibility)?;
-                    if kind != TypeKind::Class {
+                    if !matches!(kind, TypeKind::Class | TypeKind::Mixin) {
                         invalid_constructors.push(constructor.span);
                     }
                     members.push(TypeMember::Method(constructor));
@@ -840,13 +869,6 @@ impl<'a> Parser<'a> {
                                 field.span,
                             ));
                     }
-                    if kind == TypeKind::Mixin {
-                        self.diagnostics.push(Diagnostic::error(
-                            "mixin_storage",
-                            "mixins cannot declare stored fields; require an interface getter instead",
-                            field.span,
-                        ));
-                    }
                     members.push(TypeMember::Field(field));
                 }
             }
@@ -871,6 +893,7 @@ impl<'a> Parser<'a> {
             type_conditions: generic_clause.conditions,
             with_bounds,
             mixins,
+            mixin_initializers: Vec::new(),
             members,
             span: start.cover(end),
         })
@@ -1318,6 +1341,7 @@ impl<'a> Parser<'a> {
         };
 
         Some(FieldDecl {
+            from_mixin: false,
             annotations,
             visibility,
             mutable,
@@ -1395,29 +1419,28 @@ fn type_body_constructor_message(kind: TypeKind, name: &str) -> String {
     match kind {
         TypeKind::Annotation => {
             format!(
-                "only classes can declare custom constructors; annotation '{name}' cannot declare constructors"
+                "only classes and mixins can declare custom constructors; annotation '{name}' cannot declare constructors"
             )
         }
-        TypeKind::Class => unreachable!("class-body constructors are valid"),
+        TypeKind::Class | TypeKind::Mixin => unreachable!("constructors are valid here"),
         TypeKind::Record => {
             format!(
-                "only classes can declare custom constructors; shape '{name}' uses structural brace construction"
+                "only classes and mixins can declare custom constructors; shape '{name}' uses structural brace construction"
             )
         }
         TypeKind::Object => {
             format!(
-                "only classes can declare custom constructors; object '{name}' declares one object value"
+                "only classes and mixins can declare custom constructors; object '{name}' declares one object value"
             )
         }
         TypeKind::Interface => {
             format!(
-                "only classes can declare custom constructors; interface '{name}' cannot declare constructors"
+                "only classes and mixins can declare custom constructors; interface '{name}' cannot declare constructors"
             )
         }
-        TypeKind::Mixin => format!("mixin '{name}' cannot declare constructors"),
         TypeKind::Enum => {
             format!(
-                "only classes can declare custom constructors; declared union '{name}' uses variants for construction"
+                "only classes and mixins can declare custom constructors; declared union '{name}' uses variants for construction"
             )
         }
     }

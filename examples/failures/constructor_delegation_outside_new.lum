@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*constructor delegation with `this\(\.\.\.\)` or `this \{ \.\.\. \}` is only valid inside a class constructor.*
+# .*constructor delegation with `this\(\.\.\.\)` or `this \{ \.\.\. \}` is only valid inside a class or mixin constructor.*
 
 class User {
     name Str

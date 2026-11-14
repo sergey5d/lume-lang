@@ -100,9 +100,19 @@ pub struct TypeDecl {
     pub type_params: Vec<TypeParam>,
     pub type_conditions: Vec<GenericCondition>,
     pub with_bounds: Vec<TypeRef>,
-    /// Explicit, stateless behavior adopted by a class with `use MixinName`.
-    pub mixins: Vec<TypeRef>,
+    /// Mixins adopted by this class, including their constructor arguments.
+    pub mixins: Vec<MixinUse>,
+    /// Composed initialization calls, executed after class field initialization.
+    pub mixin_initializers: Vec<Expr>,
     pub members: Vec<TypeMember>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MixinUse {
+    pub target: TypeRef,
+    pub args: Vec<CallArg>,
+    pub uses_brace_syntax: bool,
     pub span: Span,
 }
 
@@ -185,6 +195,8 @@ pub struct FieldDecl {
     pub annotations: Vec<Annotation>,
     pub visibility: Visibility,
     pub mutable: bool,
+    /// Supplied storage is not an input of the consuming class constructor.
+    pub from_mixin: bool,
     pub name: String,
     pub ty: Option<TypeRef>,
     pub initializer: Option<Expr>,

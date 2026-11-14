@@ -575,6 +575,7 @@ fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
 
 #[derive(Debug, Clone)]
 struct FieldSig {
+    from_mixin: bool,
     name: String,
     ty: Ty,
     mutable: bool,
@@ -1375,25 +1376,25 @@ fn restricted_visibility(left: Visibility, right: Visibility) -> Visibility {
 
 fn custom_constructor_error(sig: &TypeSig) -> String {
     match sig.kind {
-        TypeKind::Mixin => format!("mixin '{}' cannot declare constructors", sig.name),
+        TypeKind::Mixin => format!("mixin '{}' can declare custom constructors", sig.name),
         TypeKind::Annotation => format!(
-            "only classes can declare custom constructors; annotation '{}' cannot declare constructors",
+            "only classes and mixins can declare custom constructors; annotation '{}' cannot declare constructors",
             sig.name
         ),
         TypeKind::Record => format!(
-            "only classes can declare custom constructors; shape '{}' uses structural brace construction",
+            "only classes and mixins can declare custom constructors; shape '{}' uses structural brace construction",
             sig.name
         ),
         TypeKind::Enum => format!(
-            "only classes can declare custom constructors; declared union '{}' uses variants for construction",
+            "only classes and mixins can declare custom constructors; declared union '{}' uses variants for construction",
             sig.name
         ),
         TypeKind::Interface => format!(
-            "only classes can declare custom constructors; interface '{}' cannot declare constructors",
+            "only classes and mixins can declare custom constructors; interface '{}' cannot declare constructors",
             sig.name
         ),
         TypeKind::Object => format!(
-            "only classes can declare custom constructors; object '{}' declares one object value",
+            "only classes and mixins can declare custom constructors; object '{}' declares one object value",
             sig.name
         ),
         TypeKind::Class => format!("class '{}' can declare custom constructors", sig.name),
@@ -1520,8 +1521,18 @@ impl World {
                 checker.current_type_paths.push(decl.name.clone());
                 checker.push_ast_type_params(&decl.type_params, &decl.type_conditions);
                 let mut methods = module.types[&decl.name].methods.clone();
+                let mut fields = module.types[&decl.name].fields.clone();
                 for (_, mixin, subst) in checker.mixin_uses(decl) {
+                    for mut field in mixin.fields {
+                        field.ty = substitute_type(&field.ty, &subst);
+                        field.from_mixin = true;
+                        field.has_initializer = true;
+                        fields.push(field);
+                    }
                     for (name, overloads) in mixin.methods {
+                        if name == "new" {
+                            continue;
+                        }
                         for method in overloads {
                             let method = instantiate_function_sig(method, &subst);
                             let target = methods.entry(name.clone()).or_default();
@@ -1534,12 +1545,12 @@ impl World {
                         }
                     }
                 }
-                additions.push((module.path.clone(), decl.name.clone(), methods));
+                additions.push((module.path.clone(), decl.name.clone(), methods, fields));
                 checker.pop_type_params();
                 checker.current_type_paths.pop();
             }
         }
-        for (path, name, methods) in additions {
+        for (path, name, methods, fields) in additions {
             let module = self.modules.get_mut(&path).or_else(|| {
                 self.root_module
                     .as_mut()
@@ -1547,6 +1558,7 @@ impl World {
             });
             if let Some(sig) = module.and_then(|module| module.types.get_mut(&name)) {
                 sig.methods = methods;
+                sig.fields = fields;
             }
         }
     }
@@ -1793,6 +1805,7 @@ struct Checker<'a> {
     current_owner: Option<TypeSig>,
     current_method: Option<String>,
     current_getter: bool,
+    mixin_initialized_fields: Option<(String, HashSet<String>)>,
     current_extension_target: Option<String>,
     callable_depth: usize,
     local_functions_allowed: bool,
@@ -1820,6 +1833,7 @@ impl<'a> Checker<'a> {
             current_owner: None,
             current_method: None,
             current_getter: false,
+            mixin_initialized_fields: None,
             current_extension_target: None,
             callable_depth: 0,
             local_functions_allowed: false,
@@ -2505,7 +2519,9 @@ impl<'a> Checker<'a> {
                             .push(typecheck_diagnostics::interface_member_body(body.span()));
                         continue;
                     }
-                    if method.name == "new" && decl.kind != TypeKind::Class {
+                    if method.name == "new"
+                        && !matches!(decl.kind, TypeKind::Class | TypeKind::Mixin)
+                    {
                         self.add_error(
                             "invalid_constructor_decl",
                             custom_constructor_error(&type_sig),
@@ -2626,7 +2642,7 @@ impl<'a> Checker<'a> {
             .iter()
             .any(|member| matches!(member, TypeMember::Method(method) if method.name == "new"));
 
-        if decl.kind == TypeKind::Class && !has_explicit_constructor {
+        if matches!(decl.kind, TypeKind::Class | TypeKind::Mixin) && !has_explicit_constructor {
             for member in &decl.members {
                 let TypeMember::Field(field) = member else {
                     continue;
@@ -2637,7 +2653,8 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "missing_non_public_field_initializer",
                     format!(
-                        "class '{}' cannot synthesize an implicit constructor because {} field '{}' has no initializer; add an initializer or declare 'new(...)'",
+                        "{} '{}' cannot synthesize an implicit constructor because {} field '{}' has no initializer; add an initializer or declare 'new(...)'",
+                        type_kind_label(decl.kind),
                         decl.name,
                         visibility_label(field.visibility),
                         field.name
@@ -2689,7 +2706,7 @@ impl<'a> Checker<'a> {
         decl.mixins
             .iter()
             .filter_map(|target| {
-                let Ty::Named(name, args) = self.ty_from_type_ref(target) else {
+                let Ty::Named(name, args) = self.ty_from_type_ref(&target.target) else {
                     return None;
                 };
                 let sig = self.lookup_any_type(&name)?;
@@ -2697,7 +2714,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let subst = sig.type_params.iter().cloned().zip(args).collect();
-                Some((target.clone(), sig, subst))
+                Some((target.target.clone(), sig, subst))
             })
             .collect()
     }
@@ -2716,9 +2733,32 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        let previous_owner = self.current_owner.replace(owner.clone());
+        self.push_scope();
+        self.define_local("this", self.owner_self_ty(owner), false);
+        let implicit_constructor = !decl
+            .members
+            .iter()
+            .any(|member| matches!(member, TypeMember::Method(method) if method.name == "new"));
+        let initialized = decl
+            .members
+            .iter()
+            .filter_map(|member| match member {
+                TypeMember::Field(field)
+                    if field.initializer.is_some()
+                        || (implicit_constructor && field.visibility == Visibility::Default) =>
+                {
+                    Some(field.name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let previous_initialized = self
+            .mixin_initialized_fields
+            .replace((owner.name.clone(), initialized));
         let mut seen = HashSet::new();
         for target in &decl.mixins {
-            let ty = self.ty_from_type_ref(target);
+            let ty = self.ty_from_type_ref(&target.target);
             let sig = match &ty {
                 Ty::Named(name, _) => self.lookup_any_type(name),
                 _ => None,
@@ -2727,7 +2767,7 @@ impl<'a> Checker<'a> {
                 self.add_error(
                     "invalid_mixin_use",
                     "'use' in a class must name a mixin declaration",
-                    target.span(),
+                    target.span,
                 );
             } else if let Ty::Named(_, args) = &ty {
                 let sig = sig.unwrap();
@@ -2740,21 +2780,59 @@ impl<'a> Checker<'a> {
                             sig.type_params.len(),
                             args.len()
                         ),
-                        target.span(),
+                        target.span,
                     );
+                } else {
+                    let args = args.clone();
+                    let mut constructor = sig.clone();
+                    constructor.kind = TypeKind::Class;
+                    let values = crate::mixins::adoption_arguments(target, &mut self.diagnostics);
+                    self.check_named_type_constructor(
+                        &constructor,
+                        if target.uses_brace_syntax {
+                            &target.args
+                        } else {
+                            &values
+                        },
+                        target.span,
+                        target.uses_brace_syntax,
+                        target.uses_brace_syntax,
+                        &Ty::Unknown,
+                        &args,
+                    );
+                }
+                if let Some((_, initialized)) = &mut self.mixin_initialized_fields {
+                    initialized.extend(sig.fields.iter().map(|field| field.name.clone()));
                 }
             }
             if !seen.insert(ty.describe()) {
                 self.add_error(
                     "duplicate_mixin_use",
                     "a class cannot adopt the same mixin more than once",
-                    target.span(),
+                    target.span,
                 );
             }
         }
+        self.pop_scope();
+        self.mixin_initialized_fields = previous_initialized;
+        self.current_owner = previous_owner;
+        let mut storage_names = decl
+            .members
+            .iter()
+            .filter_map(|member| match member {
+                TypeMember::Field(field) => Some(field.name.clone()),
+                TypeMember::Method(method) if method.name != "new" => Some(method.name.clone()),
+                _ => None,
+            })
+            .collect::<HashSet<_>>();
         let mut candidates =
             HashMap::<String, Vec<(String, String, FunctionSig, crate::source::Span)>>::new();
         for (target, mixin, subst) in self.mixin_uses(decl) {
+            for field in &mixin.fields {
+                if !storage_names.insert(field.name.clone()) {
+                    self.add_error("mixin_member_conflict", format!("stored field '{}' supplied by mixin '{}' conflicts with another class or mixin member", field.name, mixin.name), target.span());
+                }
+            }
             for requirement in &mixin.with_bounds {
                 let required = substitute_type(requirement, &subst);
                 if !self.is_assignable(&self.owner_self_ty(owner), &required) {
@@ -2774,6 +2852,9 @@ impl<'a> Checker<'a> {
             }
             self.check_call_generic_conditions(&mixin.generic_conditions, &subst, target.span());
             for (name, overloads) in mixin.methods {
+                if name == "new" {
+                    continue;
+                }
                 for method in overloads {
                     let method = instantiate_function_sig(method, &subst);
                     let key = mixin_signature_key(&name, &method);
@@ -2887,6 +2968,17 @@ impl<'a> Checker<'a> {
         })
     }
 
+    fn check_mixin_field_read(&mut self, name: &str, span: crate::source::Span) {
+        if let Some((owner, initialized)) = &self.mixin_initialized_fields
+            && self.current_owner.as_ref().is_some_and(|sig| {
+                sig.name == *owner && sig.fields.iter().any(|field| field.name == name)
+            })
+            && !initialized.contains(name)
+        {
+            self.add_error("uninitialized_mixin_argument", format!("mixin arguments cannot read field '{name}' before it is initialized; class constructor bodies run after mixin initialization"), span);
+        }
+    }
+
     fn check_type_field_initializers(&mut self, decl: &TypeDecl, owner: &TypeSig) {
         if decl.kind == TypeKind::Enum {
             return;
@@ -2935,7 +3027,7 @@ impl<'a> Checker<'a> {
             .module
             .types
             .values()
-            .filter(|sig| sig.kind == TypeKind::Class)
+            .filter(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Mixin))
             .map(|sig| sig.name.clone())
             .collect::<Vec<_>>();
 
@@ -2955,7 +3047,10 @@ impl<'a> Checker<'a> {
         let mut nodes = Vec::new();
         for item in &self.module.program.items {
             match item {
-                Item::Type(decl) if decl.kind == TypeKind::Class && decl.name == class_name => {
+                Item::Type(decl)
+                    if matches!(decl.kind, TypeKind::Class | TypeKind::Mixin)
+                        && decl.name == class_name =>
+                {
                     let owner_type_params = decl
                         .type_params
                         .iter()
@@ -3335,7 +3430,7 @@ impl<'a> Checker<'a> {
         method: &MethodDecl,
         owner: &TypeSig,
     ) {
-        if method.name != "new" || owner.kind != TypeKind::Class {
+        if method.name != "new" || !matches!(owner.kind, TypeKind::Class | TypeKind::Mixin) {
             return;
         }
         if let Some(body) = &method.body {
@@ -5739,6 +5834,7 @@ impl<'a> Checker<'a> {
                     return value.ty;
                 }
                 if let Some(field) = self.lookup_implicit_field(name) {
+                    self.check_mixin_field_read(name, *span);
                     return field.ty;
                 }
                 if let Some(getter) = self.lookup_implicit_getter(name) {
@@ -5943,6 +6039,9 @@ impl<'a> Checker<'a> {
                 name,
                 span,
             } => {
+                if matches!(receiver.as_ref(), Expr::Identifier { name, .. } if name == "this") {
+                    self.check_mixin_field_read(name, *span);
+                }
                 if let Some(functions) = self.module_member_functions(expr) {
                     return self.select_callable_reference_type(name, &functions, expected, *span);
                 }
@@ -6518,7 +6617,12 @@ impl<'a> Checker<'a> {
                 self.pop_scope();
                 self.wrap_for_yield_type(family.as_ref(), yield_ty)
             }
-            Expr::Lambda { params, body, .. } => self.check_lambda_expr(params, body, expected),
+            Expr::Lambda { params, body, .. } => {
+                let initialized = self.mixin_initialized_fields.take();
+                let ty = self.check_lambda_expr(params, body, expected);
+                self.mixin_initialized_fields = initialized;
+                ty
+            }
             Expr::Group { inner, .. } => self.check_expr_against(inner, expected),
         }
     }
@@ -7105,6 +7209,7 @@ impl<'a> Checker<'a> {
                 );
             }
             field_sigs.push(FieldSig {
+                from_mixin: false,
                 name: field.name.clone(),
                 ty: ty.clone(),
                 mutable: false,
@@ -8336,7 +8441,10 @@ impl<'a> Checker<'a> {
                 if name == "this" {
                     if self.current_method.as_deref() == Some("new") && self.current_owner.is_some()
                     {
-                        return self.current_owner.clone().map(|owner| {
+                        return self.current_owner.clone().map(|mut owner| {
+                            if owner.kind == TypeKind::Mixin {
+                                owner.kind = TypeKind::Class;
+                            }
                             self.check_named_type_constructor(
                                 &owner,
                                 args,
@@ -8350,7 +8458,7 @@ impl<'a> Checker<'a> {
                     }
                     self.add_error(
                         "invalid_constructor_delegation",
-                        "constructor delegation with `this(...)` or `this { ... }` is only valid inside a class constructor",
+                        "constructor delegation with `this(...)` or `this { ... }` is only valid inside a class or mixin constructor",
                         span,
                     );
                     return Some(Ty::Unknown);
@@ -9282,6 +9390,7 @@ impl<'a> Checker<'a> {
             .params
             .iter()
             .map(|param| FieldSig {
+                from_mixin: false,
                 name: param.name.clone(),
                 ty: substitute_type(&param.ty, &subst),
                 mutable: param.mutable,
@@ -12923,7 +13032,7 @@ impl<'a> Checker<'a> {
             .iter()
             .filter(|field| {
                 if sig.kind == TypeKind::Class {
-                    field.visibility == Visibility::Default
+                    !field.from_mixin && field.visibility == Visibility::Default
                 } else {
                     self.can_access_field(sig, field)
                 }
@@ -13013,7 +13122,7 @@ impl<'a> Checker<'a> {
             .iter()
             .filter(|field| {
                 if sig.kind == TypeKind::Class {
-                    field.visibility == Visibility::Default
+                    !field.from_mixin && field.visibility == Visibility::Default
                 } else {
                     self.can_access_field(sig, field)
                 }
@@ -14102,6 +14211,7 @@ impl<'a> Checker<'a> {
                 fields
                     .iter()
                     .map(|(name, ty)| FieldSig {
+                        from_mixin: false,
                         name: name.clone(),
                         ty: ty.clone(),
                         mutable: false,
@@ -14127,6 +14237,7 @@ impl<'a> Checker<'a> {
                         .iter()
                         .filter(|field| self.can_access_field(&sig, field))
                         .map(|field| FieldSig {
+                            from_mixin: false,
                             name: field.name.clone(),
                             ty: substitute_type(&field.ty, &subst),
                             mutable: field.mutable,
@@ -14683,6 +14794,7 @@ fn constructor_field_sigs_from_params(params: &[ParamSig]) -> Vec<FieldSig> {
     params
         .iter()
         .map(|param| FieldSig {
+            from_mixin: false,
             name: param.name.clone(),
             ty: param.ty.clone(),
             mutable: false,
@@ -15431,6 +15543,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
     for member in &decl.members {
         match member {
             TypeMember::Field(field) => fields.push(FieldSig {
+                from_mixin: false,
                 name: field.name.clone(),
                 ty: field
                     .ty
@@ -15461,6 +15574,7 @@ fn type_sig_from_decl(decl: &TypeDecl) -> TypeSig {
                     .fields
                     .iter()
                     .map(|field| FieldSig {
+                        from_mixin: false,
                         name: field.name.clone(),
                         ty: enum_case_field_sig_ty(field, &fields, &owner_params),
                         mutable: field.mutable,
@@ -16648,6 +16762,81 @@ fn main() Int {
             ),
         ];
         for (code, source) in cases {
+            let result = check_program(&parse_inline(source));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
+                "expected {code} for {source}: {:#?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn checks_mixin_constructor_contracts_and_initialization_boundaries() {
+        let accepted =
+            check_path(workspace_root().join("examples/features/mixin_constructors.lum")).unwrap();
+        assert!(
+            accepted.diagnostics.is_empty(),
+            "{:#?}",
+            accepted.diagnostics
+        );
+        for (code, source) in [
+            (
+                "invalid_argument_count",
+                "mixin Parts { value Int }\nclass Owner { use Parts }",
+            ),
+            (
+                "invalid_argument_type",
+                "mixin Parts { value Int }\nclass Owner { use Parts(\"wrong\") }",
+            ),
+            (
+                "invalid_argument_count",
+                "mixin Parts { first Int = 1\nlast Int }\nclass Owner { use Parts(2) }",
+            ),
+            (
+                "no_matching_overload",
+                "mixin Parts { value Int }\nclass Owner { use Parts { typo: 1 } }",
+            ),
+            (
+                "missing_non_public_field_initializer",
+                "mixin Parts { private value Int }\nclass Owner { use Parts }",
+            ),
+            (
+                "uninitialized_field",
+                "mixin Parts { private value Int\nnew() {} }\nclass Owner { use Parts }",
+            ),
+            (
+                "mixin_member_conflict",
+                "mixin Parts { value Int = 1 }\nclass Owner { value Int = 2\nuse Parts }",
+            ),
+            (
+                "mixin_member_conflict",
+                "mixin First { value Int = 1 }\nmixin Second { value Int = 2 }\nclass Owner { use First\nuse Second }",
+            ),
+            (
+                "uninitialized_mixin_argument",
+                "mixin Parts { value Int }\nclass Owner { base Int\nuse Parts(this.base)\nnew() { this.base = 1 } }",
+            ),
+            (
+                "uninitialized_mixin_argument",
+                "mixin First { value Int }\nmixin Second { later Int = 2 }\nclass Owner { use First(this.later)\nuse Second }",
+            ),
+            (
+                "constructor_delegation_cycle",
+                "mixin Parts { new() = this() }\nclass Owner { use Parts }",
+            ),
+            (
+                "invalid_mixin_construction",
+                "mixin Parts { value Int }\nfn main() { parts = Parts(1) }",
+            ),
+            (
+                "invalid_argument_count",
+                "mixin Parts { value Int = 1 }\nclass Owner { use Parts }\nfn main() { owner = Owner(2) }",
+            ),
+        ] {
             let result = check_program(&parse_inline(source));
             assert!(
                 result

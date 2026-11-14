@@ -18,6 +18,7 @@ pub(super) fn define() -> RuntimeType {
         name: "Set".to_string(),
         fields: Vec::new(),
         field_init: None,
+        mixin_init: None,
         methods: vec![
             builtin_method(2, "add", vec![ir::Type::Unknown], set_add),
             builtin_method(14, "addAll", vec![ir::Type::Unknown], set_add_all),

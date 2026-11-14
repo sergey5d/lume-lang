@@ -18,6 +18,7 @@ pub(super) fn define() -> RuntimeType {
         name: "IntRange".to_string(),
         fields: vec![field(0, "start"), field(1, "end"), field(2, "step")],
         field_init: None,
+        mixin_init: None,
         methods: vec![
             builtin_method(0, "iterator", Vec::new(), range_iterator),
             builtin_method(1, "zip", vec![ir::Type::Unknown], range_zip),
@@ -30,6 +31,7 @@ pub(super) fn define() -> RuntimeType {
 
 fn field(slot: usize, name: &str) -> RuntimeField {
     RuntimeField {
+        from_mixin: false,
         slot: RuntimeFieldSlot(slot),
         name: name.to_string(),
         ty: ir::Type::Int,

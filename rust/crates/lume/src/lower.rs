@@ -558,16 +558,21 @@ impl<'a> Lowerer<'a> {
                         })
                         .unwrap_or(ir::Type::Unknown);
                     fields.push(ir::Field {
+                        from_mixin: field.from_mixin,
                         annotations: lower_annotations(&field.annotations),
                         visibility: field.visibility,
                         mutable: field.mutable,
                         name: field.name.clone(),
                         ty: ty.clone(),
-                        has_initializer: field.initializer.is_some(),
-                        initializer: lower_field_initializer_constant(field.initializer.as_ref()),
+                        has_initializer: field.from_mixin || field.initializer.is_some(),
+                        initializer: if field.from_mixin {
+                            None
+                        } else {
+                            lower_field_initializer_constant(field.initializer.as_ref())
+                        },
                         span: Some(field.span),
                     });
-                    if decl.kind != ast::TypeKind::Enum {
+                    if decl.kind != ast::TypeKind::Enum && !field.from_mixin {
                         if let Some(initializer) = &field.initializer {
                             field_init_stmts.push(self.synthesize_field_initializer_stmt(
                                 &field.name,
@@ -603,6 +608,7 @@ impl<'a> Lowerer<'a> {
                         .fields
                         .iter()
                         .map(|field| ir::Field {
+                            from_mixin: false,
                             annotations: lower_annotations(&field.annotations),
                             visibility: field.visibility,
                             mutable: field.mutable,
@@ -637,7 +643,8 @@ impl<'a> Lowerer<'a> {
         }
 
         let field_init = (!field_init_stmts.is_empty()).then(|| {
-            let (id, this_local) = self.declare_field_init_function(type_id, &decl.name, decl.span);
+            let (id, this_local) =
+                self.declare_field_init_function(type_id, &decl.name, "__field_init", decl.span);
             let body = Block {
                 statements: field_init_stmts,
                 span: decl.span,
@@ -653,9 +660,36 @@ impl<'a> Lowerer<'a> {
             id
         });
 
+        let mixin_init = (!decl.mixin_initializers.is_empty()).then(|| {
+            let (id, this_local) =
+                self.declare_field_init_function(type_id, &decl.name, "__mixin_init", decl.span);
+            let body = Block {
+                statements: decl
+                    .mixin_initializers
+                    .iter()
+                    .map(|expr| {
+                        Stmt::Expr(core::ExprStmt {
+                            span: expr.span(),
+                            expr: desugar::desugar_expr(expr),
+                        })
+                    })
+                    .collect(),
+                span: decl.span,
+            };
+            self.core_bodies
+                .insert(id, CallableBody::Block(body.clone()));
+            self.field_init_work.push(FieldInitWork {
+                id,
+                this_local,
+                body,
+                span: decl.span,
+            });
+            id
+        });
         if let Some(ty) = self.program.types.get_mut(type_id.0) {
             ty.fields = fields;
             ty.field_init = field_init;
+            ty.mixin_init = mixin_init;
             ty.methods.extend(methods_to_attach);
             ty.enum_cases = cases;
         }
@@ -821,10 +855,11 @@ impl<'a> Lowerer<'a> {
         &mut self,
         owner: ir::TypeId,
         owner_name: &str,
+        name: &str,
         span: Span,
     ) -> (ir::FunctionId, ir::LocalId) {
         let id = self.declare_function(
-            "__field_init",
+            name,
             ast::Visibility::Private,
             &[],
             &[],
@@ -1857,6 +1892,7 @@ impl<'a> FunctionLowerer<'a> {
         ty.fields = fields
             .iter()
             .map(|field| ir::Field {
+                from_mixin: false,
                 annotations: lower_annotations(&field.annotations),
                 visibility: field.visibility,
                 mutable: false,
@@ -8202,7 +8238,7 @@ impl<'a> FunctionLowerer<'a> {
                 .iter()
                 .filter(|field| {
                     if ty.kind == ast::TypeKind::Class {
-                        field.visibility == ast::Visibility::Default
+                        !field.from_mixin && field.visibility == ast::Visibility::Default
                     } else {
                         field.visibility != ast::Visibility::Private
                     }
@@ -8502,7 +8538,7 @@ impl<'a> FunctionLowerer<'a> {
                 .iter()
                 .filter(|field| {
                     if ty.kind == ast::TypeKind::Class {
-                        field.visibility == ast::Visibility::Default
+                        !field.from_mixin && field.visibility == ast::Visibility::Default
                     } else {
                         field.visibility != ast::Visibility::Private
                     }
@@ -8779,14 +8815,11 @@ impl<'a> FunctionLowerer<'a> {
             if path.len() == 1 {
                 let name = &path[0];
                 if name == "this" && self.function().name == "new" {
-                    if let ir::FunctionKind::Method { owner } = self.function().kind {
-                        if let Some(owner_name) =
-                            self.program.types.get(owner.0).map(|ty| ty.name.clone())
-                        {
-                            return ir::Callee::Named {
-                                path: vec![owner_name],
-                            };
-                        }
+                    if let ir::FunctionKind::Method { .. } = self.function().kind {
+                        return ir::Callee::Method {
+                            receiver: self.lookup_value("this").expect("constructor receiver"),
+                            method: "new".to_string(),
+                        };
                     }
                 }
                 if let Some(intrinsic) = intrinsic_for_name(name) {
@@ -9152,7 +9185,7 @@ impl<'a> FunctionLowerer<'a> {
                 .iter()
                 .filter(|field| {
                     if ty.kind == ast::TypeKind::Class {
-                        field.visibility == ast::Visibility::Default
+                        !field.from_mixin && field.visibility == ast::Visibility::Default
                     } else {
                         field.visibility != ast::Visibility::Private
                     }

@@ -1,5 +1,5 @@
-//! Stateless mixin composition. Bodies become ordinary methods on the one
-//! consuming receiver; mixins never acquire storage or runtime identities.
+//! Mixin composition onto one consuming receiver. Initialization operates on
+//! that receiver's storage; no separate mixin object or identity is created.
 
 use std::collections::{HashMap, HashSet};
 
@@ -180,8 +180,8 @@ pub(crate) fn compose(program: &Program) -> Result<Program, Vec<Diagnostic>> {
                 _ => None,
             })
             .collect::<HashSet<_>>();
-        for target in std::mem::take(&mut class.mixins) {
-            let TypeRef::Named { name, args, span } = target else {
+        for adoption in std::mem::take(&mut class.mixins) {
+            let TypeRef::Named { name, args, span } = adoption.target.clone() else {
                 continue;
             };
             let mut candidate = Some(class.name.as_str());
@@ -199,16 +199,179 @@ pub(crate) fn compose(program: &Program) -> Result<Program, Vec<Diagnostic>> {
                 ));
                 continue;
             };
-            let subst = mixin
+            let subst: HashMap<_, _> = mixin
                 .type_params
                 .iter()
                 .map(|param| param.name.clone())
                 .zip(args)
                 .collect();
+            let fields = mixin
+                .members
+                .iter()
+                .filter_map(|member| match member {
+                    TypeMember::Field(field) => {
+                        let mut field = field.clone();
+                        optional_type(&mut field.ty, &subst);
+                        if let Some(value) = &mut field.initializer {
+                            expression(value, &subst);
+                        }
+                        field.from_mixin = true;
+                        Some(field)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            class
+                .members
+                .extend(fields.iter().cloned().map(TypeMember::Field));
+            let constructor_prefix = format!("__lume_mixin_{}_init", mixin.name.replace('.', "_"));
+            let mut constructor_name = constructor_prefix.clone();
+            let mut suffix = 0;
+            while class.members.iter().any(|member| match member {
+                TypeMember::Field(field) => {
+                    field.name == constructor_name
+                        || field.name == format!("{constructor_name}_fields")
+                }
+                TypeMember::Method(method) => {
+                    method.name == constructor_name
+                        || method.name == format!("{constructor_name}_fields")
+                }
+                _ => false,
+            }) {
+                suffix += 1;
+                constructor_name = format!("{constructor_prefix}_{suffix}");
+            }
+            let constructors = mixin
+                .members
+                .iter()
+                .filter_map(|member| match member {
+                    TypeMember::Method(method) if method.name == "new" => {
+                        Some(instantiate_method(method, &subst))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let args = adoption_arguments(&adoption, &mut diagnostics);
+            if !constructors.is_empty() {
+                // Field defaults must not see parameters shadowing stored fields.
+                let field_initializers = fields
+                    .iter()
+                    .filter_map(|field| {
+                        field
+                            .initializer
+                            .as_ref()
+                            .map(|value| initialize_field(&field.name, value.clone(), field.span))
+                    })
+                    .collect::<Vec<_>>();
+                let field_initializer_name = format!("{constructor_name}_fields");
+                if !field_initializers.is_empty() {
+                    class.members.push(TypeMember::Method(MethodDecl {
+                        annotations: Vec::new(),
+                        visibility: Visibility::Private,
+                        name: field_initializer_name.clone(),
+                        getter: false,
+                        type_params: Vec::new(),
+                        type_conditions: Vec::new(),
+                        params: Vec::new(),
+                        return_type: None,
+                        body: Some(CallableBody::Block(Block {
+                            statements: field_initializers,
+                            span,
+                        })),
+                        span,
+                    }));
+                }
+                for mut constructor in constructors {
+                    constructor.name = constructor_name.clone();
+                    constructor.visibility = Visibility::Private;
+                    let mut statements = Vec::new();
+                    let delegated = constructor
+                        .body
+                        .as_mut()
+                        .is_some_and(|body| rewrite_delegation(body, &constructor_name));
+                    if !delegated && fields.iter().any(|field| field.initializer.is_some()) {
+                        statements.push(Stmt::Expr(ExprStmt {
+                            expr: initializer_call(&field_initializer_name, Vec::new(), span),
+                            span,
+                        }));
+                    }
+                    if let Some(body) = constructor.body.take() {
+                        append_body(&mut statements, body);
+                    }
+                    constructor.body = Some(CallableBody::Block(Block {
+                        statements,
+                        span: constructor.span,
+                    }));
+                    class.members.push(TypeMember::Method(constructor));
+                }
+                class
+                    .mixin_initializers
+                    .push(initializer_call(&constructor_name, args, span));
+            } else if !fields.is_empty() {
+                let public_fields = fields
+                    .iter()
+                    .filter(|field| field.visibility == Visibility::Default)
+                    .collect::<Vec<_>>();
+                let mut provided = HashMap::new();
+                let mut params = Vec::new();
+                let mut call_args = Vec::new();
+                let mut positional = 0;
+                for arg in args {
+                    let field = match &arg.name {
+                        Some(name) => public_fields
+                            .iter()
+                            .find(|field| field.name == *name)
+                            .copied(),
+                        None => {
+                            let field = public_fields.get(positional).copied();
+                            positional += 1;
+                            field
+                        }
+                    };
+                    let Some(field) = field else { continue };
+                    let name = format!("__lume_arg_{}", field.name);
+                    provided.insert(field.name.clone(), identifier(&name, arg.span));
+                    params.push(Param {
+                        name,
+                        ty: field.ty.clone(),
+                        initializer: None,
+                        variadic: false,
+                        span: arg.span,
+                    });
+                    call_args.push(CallArg { name: None, ..arg });
+                }
+                let statements = fields
+                    .iter()
+                    .filter_map(|field| {
+                        let value = provided
+                            .remove(&field.name)
+                            .or_else(|| field.initializer.clone())?;
+                        Some(initialize_field(&field.name, value, field.span))
+                    })
+                    .collect();
+                class.members.push(TypeMember::Method(MethodDecl {
+                    annotations: Vec::new(),
+                    visibility: Visibility::Private,
+                    name: constructor_name.clone(),
+                    getter: false,
+                    type_params: Vec::new(),
+                    type_conditions: Vec::new(),
+                    params,
+                    return_type: None,
+                    body: Some(CallableBody::Block(Block { statements, span })),
+                    span,
+                }));
+                class
+                    .mixin_initializers
+                    .push(initializer_call(&constructor_name, call_args, span));
+            }
             for member in &mixin.members {
                 let TypeMember::Method(method) = member else {
                     continue;
                 };
+                if method.name == "new" {
+                    continue;
+                }
                 let method = instantiate_method(method, &subst);
                 if selected.insert(composition_key(&method, &aliases)) {
                     class.members.push(TypeMember::Method(method));
@@ -224,6 +387,132 @@ pub(crate) fn compose(program: &Program) -> Result<Program, Vec<Diagnostic>> {
     } else {
         Err(diagnostics)
     }
+}
+
+fn identifier(name: &str, span: crate::Span) -> Expr {
+    Expr::Identifier {
+        name: name.to_string(),
+        span,
+    }
+}
+
+fn initializer_call(name: &str, args: Vec<CallArg>, span: crate::Span) -> Expr {
+    Expr::Call {
+        callee: Box::new(Expr::Member {
+            receiver: Box::new(identifier("this", span)),
+            name: name.to_string(),
+            span,
+        }),
+        args,
+        uses_brace_syntax: false,
+        span,
+    }
+}
+
+fn initialize_field(name: &str, value: Expr, span: crate::Span) -> Stmt {
+    Stmt::Assignment(AssignmentStmt {
+        targets: vec![Expr::Member {
+            receiver: Box::new(identifier("this", span)),
+            name: name.to_string(),
+            span,
+        }],
+        operator: AssignOp::Assign,
+        values: vec![value],
+        span,
+    })
+}
+
+fn append_body(statements: &mut Vec<Stmt>, body: CallableBody) {
+    match body {
+        CallableBody::Block(body) => statements.extend(body.statements),
+        CallableBody::Expr(expr) => statements.push(Stmt::Expr(ExprStmt {
+            span: expr.span(),
+            expr,
+        })),
+    }
+}
+
+fn rewrite_delegation(body: &mut CallableBody, name: &str) -> bool {
+    fn rewrite(expr: &mut Expr, name: &str) -> bool {
+        match expr {
+            Expr::Group { inner, .. } => rewrite(inner, name),
+            Expr::Call {
+                callee,
+                args,
+                uses_brace_syntax,
+                ..
+            } if matches!(callee.as_ref(), Expr::Identifier { name, .. } if name == "this") => {
+                let span = callee.span();
+                **callee = Expr::Member {
+                    receiver: Box::new(identifier("this", span)),
+                    name: name.to_string(),
+                    span,
+                };
+                if *uses_brace_syntax {
+                    if let [
+                        CallArg {
+                            value: Expr::RecordLiteral { fields, .. },
+                            ..
+                        },
+                    ] = args.as_slice()
+                    {
+                        *args = fields.clone();
+                        *uses_brace_syntax = false;
+                    }
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+    match body {
+        CallableBody::Expr(expr) => rewrite(expr, name),
+        _ => false,
+    }
+}
+
+pub(crate) fn adoption_arguments(
+    adoption: &MixinUse,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<CallArg> {
+    let mut args = if adoption.uses_brace_syntax {
+        match adoption.args.as_slice() {
+            [
+                CallArg {
+                    value: Expr::RecordLiteral { fields, values, .. },
+                    ..
+                },
+            ] => {
+                if !values.is_empty() {
+                    diagnostics.push(Diagnostic::error("invalid_mixin_arguments", "mixin adoption requires explicit named fields; spreads and unlabeled entries are not supported", adoption.span));
+                }
+                fields
+                    .iter()
+                    .map(|field| CallArg {
+                        from_shape_spread: false,
+                        name: field.name.clone(),
+                        ty: field.ty.clone(),
+                        value: field.value.clone(),
+                        span: field.span,
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    } else {
+        adoption.args.clone()
+    };
+    for arg in &args {
+        if matches!(arg.value, Expr::Spread { .. }) {
+            diagnostics.push(Diagnostic::error(
+                "invalid_mixin_arguments",
+                "mixin adoption arguments cannot use a spread",
+                arg.span,
+            ));
+        }
+    }
+    args.sort_by_key(|arg| arg.span.start);
+    args
 }
 
 pub(crate) fn instantiate_method(

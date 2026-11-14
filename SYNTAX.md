@@ -1075,7 +1075,8 @@ type OptionX[T] =
 Named `class`, `shape`, `interface`, `mixin`, `object`, and `annotation`
 declarations, as well as `type` aliases and declared unions, may appear inside
 named classes, shapes, objects, or annotations. Interfaces contain only `get`
-and `fn` signatures; mixin bodies contain only getter and method implementations.
+and `fn` signatures; mixin bodies may contain stored fields, constructors, getters,
+and method implementations.
 Neither supports nested declarations:
 
 ```txt
@@ -2854,10 +2855,10 @@ user User = User { name: "Ada" }
 label = user.displayName()
 ```
 
-### Stateless Mixins
+### Mixins
 
-A `mixin` supplies reusable methods and getters that a class explicitly adopts.
-It is not a value type, an interface, or a constructor target.
+A `mixin` supplies reusable storage, methods, and getters that a class explicitly
+adopts. It is not a value type or interface and cannot be constructed independently.
 
 ```txt
 interface Sized {
@@ -2882,7 +2883,9 @@ class Bag with Sized {
 
 - `with Sized` on a mixin requires the consuming class to implement `Sized`.
   It does not automatically add that interface to the class's declared bounds.
-- A class adopts a mixin with `use MixinName` inside its body. Imports of mixin
+- A class adopts a mixin inside its body. `use MixinName` supplies zero arguments;
+  `use MixinName(arguments)` supplies positional constructor inputs;
+  `use MixinName { field: value }` supplies named inputs. Imports of mixin
   declarations use the ordinary module visibility and `use` rules.
 - Top-level mixins are private by default. `private mixin` is file-local;
   `internal mixin` may be imported only within the same declared module;
@@ -2891,9 +2894,27 @@ class Bag with Sized {
   retain their declared member visibility.
 - Mixins may have type parameters, for example `use ValueParts[Int]`. Their
   methods may have their own type parameters; getters follow normal getter rules.
-- Mixin bodies contain methods and getters with implementations, not stored
-  fields, constructors, or nested declarations. State belongs to the class and
-  is accessed through the mixin's required interfaces.
+- Mixin bodies may contain stored fields and `new` constructors, as well as
+  implemented methods and getters. They cannot contain nested declarations.
+  Without an explicit constructor, public fields are constructor inputs and
+  non-public fields require initializers, as for classes. With an explicit
+  constructor, its parameters define the inputs.
+- Adoption uses ordinary constructor visibility, overload selection, parameter
+  defaults, and positional-prefix rules. Bare `use MixinName` is valid whenever
+  an accessible constructor accepts zero supplied arguments, including when
+  all its parameters have defaults. Adoption arguments currently support
+  individual positional or named inputs, not spreads.
+- Each class instance owns its mixin storage. Mixin fields do not become inputs
+  to the class's implicit constructor. Stored field names must not collide
+  with class members or storage supplied by another mixin.
+- Initialization runs in this order: class field initialization (including
+  implicit constructor inputs), mixin initialization in written `use` order,
+  then the class constructor body. Each adoption evaluates its supplied
+  expressions once in source order. Constructor delegation does not initialize
+  mixins again. Adoption arguments may read initialized class fields or earlier
+  mixin state, but not fields assigned only by the class constructor body.
+- Supplied implicit-constructor inputs suppress their field defaults. Omitted
+  inputs retain their declared defaults, evaluated separately for each instance.
 - Supplied members become ordinary members of the consuming class and may
   satisfy its interface requirements. There is one receiver: `this` is always
   the consuming class instance, including inside nested calls and callbacks.
@@ -2904,8 +2925,8 @@ class Bag with Sized {
   satisfy getters in the mixin's required interfaces.
 - Competing mixin implementations of the same signature require a compatible
   declaration in the class. There is no first- or last-mixin winner, so
-  reordering adoption declarations cannot change a valid program's behavior.
-  Distinct method overloads may coexist.
+  adoption order does not choose an implementation. Initialization still follows
+  written adoption order. Distinct method overloads may coexist.
 - Internal calls use the class's final members. In the example,
   `bag.describe()` calls `Bag.nonEmpty`, not a separate mixin receiver.
 - Only classes adopt mixins. There is no mixin-to-mixin adoption or `super`
@@ -2918,13 +2939,30 @@ belong in explicitly adopted mixins, or in extensions for helpers that do not
 supply class members.
 Implementing an interface does not implicitly adopt a mixin. Extension visibility
 is independent of mixin adoption.
-See `examples/features/mixins.lum` for an executable example.
+For stateful adoption:
+
+```txt
+mixin CounterParts {
+    private var count Int
+    new(start Int = 0) { this.count = start }
+    get current Int = count
+    fn increment() { count := count + 1 }
+}
+
+class Counter { use CounterParts }
+class OffsetCounter { use CounterParts(10) }
+class NamedCounter { use CounterParts { start: 20 } }
+```
+
+See `examples/features/mixins.lum` and
+`examples/features/mixin_constructors.lum` for executable examples.
 
 ### Constructors
 
-Custom constructors are class-only and use a dedicated `new(...)` declaration
-in the class body. Shapes, union alternatives, objects, annotations, and
-interfaces cannot declare them.
+Classes and mixins may declare custom constructors with `new(...)` in their
+bodies. Mixins are initialized only through [adoption](#mixins), not standalone
+construction. Shapes, union alternatives, objects, annotations, and interfaces
+cannot declare constructors.
 
 - `new(...) { body }` declares a block-bodied constructor.
 - `new(...) = expression` declares an expression-bodied constructor.

@@ -18,6 +18,7 @@ pub(super) fn define() -> RuntimeType {
         name: "Result".to_string(),
         fields: Vec::new(),
         field_init: None,
+        mixin_init: None,
         methods: vec![
             builtin_method(0, "isOk", Vec::new(), result_is_ok),
             builtin_method(1, "isErr", Vec::new(), result_is_err),
@@ -59,6 +60,7 @@ pub(super) fn define() -> RuntimeType {
                 id: RuntimeEnumCaseId(0),
                 name: "Ok".to_string(),
                 fields: vec![RuntimeField {
+                    from_mixin: false,
                     slot: RuntimeFieldSlot(0),
                     name: "value".to_string(),
                     ty: ir::Type::Unknown,
@@ -72,6 +74,7 @@ pub(super) fn define() -> RuntimeType {
                 id: RuntimeEnumCaseId(1),
                 name: "Err".to_string(),
                 fields: vec![RuntimeField {
+                    from_mixin: false,
                     slot: RuntimeFieldSlot(0),
                     name: "error".to_string(),
                     ty: ir::Type::Unknown,

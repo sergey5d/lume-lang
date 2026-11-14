@@ -18,6 +18,7 @@ pub(super) fn define() -> RuntimeType {
         name: "Map".to_string(),
         fields: Vec::new(),
         field_init: None,
+        mixin_init: None,
         methods: vec![
             builtin_method(
                 1,

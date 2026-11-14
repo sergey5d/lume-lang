@@ -18,6 +18,7 @@ pub(super) fn define() -> RuntimeType {
         name: "Vector".to_string(),
         fields: Vec::new(),
         field_init: None,
+        mixin_init: None,
         methods: vec![
             builtin_method(29, "add", vec![ir::Type::Unknown], list_add),
             builtin_method(30, "addAll", vec![ir::Type::Unknown], list_add_all),
