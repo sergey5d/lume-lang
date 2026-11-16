@@ -6,7 +6,6 @@
 //! so the interpreter does not have to rediscover type structure through
 //! repeated scans of the IR tables.
 
-mod builtins;
 mod types;
 
 pub use types::{
@@ -14,4 +13,4 @@ pub use types::{
     RuntimeMethodSlot, RuntimeProgram, RuntimeType, RuntimeTypeId,
 };
 
-pub(crate) use types::RuntimeMethodTarget;
+pub(crate) use types::{BuiltinMethodFn, RuntimeMethodKind, RuntimeMethodTarget};

@@ -46,18 +46,20 @@ impl RegexMatchValue {
 }
 
 impl Interpreter<'_> {
-    pub(super) fn invoke_regex_static(
+    pub(crate) fn native_regex_static_compile(
         &mut self,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "compile";
+
         expect_runtime_arity(self, &format!("Regex.{method}"), &args, 1, span)?;
         let Value::String(pattern) = &args[0] else {
             return Err(self.runtime_error(span, "Regex expects a Str argument"));
         };
-        match method {
-            "compile" => {
+        
                 let compiled = Regex::new(pattern).and_then(|regex| {
                     Regex::new(&format!(r"\A(?:{pattern})\z"))
                         .map(|full| RegexValue { regex, full })
@@ -79,27 +81,71 @@ impl Interpreter<'_> {
                         self.result_err(error)
                     }
                 })
-            }
-            "escape" => Ok(Value::String(::regex::escape(pattern))),
-            _ => Err(self.runtime_error(span, format!("unknown Regex method '{method}'"))),
-        }
+            
     }
 
-    pub(super) fn invoke_regex_method(
+    pub(crate) fn native_regex_static_escape(
         &mut self,
-        regex: Rc<RegexValue>,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "escape";
+
+        expect_runtime_arity(self, &format!("Regex.{method}"), &args, 1, span)?;
+        let Value::String(pattern) = &args[0] else {
+            return Err(self.runtime_error(span, "Regex expects a Str argument"));
+        };
+        Ok(Value::String(::regex::escape(pattern)))
+    }
+
+    pub(crate) fn native_regex_contains(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::Regex(regex) = receiver else { unreachable!() };
+        let method = "contains";
+
         expect_runtime_arity(self, &format!("Regex.{method}"), &args, 1, span)?;
         let Value::String(text) = &args[0] else {
             return Err(self.runtime_error(span, "Regex input must be Str"));
         };
-        match method {
-            "contains" => Ok(Value::Bool(regex.regex.is_match(text))),
-            "matches" => Ok(Value::Bool(regex.full.is_match(text))),
-            "find" | "fullMatch" => {
+        Ok(Value::Bool(regex.regex.is_match(text)))
+    }
+
+    pub(crate) fn native_regex_matches(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::Regex(regex) = receiver else { unreachable!() };
+        let method = "matches";
+
+        expect_runtime_arity(self, &format!("Regex.{method}"), &args, 1, span)?;
+        let Value::String(text) = &args[0] else {
+            return Err(self.runtime_error(span, "Regex input must be Str"));
+        };
+        Ok(Value::Bool(regex.full.is_match(text)))
+    }
+
+    pub(crate) fn native_regex_find(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::Regex(regex) = receiver else { unreachable!() };
+        let method = "find";
+
+        expect_runtime_arity(self, &format!("Regex.{method}"), &args, 1, span)?;
+        let Value::String(text) = &args[0] else {
+            return Err(self.runtime_error(span, "Regex input must be Str"));
+        };
+        
                 let compiled = if method == "fullMatch" {
                     &regex.full
                 } else {
@@ -111,8 +157,51 @@ impl Interpreter<'_> {
                     ))),
                     None => self.option_none(),
                 })
-            }
-            "findAll" => Ok(Value::list(
+            
+    }
+
+    pub(crate) fn native_regex_full_match(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::Regex(regex) = receiver else { unreachable!() };
+        let method = "fullMatch";
+
+        expect_runtime_arity(self, &format!("Regex.{method}"), &args, 1, span)?;
+        let Value::String(text) = &args[0] else {
+            return Err(self.runtime_error(span, "Regex input must be Str"));
+        };
+        
+                let compiled = if method == "fullMatch" {
+                    &regex.full
+                } else {
+                    &regex.regex
+                };
+                Ok(match compiled.captures(text) {
+                    Some(captures) => self.option_some(Value::RegexMatch(Rc::new(
+                        RegexMatchValue::capture(compiled, text, captures),
+                    ))),
+                    None => self.option_none(),
+                })
+            
+    }
+
+    pub(crate) fn native_regex_find_all(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::Regex(regex) = receiver else { unreachable!() };
+        let method = "findAll";
+
+        expect_runtime_arity(self, &format!("Regex.{method}"), &args, 1, span)?;
+        let Value::String(text) = &args[0] else {
+            return Err(self.runtime_error(span, "Regex input must be Str"));
+        };
+        Ok(Value::list(
                 regex
                     .regex
                     .captures_iter(text)
@@ -124,18 +213,18 @@ impl Interpreter<'_> {
                         )))
                     })
                     .collect(),
-            )),
-            _ => Err(self.runtime_error(span, format!("unknown Regex method '{method}'"))),
-        }
+            ))
     }
 
-    pub(super) fn invoke_regex_match_method(
+    pub(crate) fn native_regex_match_text(
         &mut self,
-        hit: Rc<RegexMatchValue>,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        let Value::RegexMatch(hit) = receiver else { unreachable!() };
+        let method = "text";
+
         expect_runtime_arity(
             self,
             &format!("RegexMatch.{method}"),
@@ -143,11 +232,64 @@ impl Interpreter<'_> {
             usize::from(method == "group"),
             span,
         )?;
-        match method {
-            "text" => Ok(Value::String(hit.text.clone())),
-            "start" => Ok(Value::Int(hit.start)),
-            "end" => Ok(Value::Int(hit.end)),
-            "groups" => Ok(Value::list(
+        Ok(Value::String(hit.text.clone()))
+    }
+
+    pub(crate) fn native_regex_match_start(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RegexMatch(hit) = receiver else { unreachable!() };
+        let method = "start";
+
+        expect_runtime_arity(
+            self,
+            &format!("RegexMatch.{method}"),
+            &args,
+            usize::from(method == "group"),
+            span,
+        )?;
+        Ok(Value::Int(hit.start))
+    }
+
+    pub(crate) fn native_regex_match_end(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RegexMatch(hit) = receiver else { unreachable!() };
+        let method = "end";
+
+        expect_runtime_arity(
+            self,
+            &format!("RegexMatch.{method}"),
+            &args,
+            usize::from(method == "group"),
+            span,
+        )?;
+        Ok(Value::Int(hit.end))
+    }
+
+    pub(crate) fn native_regex_match_groups(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RegexMatch(hit) = receiver else { unreachable!() };
+        let method = "groups";
+
+        expect_runtime_arity(
+            self,
+            &format!("RegexMatch.{method}"),
+            &args,
+            usize::from(method == "group"),
+            span,
+        )?;
+        Ok(Value::list(
                 hit.groups
                     .iter()
                     .map(|capture| {
@@ -157,8 +299,26 @@ impl Interpreter<'_> {
                             .unwrap_or_else(|| self.option_none())
                     })
                     .collect(),
-            )),
-            "groupMap" => Ok(Value::map(
+            ))
+    }
+
+    pub(crate) fn native_regex_match_group_map(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RegexMatch(hit) = receiver else { unreachable!() };
+        let method = "groupMap";
+
+        expect_runtime_arity(
+            self,
+            &format!("RegexMatch.{method}"),
+            &args,
+            usize::from(method == "group"),
+            span,
+        )?;
+        Ok(Value::map(
                 hit.names
                     .iter()
                     .filter_map(|(name, index)| {
@@ -167,8 +327,26 @@ impl Interpreter<'_> {
                             .map(|text| (Value::String(name.clone()), Value::String(text.clone())))
                     })
                     .collect(),
-            )),
-            "group" => {
+            ))
+    }
+
+    pub(crate) fn native_regex_match_group(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RegexMatch(hit) = receiver else { unreachable!() };
+        let method = "group";
+
+        expect_runtime_arity(
+            self,
+            &format!("RegexMatch.{method}"),
+            &args,
+            usize::from(method == "group"),
+            span,
+        )?;
+        
                 let index = match &args[0] {
                     Value::Int(index) => usize::try_from(*index).ok(),
                     Value::String(name) => hit
@@ -185,8 +363,5 @@ impl Interpreter<'_> {
                     .and_then(|capture| capture.as_ref())
                     .map(|text| self.option_some(Value::String(text.clone())))
                     .unwrap_or_else(|| self.option_none()))
-            }
-            _ => Err(self.runtime_error(span, format!("unknown RegexMatch member '{method}'"))),
-        }
     }
 }

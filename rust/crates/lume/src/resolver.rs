@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     env, fs,
     path::{Path, PathBuf},
-    sync::OnceLock,
 };
 
 use crate::{
@@ -73,10 +72,7 @@ pub fn resolve_program(program: &Program) -> CheckResult {
 }
 
 fn default_inline_ambient_registry() -> AmbientRegistry {
-    find_stdlib_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
-        .ok()
-        .and_then(|stdlib_dir| AmbientRegistry::load_from_stdlib(&stdlib_dir).ok())
-        .unwrap_or_else(AmbientRegistry::with_builtin_values)
+    AmbientRegistry::from_declarations(crate::stdlib::declarations())
 }
 
 pub fn resolve_path(path: impl AsRef<Path>) -> Result<ResolveResult, String> {
@@ -91,8 +87,10 @@ pub fn definition_at_path(
     let path = path.as_ref();
     let root =
         fs::canonicalize(path).map_err(|err| format!("resolve {}: {err}", path.display()))?;
-    let stdlib_dir = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?;
-    let ambient = AmbientRegistry::load_from_stdlib(&stdlib_dir)?;
+    let mut ambient = default_inline_ambient_registry();
+    if let Ok(stdlib_dir) = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new("."))) {
+        ambient.load_navigation_sources(&stdlib_dir);
+    }
     let mut options = ModuleLoadOptions::default();
     if let Some(source) = source {
         options
@@ -100,7 +98,14 @@ pub fn definition_at_path(
             .insert(root.clone(), source.to_string());
     }
     options.allow_missing_modules = true;
-    let (graph, root) = load_module_graph_with_options(&root, &options)?;
+    let (mut graph, root) = load_module_graph_with_options(&root, &options)?;
+    for module in graph.modules.values_mut() {
+        if module.source == ModuleSource::Library
+            && let Ok(source) = parse_program_from_path(Path::new(&module.display_path))
+        {
+            overlay_navigation_spans(&mut module.program, &source);
+        }
+    }
     let module = graph
         .modules
         .get(&root)
@@ -127,13 +132,88 @@ pub(crate) fn module_definition_references(
     resolver.definition_references.unwrap_or_default()
 }
 
+fn overlay_navigation_spans(program: &mut Program, source: &Program) {
+    for item in &mut program.items {
+        match item {
+            crate::ast::Item::Type(declaration) => {
+                let Some(original) = source.items.iter().find_map(|item| match item {
+                    crate::ast::Item::Type(original)
+                        if original.name == declaration.name
+                            && original.kind == declaration.kind =>
+                    {
+                        Some(original)
+                    }
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                declaration.span = original.span;
+                for member in &mut declaration.members {
+                    match member {
+                        TypeMember::Field(field) => {
+                            if let Some(original) =
+                                original.members.iter().find_map(|member| match member {
+                                    TypeMember::Field(original) if original.name == field.name => {
+                                        Some(original)
+                                    }
+                                    _ => None,
+                                })
+                            {
+                                field.span = original.span;
+                            }
+                        }
+                        TypeMember::Method(method) => {
+                            if let Some(original) =
+                                original.members.iter().find_map(|member| match member {
+                                    TypeMember::Method(original)
+                                        if original.name == method.name
+                                            && original.params.len() == method.params.len() =>
+                                    {
+                                        Some(original)
+                                    }
+                                    _ => None,
+                                })
+                            {
+                                method.span = original.span;
+                            }
+                        }
+                        TypeMember::Case(case) => {
+                            if let Some(original) =
+                                original.members.iter().find_map(|member| match member {
+                                    TypeMember::Case(original) if original.name == case.name => {
+                                        Some(original)
+                                    }
+                                    _ => None,
+                                })
+                            {
+                                case.span = original.span;
+                            }
+                        }
+                    }
+                }
+            }
+            crate::ast::Item::TypeAlias(alias) => {
+                if let Some(original) = source.items.iter().find_map(|item| match item {
+                    crate::ast::Item::TypeAlias(original) if original.name == alias.name => {
+                        Some(original)
+                    }
+                    _ => None,
+                }) {
+                    alias.span = original.span;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(crate) fn resolve_path_with_options(
     path: impl AsRef<Path>,
     options: &ModuleLoadOptions,
 ) -> Result<ResolveResult, String> {
     let root = path.as_ref();
     let stdlib_dir = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?;
-    let ambient = AmbientRegistry::load_from_stdlib(&stdlib_dir)?;
+    let ambient = default_inline_ambient_registry();
     let mut graph = ModuleGraph::default();
     let source_root = source_root_for_path(root)?;
     let root_path = load_module_with_options(
@@ -241,44 +321,14 @@ fn native_library_modules() -> HashMap<String, LibraryModule> {
 }
 
 fn native_regex_program() -> Program {
-    static PROGRAM: OnceLock<Program> = OnceLock::new();
-    PROGRAM
-        .get_or_init(|| {
-            let file = SourceFile::new(
-                "<native:lume/regex>",
-                include_str!("native_regex.lum").to_string(),
-            );
-            let lexed = lex(&file);
-            assert!(lexed.diagnostics.is_empty(), "{:#?}", lexed.diagnostics);
-            let parsed = parse_program(&lexed.tokens);
-            assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
-            parsed.program.expect("native lume/regex program")
-        })
+    crate::stdlib::module_declarations("lume/regex")
+        .expect("native regex contracts")
         .clone()
 }
 
 fn native_json_program() -> Program {
-    static PROGRAM: OnceLock<Program> = OnceLock::new();
-    PROGRAM
-        .get_or_init(|| {
-            let file = SourceFile::new(
-                "<native:lume/json>",
-                include_str!("native_json.lum").to_string(),
-            );
-            let lexed = lex(&file);
-            assert!(
-                lexed.diagnostics.is_empty(),
-                "native lume/json lexer diagnostics: {:#?}",
-                lexed.diagnostics
-            );
-            let parsed = parse_program(&lexed.tokens);
-            assert!(
-                parsed.diagnostics.is_empty(),
-                "native lume/json parser diagnostics: {:#?}",
-                parsed.diagnostics
-            );
-            parsed.program.expect("native lume/json program")
-        })
+    crate::stdlib::module_declarations("lume/json")
+        .expect("native JSON contracts")
         .clone()
 }
 
@@ -300,8 +350,9 @@ pub(crate) struct LoadedModule {
     pub(crate) dependencies: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum ModuleSource {
+    #[default]
     Source,
     Library,
 }
@@ -332,37 +383,15 @@ struct AmbientRegistry {
     type_origins: HashMap<String, String>,
     alias_origins: HashMap<String, String>,
     values: HashSet<String>,
+    navigation_types: HashMap<String, (String, TypeInfo)>,
+    navigation_aliases: HashMap<String, DefinitionTarget>,
 }
 
 impl AmbientRegistry {
-    fn with_builtin_values() -> Self {
+    fn from_declarations(program: &Program) -> Self {
         let mut registry = AmbientRegistry::default();
-        for value in [
-            "Vector", "Map", "Int", "Bool", "Char", "Float", "Decimal", "Str", "Unit", "Never",
-            "print", "println", "printf", "panic", "assert", "ensure", "identity", "Math",
-        ] {
-            registry.values.insert(value.to_string());
-        }
-        registry
-    }
-
-    fn load_from_stdlib(stdlib_dir: &Path) -> Result<Self, String> {
-        let mut registry = AmbientRegistry::with_builtin_values();
-        let mut entries = fs::read_dir(stdlib_dir)
-            .map_err(|err| format!("read stdlib {}: {err}", stdlib_dir.display()))?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "lum"))
-            .collect::<Vec<_>>();
-        entries.sort();
-
-        for path in entries {
-            let directives = read_directives(&path)?;
-            if !directives.interpreter {
-                continue;
-            }
-            let program = parse_program_from_path(&path)?;
-            let decls = collect_top_level_decls(&program);
+        {
+            let decls = collect_top_level_decls(program);
             for (name, decl) in &decls.functions {
                 if decl.visibility == Visibility::Default {
                     registry.values.insert(name.clone());
@@ -378,8 +407,8 @@ impl AmbientRegistry {
                     }
                     registry
                         .type_origins
-                        .insert(name.clone(), path.display().to_string());
-                    registry.types.insert(name, info);
+                        .insert(name.clone(), "<stdlib>".to_string());
+                    registry.types.entry(name).or_insert(info);
                 }
             }
             for (name, info) in decls.objects {
@@ -387,27 +416,59 @@ impl AmbientRegistry {
                     registry.values.insert(name.clone());
                     registry
                         .type_origins
-                        .insert(name.clone(), path.display().to_string());
-                    registry.types.insert(name, info);
+                        .insert(name.clone(), "<stdlib>".to_string());
+                    registry.types.entry(name).or_insert(info);
                 }
             }
             for (name, alias) in decls.aliases {
                 if alias.visibility == Visibility::Default {
                     registry
                         .alias_origins
-                        .insert(name.clone(), path.display().to_string());
+                        .insert(name.clone(), "<stdlib>".to_string());
                     registry.aliases.insert(name, alias);
                 }
             }
         }
 
-        Ok(registry)
+        registry
     }
-}
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct FileDirectives {
-    pub(crate) interpreter: bool,
+    fn load_navigation_sources(&mut self, stdlib_dir: &Path) {
+        let Ok(entries) = fs::read_dir(stdlib_dir) else {
+            return;
+        };
+        let mut paths = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "lum"))
+            .collect::<Vec<_>>();
+        paths.sort();
+        for path in paths {
+            let Ok(program) = parse_program_from_path(&path) else {
+                continue;
+            };
+            let decls = collect_top_level_decls(&program);
+            for (name, info) in decls.types.into_iter().chain(decls.objects) {
+                if self.types.contains_key(&name) {
+                    self.navigation_types
+                        .entry(name)
+                        .and_modify(|(_, existing)| existing.methods.extend(info.methods.clone()))
+                        .or_insert_with(|| (path.display().to_string(), info));
+                }
+            }
+            for (name, alias) in decls.aliases {
+                if self.aliases.contains_key(&name) {
+                    self.navigation_aliases.insert(
+                        name,
+                        DefinitionTarget {
+                            path: path.display().to_string(),
+                            span: alias.span,
+                        },
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -848,25 +909,6 @@ fn library_module_path(path: &str) -> PathBuf {
     PathBuf::from(format!("<library:{path}>"))
 }
 
-pub(crate) fn read_directives(path: &Path) -> Result<FileDirectives, String> {
-    let text = fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
-    let mut directives = FileDirectives::default();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if !line.starts_with('#') {
-            break;
-        }
-        match line {
-            "# INTERPRETER" => directives.interpreter = true,
-            _ => {}
-        }
-    }
-    Ok(directives)
-}
-
 pub(crate) fn find_stdlib_dir(start: &Path) -> Result<PathBuf, String> {
     if let Some(configured) = env::var_os("LUME_STDLIB") {
         let configured = PathBuf::from(configured);
@@ -883,22 +925,17 @@ pub(crate) fn find_stdlib_dir(start: &Path) -> Result<PathBuf, String> {
 
     let mut dir =
         fs::canonicalize(start).map_err(|err| format!("resolve {}: {err}", start.display()))?;
+    let fallback = dir.join("stdlib");
     loop {
         let candidate = dir.join("stdlib");
         if candidate.is_dir() {
             return Ok(candidate);
         }
         let Some(parent) = dir.parent() else {
-            return Err(format!(
-                "could not find stdlib directory from {}",
-                start.display()
-            ));
+            return Ok(fallback);
         };
         if parent == dir {
-            return Err(format!(
-                "could not find stdlib directory from {}",
-                start.display()
-            ));
+            return Ok(fallback);
         }
         dir = parent.to_path_buf();
     }
@@ -3848,6 +3885,14 @@ impl<'a> Resolver<'a> {
         {
             return self.imported_definition(owner, span);
         }
+        if let Some((path, info)) = self.ambient.navigation_types.get(owner)
+            && let Some(span) = type_member_span(info, name)
+        {
+            return Some(DefinitionTarget {
+                path: path.clone(),
+                span,
+            });
+        }
         if let Some(info) = self.ambient.types.get(owner)
             && let Some(span) = type_member_span(info, name)
             && let Some(path) = self.ambient.type_origins.get(owner)
@@ -4047,6 +4092,12 @@ impl<'a> Resolver<'a> {
     }
 
     fn ambient_type_definition(&self, name: &str) -> Option<DefinitionTarget> {
+        if let Some((path, info)) = self.ambient.navigation_types.get(name) {
+            return Some(DefinitionTarget {
+                path: path.clone(),
+                span: info.span,
+            });
+        }
         let info = self.ambient.types.get(name)?;
         let path = self.ambient.type_origins.get(name)?.clone();
         Some(DefinitionTarget {
@@ -4153,6 +4204,9 @@ impl<'a> Resolver<'a> {
         }
         if let Some(info) = self.imported_aliases.get(name) {
             return self.imported_definition(name, info.span);
+        }
+        if let Some(target) = self.ambient.navigation_aliases.get(name) {
+            return Some(target.clone());
         }
         let info = self.ambient.aliases.get(name)?;
         let path = self.ambient.alias_origins.get(name)?.clone();
@@ -4484,14 +4538,11 @@ fn member_reference_span(span: crate::source::Span, name: &str) -> crate::source
 }
 
 fn builtin_type_arity(name: &str) -> Option<usize> {
-    match name {
-        "Any" | "Int" | "Bool" | "Char" | "Float" | "Decimal" | "Str" | "Unit" | "Never" => Some(0),
-        _ => None,
-    }
+    (crate::stdlib::is_primitive(name) || matches!(name, "Any" | "Unit" | "Never")).then_some(0)
 }
 
 fn is_builtin_extension_target(name: &str) -> bool {
-    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Char" | "Str")
+    crate::stdlib::is_primitive(name)
 }
 
 fn arity_label(arity: usize) -> &'static str {
@@ -4555,6 +4606,40 @@ mod tests {
         let parsed = parse_program(&lexed.tokens);
         assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
         parsed.program.expect("program")
+    }
+
+    #[test]
+    fn ambient_descriptors_preserve_type_arity_with_companion_objects() {
+        let program = parse_inline(
+            r#"
+fn main() Unit {
+    values Vector[Int] = Vector.fill(2, 1)
+    array Array[Int] = Array.generate(2, index => index)
+    selected Option[Int] = Option.when(true, 1)
+}
+"#,
+        );
+        let checked = resolve_program(&program);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+        let registry = default_inline_ambient_registry();
+        assert_eq!(registry.types["Vector"].arity, 1);
+        assert_eq!(registry.types["Map"].arity, 2);
+        assert!(registry.navigation_types.is_empty());
+    }
+
+    #[test]
+    fn source_without_a_stdlib_directory_uses_rust_contracts() {
+        let temp = std::env::temp_dir().join(format!("lume-rust-contracts-{}", std::process::id()));
+        fs::create_dir_all(&temp).expect("create temporary source root");
+        let path = temp.join("main.lum");
+        fs::write(
+            &path,
+            "fn main() Unit { println(Vector.fill(2, 1).size) }\n",
+        )
+        .expect("write source");
+        let result = crate::typecheck::check_path(&path).expect("load without stdlib source");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        fs::remove_dir_all(temp).expect("remove temporary source root");
     }
 
     #[test]

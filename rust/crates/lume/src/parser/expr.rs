@@ -2196,15 +2196,7 @@ impl<'a> Parser<'a> {
             self.restore(checkpoint);
             return None;
         };
-        let expected_arity = match name.as_str() {
-            "Vector" => 1,
-            "Map" => 2,
-            _ => {
-                self.restore(checkpoint);
-                return None;
-            }
-        };
-        if args.len() != expected_arity || !self.at(TokenKind::LParen) {
+        if !self.at(TokenKind::LParen) {
             self.restore(checkpoint);
             return None;
         }

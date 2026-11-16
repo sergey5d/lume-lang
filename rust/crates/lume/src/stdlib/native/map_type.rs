@@ -2,65 +2,40 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     Diagnostic, Span,
-    ast::TypeKind,
     interpreter::{Interpreter, Value, iterable_values},
-    ir,
 };
 
 use super::builtin_method;
-use crate::runtime::{RuntimeType, RuntimeTypeId};
+use crate::runtime::RuntimeType;
 
 pub(super) fn define() -> RuntimeType {
-    RuntimeType {
-        id: RuntimeTypeId(usize::MAX),
-        ir_type_id: None,
-        kind: TypeKind::Class,
-        name: "Map".to_string(),
-        fields: Vec::new(),
-        field_init: None,
-        mixin_init: None,
-        methods: vec![
-            builtin_method(
-                1,
-                "put",
-                vec![ir::Type::Unknown, ir::Type::Unknown],
-                map_put,
-            ),
-            builtin_method(2, "iterator", Vec::new(), map_iterator),
-            builtin_method(3, "map", vec![function_unknown()], map_map),
-            builtin_method(4, "mapValues", vec![function_unknown()], map_map_values),
-            builtin_method(5, "flatMap", vec![function_unknown()], map_flat_map),
-            builtin_method(6, "filter", vec![function_unknown()], map_filter),
-            builtin_method(
-                7,
-                "fold",
-                vec![ir::Type::Unknown, function_unknown()],
-                map_fold,
-            ),
-            builtin_method(8, "reduce", vec![function_unknown()], map_reduce),
-            builtin_method(9, "exists", vec![function_unknown()], map_exists),
-            builtin_method(10, "forAll", vec![function_unknown()], map_for_all),
-            builtin_method(11, "forEach", vec![function_unknown()], map_for_each),
-            builtin_method(12, "get", vec![ir::Type::Unknown], map_get),
-            builtin_method(13, "contains", vec![ir::Type::Unknown], map_contains),
-            builtin_method(14, "size", Vec::new(), map_size),
-            builtin_method(15, "entries", Vec::new(), map_entries_list),
-            builtin_method(16, "clear", Vec::new(), map_clear),
-            builtin_method(17, "values", Vec::new(), map_values),
-            builtin_method(18, "keys", Vec::new(), map_keys),
-            builtin_method(19, "isEmpty", Vec::new(), map_is_empty),
-            builtin_method(20, "nonEmpty", Vec::new(), map_non_empty),
-        ],
-        enum_cases: Vec::new(),
-        with_bounds: Vec::new(),
-    }
-}
-
-fn function_unknown() -> ir::Type {
-    ir::Type::Function {
-        params: Vec::new(),
-        ret: Box::new(ir::Type::Unknown),
-    }
+    let mut ty = super::empty_builtin_type("Map");
+    ty.methods = vec![
+        builtin_method("Map", "put", 2, map_put),
+        builtin_method("Map", "iterator", 0, map_iterator),
+        builtin_method("Map", "map", 1, map_map),
+        builtin_method("Map", "mapValues", 1, map_map_values),
+        builtin_method("Map", "flatMap", 1, map_flat_map),
+        builtin_method("Map", "filter", 1, map_filter),
+        builtin_method("Map", "fold", 2, map_fold),
+        builtin_method("Map", "reduce", 1, map_reduce),
+        builtin_method("Map", "exists", 1, map_exists),
+        builtin_method("Map", "forAll", 1, map_for_all),
+        builtin_method("Map", "forEach", 1, map_for_each),
+        builtin_method("Map", "get", 1, map_get),
+        builtin_method("Map", "contains", 1, map_contains),
+        builtin_method("Map", "size", 0, map_size),
+        builtin_method("Map", "entries", 0, map_entries_list),
+        builtin_method("Map", "clear", 0, map_clear),
+        builtin_method("Map", "values", 0, map_values),
+        builtin_method("Map", "keys", 0, map_keys),
+        builtin_method("Map", "isEmpty", 0, map_is_empty),
+        builtin_method("Map", "nonEmpty", 0, map_non_empty),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    ty
 }
 
 fn map_entries(receiver: &Value) -> Rc<RefCell<Vec<(Value, Value)>>> {

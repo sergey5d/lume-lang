@@ -1947,32 +1947,6 @@ fn source_function_param_specs(function: &ir::Function) -> Vec<JavaParamSpec> {
         .collect()
 }
 
-fn param_specs_from_types(params: Vec<ir::Type>) -> Vec<JavaParamSpec> {
-    params
-        .into_iter()
-        .map(|ty| JavaParamSpec {
-            name: None,
-            ty,
-            variadic: false,
-            default: None,
-            coercion: None,
-        })
-        .collect()
-}
-
-fn java_callback_param_spec(ret: ir::Type) -> JavaParamSpec {
-    JavaParamSpec {
-        name: None,
-        ty: ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ret),
-        },
-        variadic: false,
-        default: None,
-        coercion: None,
-    }
-}
-
 fn function_accepts_arg_len(function: &ir::Function, arg_len: usize) -> bool {
     param_specs_accept_arg_len(&function_param_specs(function), arg_len)
 }
@@ -10152,6 +10126,33 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             None
         })?;
+        let native_signature = receiver_ty.as_ref().and_then(|receiver| {
+            self.names
+                .native_method_signature(receiver, method, call.lowered_args.len())
+        });
+        if native_signature
+            .as_ref()
+            .is_some_and(|signature| signature.variadic)
+            && matches!(
+                receiver_ty.as_ref(),
+                Some(ir::Type::Named { name: owner, .. })
+                    if matches!((owner.as_str(), method.as_str()),
+                        ("ClassType" | "ShapeType" | "UnionAlternative", "construct")
+                            | ("Method", "call"))
+            )
+        {
+            // Reflection runtime entrypoints use Java Object..., not Lume vector packing.
+            let mut args = ordered_args
+                .iter()
+                .map(|arg| self.emit_call_arg(arg, bindings))
+                .collect::<Option<Vec<_>>>()?;
+            args.extend(self.emit_source_reified_evidence(call, call.reified_arg_count)?);
+            return Some(format_java_instance_call(
+                &self.emit_receiver_expr(receiver, bindings)?,
+                &java_method,
+                &args,
+            ));
+        }
         let param_specs = JavaIrSupport::new(self.bundle, resolved_function, self.names)
             .method_param_specs_for_receiver(lowered_receiver, method, &call.lowered_args)
             .or_else(|| {
@@ -10193,11 +10194,15 @@ impl<'a> SourceBodyEmitter<'a> {
                 &emitted_args,
             ));
         };
+        let native_call = native_signature.is_some();
         for (spec, source_spec) in param_specs.iter_mut().zip(call.param_specs.iter()) {
             if let Some(source_spec) = source_spec
                 && !matches!(source_spec.ty, ir::Type::Unknown)
             {
                 spec.ty = source_spec.ty.clone();
+            }
+            if native_call {
+                spec.ty = java_native_param_type(spec.ty.clone());
             }
         }
         let source_param_count = if call.param_specs.is_empty() {
@@ -10746,7 +10751,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         return None;
                     };
                     let receiver_ty = self.expr_type(receiver, bindings)?;
-                    if let Some(ret) = builtin_method_return_type(&receiver_ty, name, args.len()) {
+                    if let Some(ret) = builtin_method_return_type(&receiver_ty, name, args.len(), self.names) {
                         return Some(ret);
                     }
                     let ir::Type::Named {
@@ -10866,7 +10871,9 @@ impl<'a> SourceBodyEmitter<'a> {
                 };
                 let receiver_ty =
                     self.expr_type_with_binding_types(receiver, bindings, binding_types)?;
-                if let Some(ret) = builtin_method_return_type(&receiver_ty, name, args.len()) {
+                if let Some(ret) =
+                    builtin_method_return_type(&receiver_ty, name, args.len(), self.names)
+                {
                     return Some(ret);
                 }
                 let ir::Type::Named {
@@ -11787,7 +11794,9 @@ impl<'a> JavaIrSupport<'a> {
                 }
             }
         }
-        if let Some(params) = builtin_method_param_specs(&receiver_ty, method, operands.len()) {
+        if let Some(params) =
+            builtin_method_param_specs(&receiver_ty, method, operands.len(), self.names)
+        {
             return Some(params);
         }
         let ir::Type::Named { name, args } = receiver_ty else {
@@ -11831,7 +11840,7 @@ impl<'a> JavaIrSupport<'a> {
         arg_len: usize,
     ) -> Option<ir::Type> {
         let receiver_ty = self.operand_type(receiver)?;
-        if let Some(ret) = builtin_method_return_type(&receiver_ty, method, arg_len) {
+        if let Some(ret) = builtin_method_return_type(&receiver_ty, method, arg_len, self.names) {
             return Some(ret);
         }
         let ir::Type::Named { name, args } = receiver_ty else {
@@ -11853,6 +11862,19 @@ impl<'a> JavaIrSupport<'a> {
     }
 
     fn named_runtime_call_return_type(&self, path: &[String], arg_len: usize) -> Option<ir::Type> {
+        if let [owner, method] = path {
+            let native_owner = if owner == "Regex" {
+                self.names.has_native_regex()
+            } else {
+                !self.names.is_java_type(owner)
+            };
+            if native_owner
+                && let Some(signature) =
+                    crate::stdlib::static_method_signature(owner, method, arg_len)
+            {
+                return Some(signature.return_ty);
+            }
+        }
         match path {
             [case] if core_enum_case_owner(case).is_some() => self.core_enum_case_type(case),
             [owner, case]
@@ -11887,45 +11909,6 @@ impl<'a> JavaIrSupport<'a> {
                 name: "IntRange".to_string(),
                 args: Vec::new(),
             }),
-            [owner, method] if owner == "Int" && method == "parse" && arg_len == 1 => {
-                Some(ir::Type::Named {
-                    name: "Option".to_string(),
-                    args: vec![ir::Type::Int],
-                })
-            }
-            [owner, method] if owner == "Float" && method == "parse" && arg_len == 1 => {
-                Some(ir::Type::Named {
-                    name: "Option".to_string(),
-                    args: vec![ir::Type::Float],
-                })
-            }
-            [owner, method] if owner == "Decimal" && method == "parse" && arg_len == 1 => {
-                Some(ir::Type::option(ir::Type::named("Decimal")))
-            }
-            [owner, method]
-                if owner == "Regex"
-                    && self.names.has_native_regex()
-                    && method == "compile"
-                    && arg_len == 1 =>
-            {
-                Some(ir::Type::Named {
-                    name: "Result".to_string(),
-                    args: vec![ir::Type::named("Regex"), ir::Type::named("RegexError")],
-                })
-            }
-            [owner, method]
-                if owner == "Regex"
-                    && self.names.has_native_regex()
-                    && method == "escape"
-                    && arg_len == 1 =>
-            {
-                Some(ir::Type::Str)
-            }
-            [owner, method]
-                if owner == "Math" && matches!(method.as_str(), "min" | "max") && arg_len == 2 =>
-            {
-                Some(ir::Type::Unknown)
-            }
             [owner] if self.names.is_java_type(owner) || self.is_lume_constructible_type(owner) => {
                 Some(ir::Type::Named {
                     name: owner.clone(),
@@ -11987,7 +11970,7 @@ impl<'a> JavaIrSupport<'a> {
         if self.receiver_has_field(receiver, name) {
             return false;
         }
-        if java_builtin_getter_type(receiver, name).is_some() {
+        if java_builtin_getter_type(receiver, name, self.names).is_some() {
             return true;
         }
         let ir::Type::Named {
@@ -12044,7 +12027,7 @@ impl<'a> JavaIrSupport<'a> {
         if self.receiver_has_field(receiver, name) {
             return None;
         }
-        if let Some(ty) = java_builtin_getter_type(receiver, name) {
+        if let Some(ty) = java_builtin_getter_type(receiver, name, self.names) {
             return Some(ty);
         }
         let ir::Type::Named {
@@ -12789,6 +12772,22 @@ impl JavaNames {
             .is_some_and(|name| name == "lume.core.LumeRegex")
     }
 
+    fn native_method_signature(
+        &self,
+        receiver: &ir::Type,
+        method: &str,
+        arity: usize,
+    ) -> Option<crate::stdlib::NativeSignature> {
+        if let ir::Type::Named { name, .. } = receiver
+            && self.is_java_type(name)
+            && !(self.has_native_regex()
+                && matches!(name.as_str(), "Regex" | "RegexMatch" | "RegexError"))
+        {
+            return None;
+        }
+        crate::stdlib::method_signature(receiver, method, arity)
+    }
+
     fn is_java_single_type(&self, name: &str) -> bool {
         self.java_type_kinds
             .get(name)
@@ -13036,311 +13035,15 @@ fn core_enum_case_payload_type(case: &str, ty: &ir::Type) -> Option<ir::Type> {
     }
 }
 
-fn builtin_method_param_types(
-    receiver: &ir::Type,
-    method: &str,
-    arg_len: usize,
-) -> Option<Vec<ir::Type>> {
-    if is_named_builtin(receiver, "Decimal") {
-        return match (method, arg_len) {
-            ("compareTo" | "equals", 1) => Some(vec![receiver.clone()]),
-            ("abs" | "toInt" | "toFloat" | "scale" | "hash", 0) => Some(vec![]),
-            ("divide", 3) => Some(vec![
-                receiver.clone(),
-                ir::Type::Int,
-                ir::Type::named("Rounding"),
-            ]),
-            ("round", 2) => Some(vec![ir::Type::Int, ir::Type::named("Rounding")]),
-            _ => None,
-        };
-    }
-    if method == "toDecimal" && arg_len == 0 && type_is_numeric(receiver) {
-        return Some(vec![]);
-    }
-    if type_is_int_like(receiver) {
-        return match (method, arg_len) {
-            (
-                "checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow" | "wrappingAdd"
-                | "wrappingSub" | "wrappingMul" | "pow" | "compareTo",
-                1,
-            ) => Some(vec![ir::Type::Int]),
-            ("wrappingNeg" | "abs" | "sqrt" | "toFloat", 0) => Some(Vec::new()),
-            _ => None,
-        };
-    }
-    if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
-        return match (method, arg_len) {
-            (
-                "split" | "splitRegex" | "contains" | "startsWith" | "endsWith" | "indexOf"
-                | "lastIndexOf" | "compareTo",
-                1,
-            ) => Some(vec![ir::Type::Str]),
-            ("replaceFirst" | "replaceAll" | "replaceFirstRegex" | "replaceAllRegex", 2) => {
-                Some(vec![ir::Type::Str, ir::Type::Str])
-            }
-            (
-                "size" | "trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper" | "isEmpty"
-                | "nonEmpty" | "isBlank" | "lines",
-                0,
-            ) => Some(Vec::new()),
-            ("charAt", 1) => Some(vec![ir::Type::Int]),
-            ("repeat", 1) => Some(vec![ir::Type::Int]),
-            ("slice", 0) => Some(Vec::new()),
-            ("slice", 1) => Some(vec![ir::Type::Int]),
-            ("slice", 2) => Some(vec![ir::Type::Int, ir::Type::Int]),
-            _ => None,
-        };
-    }
-    if is_named_builtin(receiver, "Char") && method == "repeat" && arg_len == 1 {
-        return Some(vec![ir::Type::Int]);
-    }
-    match receiver {
-        ir::Type::Named { name, args }
-            if matches!(name.as_str(), "Vector" | "LinkedList" | "Array" | "Set")
-                && args.len() == 1 =>
-        {
-            match (method, arg_len) {
-                ("add", 1) => Some(vec![args[0].clone()]),
-                // Lume's Iterable is broader than java.lang.Iterable (for example Option).
-                // The checker has already validated the element type, so let the runtime
-                // adapter consume the erased source through LumeIterator.
-                ("addAll", 1) => Some(vec![ir::Type::Unknown]),
-                ("contains" | "indexOf", 1) => Some(vec![args[0].clone()]),
-                ("map", 1) => Some(vec![ir::Type::Function {
-                    params: vec![args[0].clone()],
-                    ret: Box::new(ir::Type::Unknown),
-                }]),
-                ("flatMap", 1) if matches!(name.as_str(), "Vector" | "LinkedList" | "Set") => {
-                    Some(vec![ir::Type::Function {
-                        params: vec![args[0].clone()],
-                        ret: Box::new(ir::Type::Unknown),
-                    }])
-                }
-                ("flatten", 0) if name == "Vector" => Some(Vec::new()),
-                ("filter", 1) => Some(vec![ir::Type::Function {
-                    params: vec![args[0].clone()],
-                    ret: Box::new(ir::Type::Bool),
-                }]),
-                ("fold", 2) => Some(vec![
-                    ir::Type::Unknown,
-                    ir::Type::Function {
-                        params: vec![ir::Type::Unknown, args[0].clone()],
-                        ret: Box::new(ir::Type::Unknown),
-                    },
-                ]),
-                ("reduce", 1) => Some(vec![ir::Type::Function {
-                    params: vec![args[0].clone(), args[0].clone()],
-                    ret: Box::new(args[0].clone()),
-                }]),
-                ("sort", 1) => Some(vec![ir::Type::Function {
-                    params: vec![args[0].clone(), args[0].clone()],
-                    ret: Box::new(ir::Type::Int),
-                }]),
-                ("take", 1) => Some(vec![ir::Type::Int]),
-                ("at", 1) => Some(vec![ir::Type::Int]),
-                ("slice", 0) if name == "Vector" => Some(Vec::new()),
-                ("slice", 1) if name == "Vector" => Some(vec![ir::Type::Int]),
-                ("slice", 2) if name == "Vector" => Some(vec![ir::Type::Int, ir::Type::Int]),
-                ("setAt", 2) => Some(vec![ir::Type::Int, args[0].clone()]),
-                ("removeAt", 1) if matches!(name.as_str(), "Vector" | "LinkedList") => {
-                    Some(vec![ir::Type::Int])
-                }
-                ("insertAt", 2) if matches!(name.as_str(), "Vector" | "LinkedList") => {
-                    Some(vec![ir::Type::Int, args[0].clone()])
-                }
-                _ => None,
-            }
-        }
-        ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
-            match (method, arg_len) {
-                ("isEmpty" | "nonEmpty", 0) => Some(Vec::new()),
-                ("get" | "remove" | "contains", 1) => Some(vec![args[0].clone()]),
-                ("put", 2) => Some(vec![args[0].clone(), args[1].clone()]),
-                ("flatMap", 1) => Some(vec![ir::Type::Function {
-                    params: vec![args[0].clone(), args[1].clone()],
-                    ret: Box::new(ir::Type::Unknown),
-                }]),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
 fn builtin_method_return_type(
     receiver: &ir::Type,
     method: &str,
     arg_len: usize,
+    names: &JavaNames,
 ) -> Option<ir::Type> {
-    if is_named_builtin(receiver, "Decimal") {
-        return match (method, arg_len) {
-            ("compareTo", 1) | ("scale" | "hash", 0) => Some(ir::Type::Int),
-            ("equals", 1) => Some(ir::Type::Bool),
-            ("abs", 0) | ("divide", 3) | ("round", 2) => Some(receiver.clone()),
-            ("toInt", 0) => Some(ir::Type::option(ir::Type::Int)),
-            ("toFloat", 0) => Some(ir::Type::Float),
-            _ => None,
-        };
-    }
-    if method == "toDecimal" && arg_len == 0 && type_is_numeric(receiver) {
-        let decimal = ir::Type::named("Decimal");
-        return Some(if type_is_int_like(receiver) {
-            decimal
-        } else {
-            ir::Type::option(decimal)
-        });
-    }
-    if type_is_int_like(receiver) {
-        return match (method, arg_len) {
-            ("checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow", 1) => {
-                Some(ir::Type::option(ir::Type::Int))
-            }
-            ("wrappingAdd" | "wrappingSub" | "wrappingMul" | "pow" | "compareTo", 1)
-            | ("wrappingNeg" | "abs", 0) => Some(ir::Type::Int),
-            ("sqrt" | "toFloat", 0) => Some(ir::Type::Float),
-            _ => None,
-        };
-    }
-    if type_is_named_or_primitive(receiver, "Str", |ty| matches!(ty, ir::Type::Str)) {
-        return match (method, arg_len) {
-            ("split" | "splitRegex", 1) | ("lines", 0) => Some(ir::Type::list(ir::Type::Str)),
-            ("trim" | "trimLeft" | "trimRight" | "toLower" | "toUpper", 0) => Some(ir::Type::Str),
-            ("replaceFirst" | "replaceAll" | "replaceFirstRegex" | "replaceAllRegex", 2) => {
-                Some(ir::Type::Str)
-            }
-            ("isEmpty" | "nonEmpty" | "isBlank", 0)
-            | ("contains" | "startsWith" | "endsWith", 1) => Some(ir::Type::Bool),
-            ("size", 0) | ("compareTo", 1) => Some(ir::Type::Int),
-            ("indexOf" | "lastIndexOf", 1) => Some(ir::Type::option(ir::Type::Int)),
-            ("repeat", 1) => Some(ir::Type::Str),
-            ("charAt", 1) => Some(ir::Type::option(ir::Type::named("Char"))),
-            ("slice", 0..=2) => Some(ir::Type::Str),
-            _ => None,
-        };
-    }
-    if is_named_builtin(receiver, "Char") && method == "repeat" && arg_len == 1 {
-        return Some(ir::Type::Str);
-    }
-    match receiver {
-        ir::Type::Named { name, .. }
-            if matches!(
-                name.as_str(),
-                "Type"
-                    | "ClassType"
-                    | "ShapeType"
-                    | "UnionType"
-                    | "InterfaceType"
-                    | "ObjectType"
-                    | "AnnotationType"
-                    | "Field"
-                    | "Method"
-                    | "UnionAlternative"
-            ) && method == "annotation"
-                && arg_len == 0 =>
-        {
-            Some(ir::Type::Named {
-                name: "Option".to_string(),
-                args: vec![ir::Type::named("AnnotationValue")],
-            })
-        }
-        ir::Type::Named { name, .. }
-            if matches!(
-                name.as_str(),
-                "Type"
-                    | "ClassType"
-                    | "ShapeType"
-                    | "UnionType"
-                    | "InterfaceType"
-                    | "ObjectType"
-                    | "AnnotationType"
-                    | "Field"
-                    | "Method"
-                    | "UnionAlternative"
-            ) && method == "hasAnnotation"
-                && arg_len == 0 =>
-        {
-            Some(ir::Type::Bool)
-        }
-        ir::Type::Named { name, args }
-            if name == "Vector" && args.len() == 1 && method == "slice" && arg_len <= 2 =>
-        {
-            Some(receiver.clone())
-        }
-        ir::Type::Named { name, args }
-            if matches!(name.as_str(), "Vector" | "LinkedList" | "Array")
-                && args.len() == 1
-                && method == "indexOf"
-                && arg_len == 1 =>
-        {
-            Some(ir::Type::option(ir::Type::Int))
-        }
-        ir::Type::Named { name, args } if name == "Vector" && args.len() == 1 => {
-            match (method, arg_len) {
-                ("add" | "filter" | "sort" | "take", 1) => Some(receiver.clone()),
-                ("map" | "flatMap", 1) => Some(ir::Type::list(ir::Type::Unknown)),
-                ("flatten", 0) => Some(ir::Type::list(
-                    iterable_item_type(&args[0]).unwrap_or(ir::Type::Unknown),
-                )),
-                ("fold", 2) => Some(ir::Type::Unknown),
-                ("reduce", 1) => Some(ir::Type::option(args[0].clone())),
-                ("size", 0) => Some(ir::Type::Int),
-                ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
-                ("contains", 1) => Some(ir::Type::Bool),
-                ("at" | "removeFirst" | "removeLast", 0 | 1) => {
-                    Some(ir::Type::option(args[0].clone()))
-                }
-                _ => None,
-            }
-        }
-        ir::Type::Named { name, args }
-            if name == "LinkedList" && args.len() == 1 && method == "flatMap" && arg_len == 1 =>
-        {
-            Some(ir::Type::Named {
-                name: "LinkedList".to_string(),
-                args: vec![ir::Type::Unknown],
-            })
-        }
-        ir::Type::Named { name, args }
-            if name == "Set" && args.len() == 1 && method == "flatMap" && arg_len == 1 =>
-        {
-            Some(ir::Type::Named {
-                name: "Set".to_string(),
-                args: vec![ir::Type::Unknown],
-            })
-        }
-        ir::Type::Named { name, args }
-            if matches!(name.as_str(), "Vector" | "LinkedList")
-                && args.len() == 1
-                && method == "zipWithIndex"
-                && arg_len == 0 =>
-        {
-            Some(ir::Type::list(ir::Type::Tuple(vec![
-                args[0].clone(),
-                ir::Type::Int,
-            ])))
-        }
-        ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
-            match (method, arg_len) {
-                ("get", 1) => Some(ir::Type::Named {
-                    name: "Option".to_string(),
-                    args: vec![args[1].clone()],
-                }),
-                ("put", 2) => Some(receiver.clone()),
-                ("flatMap", 1) => Some(ir::Type::list(ir::Type::Unknown)),
-                ("contains", 1) => Some(ir::Type::Bool),
-                ("isEmpty" | "nonEmpty", 0) => Some(ir::Type::Bool),
-                ("size", 0) => Some(ir::Type::Int),
-                ("entries", 0) => Some(ir::Type::list(ir::Type::Tuple(vec![
-                    args[0].clone(),
-                    args[1].clone(),
-                ]))),
-                ("keys", 0) => Some(ir::Type::list(args[0].clone())),
-                ("values", 0) => Some(ir::Type::list(args[1].clone())),
-                _ => None,
-            }
-        }
-        _ => None,
-    }
+    names
+        .native_method_signature(receiver, method, arg_len)
+        .map(|signature| signature.return_ty)
 }
 
 fn iterable_item_type(ty: &ir::Type) -> Option<ir::Type> {
@@ -13366,30 +13069,42 @@ fn builtin_method_param_specs(
     receiver: &ir::Type,
     method: &str,
     arg_len: usize,
+    names: &JavaNames,
 ) -> Option<Vec<JavaParamSpec>> {
-    match receiver {
-        ir::Type::Named { name, args } if name == "Option" && args.len() == 1 => {
-            match (method, arg_len) {
-                ("orElse", 1) => Some(vec![java_callback_param_spec(receiver.clone())]),
-                ("toResult" | "toEither", 1) => {
-                    Some(vec![java_callback_param_spec(ir::Type::Unknown)])
-                }
-                _ => None,
+    names
+        .native_method_signature(receiver, method, arg_len)
+        .map(native_signature_param_specs)
+}
+
+fn native_signature_param_specs(signature: crate::stdlib::NativeSignature) -> Vec<JavaParamSpec> {
+    let param_count = signature.params.len();
+    signature
+        .param_names
+        .into_iter()
+        .zip(signature.params)
+        .enumerate()
+        .map(|(index, (name, ty))| JavaParamSpec {
+            name: Some(name),
+            ty: java_native_param_type(ty),
+            variadic: signature.variadic && index + 1 == param_count,
+            default: None,
+            coercion: None,
+        })
+        .collect()
+}
+
+fn java_native_param_type(ty: ir::Type) -> ir::Type {
+    // Lume Iterable includes values such as Option, which are not Java Iterables.
+    // Keep runtime adapter erasure even after refining from source-call metadata.
+    match ty {
+        ir::Type::Named { name, .. } if name == "Iterable" => ir::Type::Unknown,
+        ir::Type::Function { params, ret } if matches!(ret.as_ref(), ir::Type::Named { name, .. } if name == "Iterable") => {
+            ir::Type::Function {
+                params,
+                ret: Box::new(ir::Type::Unknown),
             }
         }
-        ir::Type::Named { name, args } if name == "Result" && args.len() == 2 => {
-            match (method, arg_len) {
-                ("orElse", 1) => Some(vec![java_callback_param_spec(receiver.clone())]),
-                _ => None,
-            }
-        }
-        ir::Type::Named { name, args } if name == "Either" && args.len() == 2 => {
-            match (method, arg_len) {
-                ("orElse", 1) => Some(vec![java_callback_param_spec(receiver.clone())]),
-                _ => None,
-            }
-        }
-        _ => builtin_method_param_types(receiver, method, arg_len).map(param_specs_from_types),
+        other => other,
     }
 }
 
@@ -13917,8 +13632,163 @@ fn refine_java_expected_type(expected: &ir::Type, actual: &ir::Type) -> ir::Type
 
 #[cfg(test)]
 mod tests {
-    use super::use_java_imports;
-    use std::collections::HashSet;
+    use super::*;
+
+    #[test]
+    fn native_member_signatures_follow_shared_descriptors() {
+        let names = JavaNames::from_external_classes(&HashMap::new());
+        let map = ir::Type::Named {
+            name: "Map".into(),
+            args: vec![ir::Type::Str, ir::Type::Int],
+        };
+        for (receiver, method, arity) in [
+            (ir::Type::Int, "checkedAdd", 1),
+            (ir::Type::Float, "toDecimal", 0),
+            (ir::Type::Str, "replaceAll", 2),
+            (ir::Type::named("Char"), "repeat", 1),
+            (ir::Type::list(ir::Type::Int), "map", 1),
+            (map, "get", 1),
+            (ir::Type::option(ir::Type::Str), "orElse", 1),
+            (ir::Type::option(ir::Type::Str), "toResult", 1),
+            (ir::Type::named("Type"), "annotation", 0),
+        ] {
+            let signature = crate::stdlib::method_signature(&receiver, method, arity)
+                .unwrap_or_else(|| panic!("missing descriptor for {receiver:?}.{method}"));
+            assert_eq!(
+                builtin_method_return_type(&receiver, method, arity, &names),
+                Some(signature.return_ty)
+            );
+            let specs = builtin_method_param_specs(&receiver, method, arity, &names).unwrap();
+            assert_eq!(specs.len(), signature.params.len());
+            for (index, spec) in specs.iter().enumerate() {
+                assert_eq!(spec.name.as_ref(), signature.param_names.get(index));
+                assert_eq!(spec.ty, signature.params[index]);
+                assert_eq!(
+                    spec.variadic,
+                    signature.variadic && index + 1 == specs.len()
+                );
+            }
+        }
+        assert!(builtin_method_param_specs(&ir::Type::Int, "checkedAdd", 0, &names).is_none());
+        assert!(
+            builtin_method_return_type(&ir::Type::Str, "notAStdlibMethod", 0, &names).is_none()
+        );
+    }
+
+    #[test]
+    fn native_getters_follow_descriptor_flags_and_owner_generics() {
+        let names = JavaNames::from_external_classes(&HashMap::new());
+        for (receiver, name) in [
+            (ir::Type::Str, "size"),
+            (ir::Type::named("Decimal"), "scale"),
+            (ir::Type::list(ir::Type::Str), "first"),
+            (ir::Type::option(ir::Type::Int), "isSet"),
+            (ir::Type::named("Type"), "name"),
+            (ir::Type::named("Field"), "isPrivate"),
+            (ir::Type::named("FileStream"), "position"),
+        ] {
+            let signature = crate::stdlib::method_signature(&receiver, name, 0).unwrap();
+            assert!(signature.getter, "{receiver:?}.{name}");
+            assert_eq!(
+                java_builtin_getter_type(&receiver, name, &names),
+                Some(signature.return_ty)
+            );
+        }
+        assert_eq!(
+            java_builtin_getter_type(&ir::Type::list(ir::Type::Str), "first", &names),
+            Some(ir::Type::option(ir::Type::Str))
+        );
+        assert!(java_builtin_getter_type(&ir::Type::Str, "trim", &names).is_none());
+        assert!(java_builtin_getter_type(&ir::Type::named("Unrelated"), "size", &names).is_none());
+    }
+
+    #[test]
+    fn native_static_returns_follow_shared_descriptors() {
+        let bundle = BackendBundle {
+            root_path: PathBuf::new(),
+            root_display_path: String::new(),
+            core_bodies: HashMap::new(),
+            ir: ir::Program::default(),
+            descriptors: Default::default(),
+        };
+        let function = ir::Function::new("test", FunctionKind::TopLevel, ir::Type::Unit);
+        let names = JavaNames::from_external_classes(&HashMap::new());
+        let support = JavaIrSupport::new(&bundle, &function, &names);
+        for (owner, method, arity) in [
+            ("Int", "parse", 1),
+            ("Float", "parse", 1),
+            ("Decimal", "parse", 1),
+            ("Math", "min", 2),
+            ("Vector", "fill", 2),
+            ("File", "readText", 1),
+        ] {
+            let signature = crate::stdlib::static_method_signature(owner, method, arity).unwrap();
+            assert_eq!(
+                support.named_runtime_call_return_type(&[owner.into(), method.into()], arity),
+                Some(signature.return_ty)
+            );
+        }
+
+        let mut names = names;
+        names
+            .java_types
+            .insert("Regex".into(), "lume.core.LumeRegex".into());
+        let support = JavaIrSupport::new(&bundle, &function, &names);
+        for method in ["compile", "escape"] {
+            let signature = crate::stdlib::static_method_signature("Regex", method, 1).unwrap();
+            assert_eq!(
+                support.named_runtime_call_return_type(&["Regex".into(), method.into()], 1),
+                Some(signature.return_ty)
+            );
+        }
+        names
+            .java_types
+            .insert("Regex".into(), "third.party.Regex".into());
+        let support = JavaIrSupport::new(&bundle, &function, &names);
+        assert!(
+            support
+                .named_runtime_call_return_type(&["Regex".into(), "compile".into()], 1)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn foreign_java_types_keep_stub_signatures_instead_of_native_namesakes() {
+        let mut names = JavaNames::from_external_classes(&HashMap::new());
+        let receiver = ir::Type::list(ir::Type::Int);
+        assert!(builtin_method_param_specs(&receiver, "add", 1, &names).is_some());
+        names
+            .java_types
+            .insert("Vector".into(), "third.party.Vector".into());
+        assert!(builtin_method_param_specs(&receiver, "add", 1, &names).is_none());
+        assert!(builtin_method_return_type(&receiver, "add", 1, &names).is_none());
+        assert!(java_builtin_getter_type(&receiver, "size", &names).is_none());
+    }
+
+    #[test]
+    fn native_parameter_adapters_preserve_java_iterable_erasure_and_varargs() {
+        let names = JavaNames::from_external_classes(&HashMap::new());
+        let receiver = ir::Type::list(ir::Type::Int);
+        let params = builtin_method_param_specs(&receiver, "addAll", 1, &names).unwrap();
+        assert_eq!(params[0].ty, ir::Type::Unknown);
+        let params = builtin_method_param_specs(&receiver, "flatMap", 1, &names).unwrap();
+        assert_eq!(
+            params[0].ty,
+            ir::Type::Function {
+                params: vec![ir::Type::Int],
+                ret: Box::new(ir::Type::Unknown),
+            }
+        );
+
+        let signature = crate::stdlib::method_signature(&receiver, "new", 3).unwrap();
+        assert!(signature.variadic);
+        let expected_names = signature.param_names.clone();
+        let expected_types = signature.params.clone();
+        let params = native_signature_param_specs(signature);
+        assert!(params.last().unwrap().variadic);
+        assert_eq!(params[0].name.as_ref(), expected_names.first());
+        assert_eq!(params[0].ty, expected_types[0]);
+    }
 
     #[test]
     fn java_imports_shorten_only_unambiguous_type_names() {
@@ -14204,66 +14074,19 @@ fn sanitize_identifier(name: &str, style: IdentifierStyle) -> String {
     out
 }
 
-fn java_builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
+fn java_builtin_getter_type(
+    receiver: &ir::Type,
+    name: &str,
+    names: &JavaNames,
+) -> Option<ir::Type> {
+    // Preserve dynamic predicate access when receiver inference has been erased.
     if matches!(receiver, ir::Type::Unknown) && java_known_getter_name(name) {
         return Some(ir::Type::Unknown);
     }
-    if matches!(receiver, ir::Type::Str) {
-        return match name {
-            "size" => Some(ir::Type::Int),
-            "isEmpty" | "nonEmpty" | "isBlank" => Some(ir::Type::Bool),
-            _ => None,
-        };
-    }
-
-    let ir::Type::Named {
-        name: type_name,
-        args,
-    } = receiver
-    else {
-        return None;
-    };
-    let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
-    match (type_name.as_str(), name) {
-        ("Decimal", "scale") => Some(ir::Type::Int),
-        ("Str", "size") => Some(ir::Type::Int),
-        ("Str", "isEmpty" | "nonEmpty" | "isBlank") => Some(ir::Type::Bool),
-        ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")
-        | ("Result", "isOk" | "isSuccess" | "isErr")
-        | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
-        ("Vector" | "LinkedList" | "Array", "first" | "last") => Some(ir::Type::option(item)),
-        ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
-        ("Vector" | "LinkedList" | "Set" | "Map", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
-        ("Type", "name" | "qualifiedName")
-        | (
-            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType",
-            "name" | "qualifiedName",
-        ) => Some(ir::Type::option(ir::Type::Str)),
-        ("Type", "kind")
-        | (
-            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType",
-            "kind",
-        ) => Some(ir::Type::named("TypeKind")),
-        ("AnnotationValue", "name")
-        | ("Field" | "Method" | "Param" | "UnionAlternative", "name") => Some(ir::Type::Str),
-        ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields")
-        | ("UnionAlternative", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
-        ("ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType", "methods") => {
-            Some(ir::Type::list(ir::Type::named("Method")))
-        }
-        ("Method", "params") => Some(ir::Type::list(ir::Type::named("Param"))),
-        ("UnionType", "alternatives") => Some(ir::Type::list(ir::Type::named("UnionAlternative"))),
-        ("Field", "fieldType") | ("Method", "returnType") | ("Param", "paramType") => {
-            Some(ir::Type::named("Type"))
-        }
-        ("Field", "isPrivate") => Some(ir::Type::Bool),
-        ("FileStream" | "TextFileReader", "path") => Some(ir::Type::Str),
-        ("FileStream", "position") => Some(ir::Type::Int),
-        ("FileStream" | "TextFileReader", "closed") => Some(ir::Type::Bool),
-        _ => None,
-    }
+    names
+        .native_method_signature(receiver, name, 0)
+        .filter(|signature| signature.getter)
+        .map(|signature| signature.return_ty)
 }
 
 fn java_known_getter_name(name: &str) -> bool {

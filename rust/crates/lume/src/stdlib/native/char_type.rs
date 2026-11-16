@@ -1,18 +1,15 @@
 use crate::{
     Diagnostic, Span,
     interpreter::{Interpreter, Value},
-    ir,
     runtime::RuntimeType,
 };
 
 pub(super) fn define() -> RuntimeType {
     let mut ty = super::empty_builtin_type("Char");
-    ty.methods = vec![super::builtin_method(
-        0,
-        "repeat",
-        vec![ir::Type::Int],
-        char_repeat,
-    )];
+    ty.methods = vec![super::builtin_method("Char", "repeat", 1, char_repeat)]
+        .into_iter()
+        .flatten()
+        .collect();
     ty
 }
 

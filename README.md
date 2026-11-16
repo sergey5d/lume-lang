@@ -250,7 +250,10 @@ and [Java-backed HTTP services](examples/java_gradle_rest/README.md).
 
 - `rust/` - Rust compiler, resolver, typechecker, lowering, interpreter, and CLI.
 - `examples/` - Lume programs used as samples and parity fixtures.
-- `stdlib/` - Standard library sources loaded by the Rust toolchain.
+- `rust/crates/lume/src/stdlib/` - Rust-authored standard-library contracts,
+  intrinsic capabilities, and interpreter native bindings.
+- `stdlib/` - Lume standard-library source counterparts for navigation,
+  compatibility imports, and Java runtime generation.
 - `vscode-extension/` - Editor highlighting, formatting, and type-definition navigation.
 - `SYNTAX.md` - Current language syntax reference.
 - `features.md` - Unsettled feature notes and design discussion.

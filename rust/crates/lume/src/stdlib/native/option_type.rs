@@ -1,94 +1,35 @@
 use crate::{
     Diagnostic, Span,
-    ast::TypeKind,
     interpreter::{Interpreter, Value},
-    ir,
 };
 
 use super::{builtin_method, invoke_callback};
-use crate::runtime::{
-    RuntimeEnumCase, RuntimeEnumCaseId, RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId,
-};
+use crate::runtime::RuntimeType;
 
 pub(super) fn define() -> RuntimeType {
-    RuntimeType {
-        id: RuntimeTypeId(usize::MAX),
-        ir_type_id: None,
-        kind: TypeKind::Enum,
-        name: "Option".to_string(),
-        fields: Vec::new(),
-        field_init: None,
-        mixin_init: None,
-        methods: vec![
-            builtin_method(0, "isSet", Vec::new(), option_is_set),
-            builtin_method(1, "isEmpty", Vec::new(), option_is_empty),
-            builtin_method(
-                2,
-                "map",
-                vec![ir::Type::Function {
-                    params: Vec::new(),
-                    ret: Box::new(ir::Type::Unknown),
-                }],
-                option_map,
-            ),
-            builtin_method(4, "orElse", vec![super::callback_type()], option_or_else),
-            builtin_method(
-                5,
-                "toResult",
-                vec![super::callback_type()],
-                option_to_result,
-            ),
-            builtin_method(
-                6,
-                "toEither",
-                vec![super::callback_type()],
-                option_to_either,
-            ),
-            builtin_method(7, "iterator", Vec::new(), option_iterator),
-            builtin_method(8, "isSuccess", Vec::new(), option_is_set),
-            builtin_method(
-                9,
-                "flatMap",
-                vec![ir::Type::Function {
-                    params: Vec::new(),
-                    ret: Box::new(ir::Type::Unknown),
-                }],
-                option_flat_map,
-            ),
-        ],
-        enum_cases: vec![
-            RuntimeEnumCase {
-                id: RuntimeEnumCaseId(0),
-                name: "None".to_string(),
-                fields: Vec::new(),
-            },
-            RuntimeEnumCase {
-                id: RuntimeEnumCaseId(1),
-                name: "Some".to_string(),
-                fields: vec![RuntimeField {
-                    from_mixin: false,
-                    slot: RuntimeFieldSlot(0),
-                    name: "value".to_string(),
-                    ty: ir::Type::Unknown,
-                    mutable: false,
-                    visibility: crate::ast::Visibility::Default,
-                    has_initializer: false,
-                    initializer: None,
-                }],
-            },
-        ],
-        with_bounds: Vec::new(),
-    }
+    let mut ty = super::empty_builtin_type("Option");
+    ty.methods = vec![
+        builtin_method("Option", "isSet", 0, option_is_set),
+        builtin_method("Option", "isEmpty", 0, option_is_empty),
+        builtin_method("Option", "map", 1, option_map),
+        builtin_method("Option", "orElse", 1, option_or_else),
+        builtin_method("Option", "toResult", 1, option_to_result),
+        builtin_method("Option", "toEither", 1, option_to_either),
+        builtin_method("Option", "iterator", 0, option_iterator),
+        builtin_method("Option", "isSuccess", 0, option_is_set),
+        builtin_method("Option", "flatMap", 1, option_flat_map),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    ty
 }
 
-const NONE_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(0);
-const SOME_CASE: RuntimeEnumCaseId = RuntimeEnumCaseId(1);
-
-fn option_case(receiver: &Value) -> (RuntimeEnumCaseId, Option<Value>) {
-    let (_, case_id, fields) = receiver
-        .variant_case_ids_and_fields()
+fn option_case(receiver: &Value) -> (bool, Option<Value>) {
+    let (case, fields) = receiver
+        .variant_case_name_and_fields()
         .expect("Option variant");
-    (case_id, fields.into_iter().next())
+    (case == "Some", fields.into_iter().next())
 }
 
 fn option_is_set(
@@ -98,8 +39,8 @@ fn option_is_set(
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     debug_assert!(args.is_empty());
-    let (case_id, _) = option_case(&receiver);
-    Ok(Value::Bool(case_id == SOME_CASE))
+    let (is_some, _) = option_case(&receiver);
+    Ok(Value::Bool(is_some))
 }
 
 fn option_is_empty(
@@ -109,8 +50,8 @@ fn option_is_empty(
     _span: Option<Span>,
 ) -> Result<Value, Diagnostic> {
     debug_assert!(args.is_empty());
-    let (case_id, _) = option_case(&receiver);
-    Ok(Value::Bool(case_id == NONE_CASE))
+    let (is_some, _) = option_case(&receiver);
+    Ok(Value::Bool(!is_some))
 }
 
 fn option_map(
@@ -122,8 +63,8 @@ fn option_map(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Option.map expects 1 argument"));
     };
-    let (case_id, first_field) = option_case(&receiver);
-    if case_id == SOME_CASE {
+    let (is_some, first_field) = option_case(&receiver);
+    if is_some {
         let mapped = interpreter.invoke_value(
             callback.clone(),
             vec![first_field.expect("Option.Some payload")],
@@ -144,8 +85,8 @@ fn option_flat_map(
     let [callback] = args.as_slice() else {
         return Err(interpreter.runtime_error(span, "Option.flatMap expects 1 argument"));
     };
-    let (case_id, first_field) = option_case(&receiver);
-    if case_id == SOME_CASE {
+    let (is_some, first_field) = option_case(&receiver);
+    if is_some {
         interpreter.invoke_value(
             callback.clone(),
             vec![first_field.expect("Option.Some payload")],
@@ -165,8 +106,8 @@ fn option_or_else(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Option.orElse expects 1 argument"));
     }
-    let (case_id, _) = option_case(&receiver);
-    if case_id == SOME_CASE {
+    let (is_some, _) = option_case(&receiver);
+    if is_some {
         Ok(receiver)
     } else {
         invoke_callback(interpreter, args[0].clone(), span)
@@ -182,8 +123,8 @@ fn option_to_result(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Option.toResult expects 1 argument"));
     }
-    let (case_id, first_field) = option_case(&receiver);
-    if case_id == SOME_CASE {
+    let (is_some, first_field) = option_case(&receiver);
+    if is_some {
         Ok(interpreter.result_ok(first_field.expect("Option.Some payload")))
     } else {
         let error = invoke_callback(interpreter, args[0].clone(), span)?;
@@ -200,8 +141,8 @@ fn option_to_either(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Option.toEither expects 1 argument"));
     }
-    let (case_id, first_field) = option_case(&receiver);
-    if case_id == SOME_CASE {
+    let (is_some, first_field) = option_case(&receiver);
+    if is_some {
         Ok(interpreter.either_right(first_field.expect("Option.Some payload")))
     } else {
         let left = invoke_callback(interpreter, args[0].clone(), span)?;
@@ -218,8 +159,8 @@ fn option_iterator(
     if !args.is_empty() {
         return Err(interpreter.runtime_error(span, "Option.iterator expects 0 arguments"));
     }
-    let (case_id, first_field) = option_case(&receiver);
-    let values = if case_id == SOME_CASE {
+    let (is_some, first_field) = option_case(&receiver);
+    let values = if is_some {
         vec![first_field.expect("Option.Some payload")]
     } else {
         Vec::new()

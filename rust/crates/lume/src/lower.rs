@@ -113,9 +113,10 @@ struct Lowerer<'a> {
 
 impl<'a> Lowerer<'a> {
     fn new(source: &'a ast::Program) -> Self {
-        let type_aliases = source
+        let type_aliases = crate::stdlib::declarations()
             .items
             .iter()
+            .chain(&source.items)
             .filter_map(|item| match item {
                 Item::TypeAlias(alias) => Some((alias.name.clone(), alias.clone())),
                 _ => None,
@@ -5305,7 +5306,8 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|item| {
                         if let Expr::Spread { value, .. } = item {
                             let spread_ty = self.infer_expr_type_with_overrides(value, overrides);
-                            known_iterable_ir_item_type(&spread_ty).unwrap_or(ir::Type::Unknown)
+                            known_iterable_ir_item_type(&spread_ty, self.program)
+                                .unwrap_or(ir::Type::Unknown)
                         } else {
                             self.infer_expr_type_with_overrides(item, overrides)
                         }
@@ -5560,9 +5562,6 @@ impl<'a> FunctionLowerer<'a> {
             return ty;
         }
         if let Some(ty) = self.infer_member_call_type(callee, &normalized_args, overrides) {
-            return ty;
-        }
-        if let Some(ty) = self.infer_named_runtime_call_type(callee) {
             return ty;
         }
         match self.infer_expr_type_with_overrides(callee, overrides) {
@@ -5957,51 +5956,7 @@ impl<'a> FunctionLowerer<'a> {
             };
             let expected = substitute_ir_type(&local.ty, subst);
             let actual = self.infer_expr_type_against_with_overrides(&arg.value, &expected, &[]);
-            infer_ir_type_subst(&expected, &actual, subst);
-        }
-    }
-
-    fn infer_named_runtime_call_type(&self, callee: &Expr) -> Option<ir::Type> {
-        let path = expr_path(callee)?;
-        match path.as_slice() {
-            [owner, method] if owner == "Int" && method == "parse" => {
-                Some(ir::Type::option(ir::Type::Int))
-            }
-            [owner, method] if owner == "Float" && method == "parse" => {
-                Some(ir::Type::option(ir::Type::Float))
-            }
-            [owner, method] if owner == "Decimal" && method == "parse" => {
-                Some(ir::Type::option(ir::Type::named("Decimal")))
-            }
-            [owner, method] if owner == "Regex" && method == "compile" => Some(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::named("Regex"), ir::Type::named("RegexError")],
-            }),
-            [owner, method] if owner == "Regex" && method == "escape" => Some(ir::Type::Str),
-            [owner, method] if owner == "File" && method == "readBytes" => Some(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],
-            }),
-            [owner, method] if owner == "File" && method == "readText" => Some(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::Str, ir::Type::named("FileError")],
-            }),
-            [owner, method] if owner == "File" && method == "open" => Some(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::named("FileStream"), ir::Type::named("FileError")],
-            }),
-            [owner, method] if owner == "File" && method == "openText" => Some(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![
-                    ir::Type::named("TextFileReader"),
-                    ir::Type::named("FileError"),
-                ],
-            }),
-            [owner] if owner == "Map" => Some(ir::Type::Named {
-                name: "Map".to_string(),
-                args: vec![ir::Type::Unknown, ir::Type::Unknown],
-            }),
-            _ => None,
+            infer_ir_type_subst(&expected, &actual, subst, self.program);
         }
     }
 
@@ -6048,6 +6003,35 @@ impl<'a> FunctionLowerer<'a> {
         let (callee, explicit_type_args) = self.split_generic_call_callee(callee);
         let path = self.canonical_enum_case_path(&expr_path(callee)?);
         let declared_name = self.canonical_declared_type_path(&path);
+        if path.len() == 1
+            && !self.program.types.iter().any(|ty| ty.name == path[0])
+            && let Some(declaration) =
+                crate::stdlib::type_declaration(&path[0], ast::TypeKind::Class)
+        {
+            let receiver = ir::Type::Named {
+                name: declaration.name.clone(),
+                args: declaration
+                    .type_params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| {
+                        explicit_type_args
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_else(|| ir::Type::TypeParam(param.name.clone()))
+                    })
+                    .collect(),
+            };
+            if let Some(mut signature) =
+                crate::stdlib::method_contract(&receiver, "new", args.len())
+            {
+                signature.return_ty = receiver;
+                return Some(
+                    self.infer_stdlib_signature(signature, args, overrides, None)
+                        .return_ty,
+                );
+            }
+        }
         if declared_name.is_some()
             || (path.len() == 1 && runtime_collection_constructor_name(&path[0]))
         {
@@ -6120,7 +6104,7 @@ impl<'a> FunctionLowerer<'a> {
                 } else {
                     for (field, arg) in ty.fields.iter().zip(args) {
                         let actual = self.infer_expr_type_with_overrides(&arg.value, overrides);
-                        infer_ir_type_subst(&field.ty, &actual, &mut subst);
+                        infer_ir_type_subst(&field.ty, &actual, &mut subst, self.program);
                     }
                 }
             }
@@ -6680,6 +6664,104 @@ impl<'a> FunctionLowerer<'a> {
         Some((ty, args))
     }
 
+    fn infer_stdlib_signature(
+        &self,
+        mut signature: crate::stdlib::NativeSignature,
+        args: &[core::CallArg],
+        overrides: &[(String, ir::Type)],
+        expected: Option<&ir::Type>,
+    ) -> crate::stdlib::NativeSignature {
+        let mut subst = HashMap::new();
+        if let Some(expected) = expected {
+            infer_ir_type_subst(&signature.return_ty, expected, &mut subst, self.program);
+        }
+        self.infer_stdlib_conditions(&signature.generic_conditions, &mut subst);
+        for (index, parameter) in signature.params.iter().enumerate() {
+            for (position, arg) in args.iter().enumerate() {
+                let matches = arg
+                    .name
+                    .as_ref()
+                    .map(|name| signature.param_names.get(index) == Some(name))
+                    .unwrap_or(
+                        position == index
+                            || (signature.variadic
+                                && index + 1 == signature.params.len()
+                                && position >= index),
+                    );
+                if !matches {
+                    continue;
+                }
+                let raw_expected = if signature.variadic
+                    && index + 1 == signature.params.len()
+                    && arg.name.is_none()
+                {
+                    match parameter {
+                        ir::Type::Named { args, .. } => args.first().unwrap_or(parameter),
+                        _ => parameter,
+                    }
+                } else {
+                    parameter
+                };
+                let expected = erase_ir_type_params(&substitute_ir_type(raw_expected, &subst));
+                let actual = if signature.variadic
+                    && arg.name.is_none()
+                    && let Expr::Spread { value, .. } = &arg.value
+                {
+                    let source = self.infer_expr_type_with_overrides(value, overrides);
+                    known_iterable_ir_item_type(&source, self.program).unwrap_or(ir::Type::Unknown)
+                } else {
+                    self.infer_expr_type_against_with_overrides(&arg.value, &expected, overrides)
+                };
+                let actual = normalize_contract_type(actual);
+                infer_ir_type_subst(raw_expected, &actual, &mut subst, self.program);
+                self.infer_stdlib_conditions(&signature.generic_conditions, &mut subst);
+            }
+        }
+        signature.params = signature
+            .params
+            .iter()
+            .map(|ty| {
+                normalize_contract_type(erase_ir_type_params(&substitute_ir_type(ty, &subst)))
+            })
+            .collect();
+        signature.return_ty = normalize_contract_type(erase_ir_type_params(&substitute_ir_type(
+            &signature.return_ty,
+            &subst,
+        )));
+        signature
+    }
+
+    fn infer_stdlib_conditions(
+        &self,
+        conditions: &[ir::GenericCondition],
+        subst: &mut HashMap<String, ir::Type>,
+    ) {
+        for _ in 0..=conditions.len() {
+            let before = subst.clone();
+            for condition in conditions {
+                match condition {
+                    ir::GenericCondition::Bound { subject, bound } => {
+                        infer_ir_type_subst(
+                            &substitute_ir_type(bound, subst),
+                            &substitute_ir_type(subject, subst),
+                            subst,
+                            self.program,
+                        );
+                    }
+                    ir::GenericCondition::Equal { left, right } => {
+                        let left = substitute_ir_type(left, subst);
+                        let right = substitute_ir_type(right, subst);
+                        infer_ir_type_subst(&left, &right, subst, self.program);
+                        infer_ir_type_subst(&right, &left, subst, self.program);
+                    }
+                }
+            }
+            if *subst == before {
+                break;
+            }
+        }
+    }
+
     fn infer_member_call_type(
         &self,
         callee: &Expr,
@@ -6702,6 +6784,18 @@ impl<'a> FunctionLowerer<'a> {
             };
         }
         let receiver_ty = self.infer_expr_type_with_overrides(receiver, overrides);
+        let contract = if let Expr::Identifier { name: owner, .. } = receiver.as_ref() {
+            crate::stdlib::static_method_contract(owner, name, args.len())
+                .or_else(|| crate::stdlib::method_contract(&receiver_ty, name, args.len()))
+        } else {
+            crate::stdlib::method_contract(&receiver_ty, name, args.len())
+        };
+        if let Some(signature) = contract {
+            return Some(
+                self.infer_stdlib_signature(signature, args, overrides, None)
+                    .return_ty,
+            );
+        }
         let ir::Type::Named {
             name: type_name,
             args: type_args,
@@ -6733,70 +6827,6 @@ impl<'a> FunctionLowerer<'a> {
                 _ => None,
             });
         };
-        if matches!(
-            type_name.as_str(),
-            "Vector" | "LinkedList" | "Array" | "Set"
-        ) {
-            match (name.as_str(), args) {
-                ("filter" | "sort" | "take", [_]) => return Some(receiver_ty),
-                ("fold", [initial, _]) => {
-                    let initial = args
-                        .iter()
-                        .find(|arg| arg.name.as_deref() == Some("initial"))
-                        .unwrap_or(initial);
-                    return Some(self.infer_expr_type_with_overrides(&initial.value, overrides));
-                }
-                ("map", [mapper]) => {
-                    let item = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
-                    let expected = ir::Type::Function {
-                        params: vec![item],
-                        ret: Box::new(ir::Type::Unknown),
-                    };
-                    let mapped = self.infer_expr_type_against_with_overrides(
-                        &mapper.value,
-                        &expected,
-                        overrides,
-                    );
-                    let ir::Type::Function { ret, .. } = mapped else {
-                        return Some(ir::Type::Unknown);
-                    };
-                    return Some(ir::Type::Named {
-                        name: type_name.clone(),
-                        args: vec![*ret],
-                    });
-                }
-                ("flatMap", [mapper]) => {
-                    let item = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
-                    let expected = ir::Type::Function {
-                        params: vec![item],
-                        ret: Box::new(ir::Type::Unknown),
-                    };
-                    let mapped = self.infer_expr_type_against_with_overrides(
-                        &mapper.value,
-                        &expected,
-                        overrides,
-                    );
-                    let ir::Type::Function { ret, .. } = mapped else {
-                        return Some(ir::Type::Unknown);
-                    };
-                    if type_name == "Vector" {
-                        let mapped_item =
-                            known_iterable_ir_item_type(&ret).unwrap_or(ir::Type::Unknown);
-                        return Some(ir::Type::Named {
-                            name: "Vector".to_string(),
-                            args: vec![mapped_item],
-                        });
-                    }
-                    return Some(*ret);
-                }
-                ("flatten", []) if type_name == "Vector" => {
-                    let item = type_args.first().cloned().unwrap_or(ir::Type::Unknown);
-                    let flattened = known_iterable_ir_item_type(&item).unwrap_or(ir::Type::Unknown);
-                    return Some(ir::Type::list(flattened));
-                }
-                _ => {}
-            }
-        }
         let Some(ty) = self.program.types.iter().find(|ty| ty.name == *type_name) else {
             return builtin_member_type(&receiver_ty, name).and_then(|ty| match ty {
                 ir::Type::Function { ret, .. } => Some(*ret),
@@ -7969,7 +7999,7 @@ impl<'a> FunctionLowerer<'a> {
             _ => return specs,
         };
         let Some((type_params, signatures)) =
-            crate::typecheck::runtime_callable_parameters(owner, name, static_owner.is_some())
+            stdlib_callable_parameters(owner, name, static_owner.is_some())
         else {
             return specs;
         };
@@ -8005,7 +8035,12 @@ impl<'a> FunctionLowerer<'a> {
             };
             if let Some(param) = param {
                 let actual = self.infer_expr_type(&arg.value);
-                infer_ir_type_subst(&substitute_ir_type(&param.ty, &subst), &actual, &mut subst);
+                infer_ir_type_subst(
+                    &substitute_ir_type(&param.ty, &subst),
+                    &actual,
+                    &mut subst,
+                    self.program,
+                );
             }
         }
         Some(
@@ -8108,7 +8143,12 @@ impl<'a> FunctionLowerer<'a> {
                     if let Some(expected) = expected
                         && let Some(function) = self.program.function(id)
                     {
-                        infer_ir_type_subst(&function.return_ty, expected, &mut subst);
+                        infer_ir_type_subst(
+                            &function.return_ty,
+                            expected,
+                            &mut subst,
+                            self.program,
+                        );
                     }
                     if ordered_args.iter().any(|arg| arg.from_shape_spread) {
                         self.infer_function_call_subst(id, ordered_args, &mut subst);
@@ -8134,47 +8174,47 @@ impl<'a> FunctionLowerer<'a> {
                     })]);
                 }
                 let receiver_ty = self.infer_expr_type(receiver);
-                if name == "fold" && ordered_args.len() == 2 {
-                    if let ir::Type::Named { name, args } = &receiver_ty {
-                        if matches!(name.as_str(), "Vector" | "LinkedList") && args.len() == 1 {
-                            let initial = ordered_args
-                                .iter()
-                                .find(|arg| arg.name.as_deref() == Some("initial"))
-                                .unwrap_or(&ordered_args[0]);
-                            let accumulator = self.infer_expr_type(&initial.value);
-                            return Some(vec![
-                                Some(ExpectedArgSpec {
-                                    name: None,
-                                    ty: accumulator.clone(),
-                                    variadic: false,
-                                    default: None,
-                                }),
-                                Some(ExpectedArgSpec {
-                                    name: None,
-                                    ty: ir::Type::Function {
-                                        params: vec![accumulator.clone(), args[0].clone()],
-                                        ret: Box::new(accumulator),
-                                    },
-                                    variadic: false,
-                                    default: None,
-                                }),
-                            ]);
-                        }
-                    }
-                }
                 if let Some((id, mut subst)) =
                     self.method_expected_arg_target(&receiver_ty, name, ordered_args)
                 {
                     if let Some(expected) = expected
                         && let Some(function) = self.program.function(id)
                     {
-                        infer_ir_type_subst(&function.return_ty, expected, &mut subst);
+                        infer_ir_type_subst(
+                            &function.return_ty,
+                            expected,
+                            &mut subst,
+                            self.program,
+                        );
                     }
                     return self.function_expected_arg_specs(id, &subst);
                 }
-                if let Some(specs) = builtin_member_expected_arg_specs(&receiver_ty, name, expected)
-                {
-                    return Some(specs);
+                let signature = if let Expr::Identifier { name: owner, .. } = receiver.as_ref() {
+                    crate::stdlib::static_method_contract(owner, name, ordered_args.len()).or_else(
+                        || crate::stdlib::method_contract(&receiver_ty, name, ordered_args.len()),
+                    )
+                } else {
+                    crate::stdlib::method_contract(&receiver_ty, name, ordered_args.len())
+                };
+                if let Some(signature) = signature {
+                    let signature =
+                        self.infer_stdlib_signature(signature, ordered_args, &[], expected);
+                    let last = signature.params.len().saturating_sub(1);
+                    return Some(
+                        signature
+                            .params
+                            .into_iter()
+                            .enumerate()
+                            .map(|(index, ty)| {
+                                Some(ExpectedArgSpec {
+                                    name: signature.param_names.get(index).cloned(),
+                                    ty,
+                                    variadic: signature.variadic && index == last,
+                                    default: None,
+                                })
+                            })
+                            .collect(),
+                    );
                 }
             }
             _ => {}
@@ -9065,11 +9105,11 @@ impl<'a> FunctionLowerer<'a> {
             } else if path.len() == 2 {
                 let owner = &path[0];
                 let member = &path[1];
-                if matches!(
-                    (owner.as_str(), member.as_str()),
-                    ("Vector", "from") | ("Set", "from")
-                ) {
-                    return Some(vec!["values".to_string()]);
+                if !single_type_exists(self.program, owner)
+                    && let Some(signature) =
+                        crate::stdlib::static_method_signature(owner, member, args.len())
+                {
+                    return Some(signature.param_names);
                 }
                 if let Some(params) =
                     self.method_param_names_for_kind(owner, ast::TypeKind::Object, member, args)
@@ -9310,7 +9350,7 @@ impl<'a> FunctionLowerer<'a> {
             };
             let expected = substitute_ir_type(&local.ty, &subst);
             let actual = self.infer_expr_type(&arg.value);
-            infer_ir_type_subst(&expected, &actual, &mut subst);
+            infer_ir_type_subst(&expected, &actual, &mut subst, self.program);
         }
         function
             .reified_type_params
@@ -9550,6 +9590,56 @@ impl<'a> FunctionLowerer<'a> {
         self.diagnostics
             .push(Diagnostic::error(code, message, span));
     }
+}
+
+fn stdlib_callable_parameters(
+    owner: &str,
+    name: &str,
+    static_member: bool,
+) -> Option<(Vec<String>, Vec<Vec<ir::SourceCallParamSpec>>)> {
+    let kind = if static_member {
+        ast::TypeKind::Object
+    } else {
+        crate::stdlib::descriptor(owner)?.kind
+    };
+    let declaration = crate::stdlib::type_declaration(owner, kind)?;
+    let signatures = crate::stdlib::member_declarations(declaration, name)
+        .into_iter()
+        .filter(|method| !method.getter)
+        .map(|method| {
+            let variables = declaration
+                .type_params
+                .iter()
+                .chain(&method.type_params)
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>();
+            method
+                .params
+                .iter()
+                .map(|param| ir::SourceCallParamSpec {
+                    name: Some(param.name.clone()),
+                    ty: param
+                        .ty
+                        .as_ref()
+                        .map(|ty| crate::stdlib::type_to_ir(ty, &variables))
+                        .unwrap_or(ir::Type::Unit),
+                    variadic: param.variadic,
+                    default: param
+                        .initializer
+                        .as_ref()
+                        .and_then(lower_param_default_constant),
+                })
+                .collect()
+        })
+        .collect();
+    Some((
+        declaration
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+        signatures,
+    ))
 }
 
 fn intrinsic_for_name(name: &str) -> Option<ir::Intrinsic> {
@@ -9817,7 +9907,7 @@ fn zero_arg_function_type(value_ty: ir::Type) -> ir::Type {
 }
 
 fn is_builtin_extension_target(name: &str) -> bool {
-    matches!(name, "Bool" | "Float" | "Int" | "Char" | "Str")
+    crate::stdlib::is_primitive(name)
 }
 
 fn builtin_extension_receiver_name(ty: &ir::Type) -> Option<&'static str> {
@@ -10308,194 +10398,19 @@ fn static_tuple_index(expr: &Expr) -> Option<usize> {
     }
 }
 
-fn known_iterable_ir_item_type(ty: &ir::Type) -> Option<ir::Type> {
-    match ty {
-        ir::Type::Named { name, args }
-            if (name == "Vector"
-                || name == "Iterable"
-                || name == "Iterator"
-                || name == "Array"
-                || name == "LinkedList"
-                || name == "Option"
-                || name == "Set")
-                && args.len() == 1 =>
-        {
-            Some(args[0].clone())
-        }
-        ir::Type::Named { name, args } if name == "Map" && args.len() == 2 => {
-            Some(ir::Type::Tuple(vec![args[0].clone(), args[1].clone()]))
-        }
-        ir::Type::Named { name, args } if name == "IntRange" && args.is_empty() => {
-            Some(ir::Type::Int)
-        }
-        _ => None,
+fn known_iterable_ir_item_type(ty: &ir::Type, program: &ir::Program) -> Option<ir::Type> {
+    if let ir::Type::Named { name, args } = ty
+        && name == "Iterator"
+        && args.len() == 1
+    {
+        return args.first().cloned();
     }
-}
-
-fn builtin_member_expected_arg_specs(
-    receiver: &ir::Type,
-    name: &str,
-    expected: Option<&ir::Type>,
-) -> Option<Vec<Option<ExpectedArgSpec>>> {
-    let ir::Type::Named {
-        name: type_name,
-        args,
-    } = receiver
+    let ir::Type::Named { args, .. } =
+        ir_type_as_supertype(ty, "Iterable", program, &mut HashSet::new())?
     else {
         return None;
     };
-    let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
-    let spec = |ty: ir::Type| {
-        Some(ExpectedArgSpec {
-            name: None,
-            ty,
-            variadic: false,
-            default: None,
-        })
-    };
-    match (type_name.as_str(), name) {
-        ("Database", "transactionally") => {
-            let value_ty = transactionally_result_value_type(expected).unwrap_or(ir::Type::Unknown);
-            Some(vec![spec(transactional_work_type(value_ty))])
-        }
-        ("Option", "map") => {
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Option" && args.len() == 1 => {
-                    args[0].clone()
-                }
-                _ => ir::Type::Unknown,
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![item.clone()],
-                ret: Box::new(mapped),
-            })])
-        }
-        ("Option", "flatMap") => {
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Option" && args.len() == 1 => {
-                    ir::Type::option(args[0].clone())
-                }
-                _ => ir::Type::option(ir::Type::Unknown),
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![item.clone()],
-                ret: Box::new(mapped),
-            })])
-        }
-        ("Option", "orElse") => Some(vec![spec(zero_arg_function_type(receiver.clone()))]),
-        ("Option", "toResult") => {
-            let error = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
-                    args[1].clone()
-                }
-                _ => ir::Type::Unknown,
-            };
-            Some(vec![spec(zero_arg_function_type(error))])
-        }
-        ("Option", "toEither") => {
-            let left = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
-                    args[0].clone()
-                }
-                _ => ir::Type::Unknown,
-            };
-            Some(vec![spec(zero_arg_function_type(left))])
-        }
-        ("Result", "map") => {
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
-                    args[0].clone()
-                }
-                _ => ir::Type::Unknown,
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![item.clone()],
-                ret: Box::new(mapped),
-            })])
-        }
-        ("Result", "flatMap") => {
-            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
-                    ir::Type::Named {
-                        name: "Result".to_string(),
-                        args: vec![args[0].clone(), error.clone()],
-                    }
-                }
-                _ => ir::Type::Named {
-                    name: "Result".to_string(),
-                    args: vec![ir::Type::Unknown, error],
-                },
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![item.clone()],
-                ret: Box::new(mapped),
-            })])
-        }
-        ("Result", "orElse") => Some(vec![spec(zero_arg_function_type(receiver.clone()))]),
-        ("Result", "mapError") => {
-            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Result" && args.len() == 2 => {
-                    args[1].clone()
-                }
-                _ => ir::Type::Unknown,
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![error],
-                ret: Box::new(mapped),
-            })])
-        }
-        ("Either", "map") => {
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
-                    args[1].clone()
-                }
-                _ => ir::Type::Unknown,
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![right],
-                ret: Box::new(mapped),
-            })])
-        }
-        ("Either", "flatMap") => {
-            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
-                    ir::Type::Named {
-                        name: "Either".to_string(),
-                        args: vec![left.clone(), args[1].clone()],
-                    }
-                }
-                _ => ir::Type::Named {
-                    name: "Either".to_string(),
-                    args: vec![left, ir::Type::Unknown],
-                },
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![right],
-                ret: Box::new(mapped),
-            })])
-        }
-        ("Either", "orElse") => Some(vec![spec(zero_arg_function_type(receiver.clone()))]),
-        ("Either", "merge") => Some(Vec::new()),
-        ("Either", "mapLeft") => {
-            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
-            let mapped = match expected {
-                Some(ir::Type::Named { name, args }) if name == "Either" && args.len() == 2 => {
-                    args[0].clone()
-                }
-                _ => ir::Type::Unknown,
-            };
-            Some(vec![spec(ir::Type::Function {
-                params: vec![left],
-                ret: Box::new(mapped),
-            })])
-        }
-        _ => None,
-    }
+    args.into_iter().next()
 }
 
 fn transactionally_result_value_type(expected: Option<&ir::Type>) -> Option<ir::Type> {
@@ -10530,592 +10445,82 @@ fn result_db_error_type(value_ty: ir::Type) -> ir::Type {
     }
 }
 
+fn normalize_contract_type(ty: ir::Type) -> ir::Type {
+    match ty {
+        ir::Type::Named { name, args } if args.is_empty() => {
+            use crate::stdlib::NativeRepresentation;
+            match crate::stdlib::descriptor(&name).and_then(|descriptor| descriptor.representation)
+            {
+                Some(NativeRepresentation::Bool) => ir::Type::Bool,
+                Some(NativeRepresentation::Int) => ir::Type::Int,
+                Some(NativeRepresentation::Float) => ir::Type::Float,
+                Some(NativeRepresentation::Str) => ir::Type::Str,
+                _ => ir::Type::Named { name, args },
+            }
+        }
+        ir::Type::Named { name, args } => ir::Type::Named {
+            name,
+            args: args.into_iter().map(normalize_contract_type).collect(),
+        },
+        ir::Type::Tuple(items) => {
+            ir::Type::Tuple(items.into_iter().map(normalize_contract_type).collect())
+        }
+        ir::Type::Union(items) => {
+            ir::Type::Union(items.into_iter().map(normalize_contract_type).collect())
+        }
+        ir::Type::Record(fields) => ir::Type::Record(
+            fields
+                .into_iter()
+                .map(|mut field| {
+                    field.ty = normalize_contract_type(field.ty);
+                    field
+                })
+                .collect(),
+        ),
+        ir::Type::Function { params, ret } => ir::Type::Function {
+            params: params.into_iter().map(normalize_contract_type).collect(),
+            ret: Box::new(normalize_contract_type(*ret)),
+        },
+        other => other,
+    }
+}
+
 fn builtin_member_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
     if let Some(ty) = universal_member_type(name) {
         return Some(ty);
     }
-    if let Some(ty) = builtin_getter_type(receiver, name) {
-        return Some(ty);
-    }
-
-    if matches!(receiver, ir::Type::Named { name, .. } if name == "Decimal") {
-        let decimal = ir::Type::named("Decimal");
-        let (params, ret) = match name {
-            "abs" => (vec![], decimal.clone()),
-            "compareTo" => (vec![decimal], ir::Type::Int),
-            "divide" => (
-                vec![decimal.clone(), ir::Type::Int, ir::Type::named("Rounding")],
-                decimal,
-            ),
-            "round" => (vec![ir::Type::Int, ir::Type::named("Rounding")], decimal),
-            "toInt" => (vec![], ir::Type::option(ir::Type::Int)),
-            "toFloat" => (vec![], ir::Type::Float),
-            _ => return None,
-        };
-        return Some(ir::Type::Function {
-            params,
-            ret: Box::new(ret),
-        });
-    }
-    if name == "toDecimal" {
-        let ret = match receiver {
-            ir::Type::Int => ir::Type::named("Decimal"),
-            ir::Type::Float => ir::Type::option(ir::Type::named("Decimal")),
-            _ => return None,
-        };
-        return Some(ir::Type::Function {
-            params: vec![],
-            ret: Box::new(ret),
-        });
-    }
-
-    if matches!(receiver, ir::Type::Int)
-        || matches!(receiver, ir::Type::Named { name, args } if name == "Int" && args.is_empty())
-    {
-        let (params, ret) = match name {
-            "checkedAdd" | "checkedSub" | "checkedMul" | "checkedPow" => {
-                (vec![ir::Type::Int], ir::Type::option(ir::Type::Int))
-            }
-            "wrappingAdd" | "wrappingSub" | "wrappingMul" | "pow" | "compareTo" => {
-                (vec![ir::Type::Int], ir::Type::Int)
-            }
-            "wrappingNeg" | "abs" => (Vec::new(), ir::Type::Int),
-            "sqrt" | "toFloat" => (Vec::new(), ir::Type::Float),
-            _ => return None,
-        };
-        return Some(ir::Type::Function {
-            params,
-            ret: Box::new(ret),
-        });
-    }
-
-    let ir::Type::Named {
-        name: type_name,
-        args,
-    } = receiver
-    else {
-        return None;
-    };
-    let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
-    match (type_name.as_str(), name) {
-        ("Database", "transactionally") => Some(ir::Type::Function {
-            params: vec![transactional_work_type(ir::Type::Unknown)],
-            ret: Box::new(result_db_error_type(ir::Type::Unknown)),
-        }),
-        ("Option", "map") => Some(ir::Type::Function {
-            params: vec![ir::Type::Function {
-                params: vec![item.clone()],
-                ret: Box::new(ir::Type::Unknown),
-            }],
-            ret: Box::new(ir::Type::option(ir::Type::Unknown)),
-        }),
-        ("Option", "flatMap") => Some(ir::Type::Function {
-            params: vec![ir::Type::Function {
-                params: vec![item.clone()],
-                ret: Box::new(ir::Type::option(ir::Type::Unknown)),
-            }],
-            ret: Box::new(ir::Type::option(ir::Type::Unknown)),
-        }),
-        ("Option", "orElse") => Some(ir::Type::Function {
-            params: vec![zero_arg_function_type(receiver.clone())],
-            ret: Box::new(receiver.clone()),
-        }),
-        ("Option", "toResult") => Some(ir::Type::Function {
-            params: vec![zero_arg_function_type(ir::Type::Unknown)],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![item.clone(), ir::Type::Unknown],
-            }),
-        }),
-        ("Option", "toEither") => Some(ir::Type::Function {
-            params: vec![zero_arg_function_type(ir::Type::Unknown)],
-            ret: Box::new(ir::Type::Named {
-                name: "Either".to_string(),
-                args: vec![ir::Type::Unknown, item.clone()],
-            }),
-        }),
-        ("Option", "isDefined") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Bool),
-        }),
-        ("Result", "map") => {
-            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: vec![ir::Type::Function {
-                    params: vec![item.clone()],
-                    ret: Box::new(ir::Type::Unknown),
-                }],
-                ret: Box::new(ir::Type::Named {
-                    name: "Result".to_string(),
-                    args: vec![ir::Type::Unknown, error],
-                }),
-            })
+    let declaration = stdlib_receiver_declaration(receiver)?;
+    let method = crate::stdlib::member_declarations(declaration, name)
+        .into_iter()
+        .next()?;
+    let signature = crate::stdlib::method_signature(receiver, name, method.params.len())?;
+    Some(if signature.getter {
+        signature.return_ty
+    } else {
+        ir::Type::Function {
+            params: signature.params,
+            ret: Box::new(signature.return_ty),
         }
-        ("Result", "flatMap") => {
-            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: vec![ir::Type::Function {
-                    params: vec![item.clone()],
-                    ret: Box::new(ir::Type::Named {
-                        name: "Result".to_string(),
-                        args: vec![ir::Type::Unknown, error.clone()],
-                    }),
-                }],
-                ret: Box::new(ir::Type::Named {
-                    name: "Result".to_string(),
-                    args: vec![ir::Type::Unknown, error],
-                }),
-            })
-        }
-        ("Result", "orElse") => Some(ir::Type::Function {
-            params: vec![zero_arg_function_type(receiver.clone())],
-            ret: Box::new(receiver.clone()),
-        }),
-        ("Result", "mapError") => {
-            let error = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: vec![ir::Type::Function {
-                    params: vec![error],
-                    ret: Box::new(ir::Type::Unknown),
-                }],
-                ret: Box::new(ir::Type::Named {
-                    name: "Result".to_string(),
-                    args: vec![item.clone(), ir::Type::Unknown],
-                }),
-            })
-        }
-        ("Either", "map") => {
-            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: vec![ir::Type::Function {
-                    params: vec![right],
-                    ret: Box::new(ir::Type::Unknown),
-                }],
-                ret: Box::new(ir::Type::Named {
-                    name: "Either".to_string(),
-                    args: vec![left, ir::Type::Unknown],
-                }),
-            })
-        }
-        ("Either", "flatMap") => {
-            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: vec![ir::Type::Function {
-                    params: vec![right],
-                    ret: Box::new(ir::Type::Named {
-                        name: "Either".to_string(),
-                        args: vec![left.clone(), ir::Type::Unknown],
-                    }),
-                }],
-                ret: Box::new(ir::Type::Named {
-                    name: "Either".to_string(),
-                    args: vec![left, ir::Type::Unknown],
-                }),
-            })
-        }
-        ("Either", "orElse") => Some(ir::Type::Function {
-            params: vec![zero_arg_function_type(receiver.clone())],
-            ret: Box::new(receiver.clone()),
-        }),
-        ("Either", "merge") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(item.clone()),
-        }),
-        ("Either", "mapLeft") => {
-            let left = args.first().cloned().unwrap_or(ir::Type::Unknown);
-            let right = args.get(1).cloned().unwrap_or(ir::Type::Unknown);
-            Some(ir::Type::Function {
-                params: vec![ir::Type::Function {
-                    params: vec![left],
-                    ret: Box::new(ir::Type::Unknown),
-                }],
-                ret: Box::new(ir::Type::Named {
-                    name: "Either".to_string(),
-                    args: vec![ir::Type::Unknown, right],
-                }),
-            })
-        }
-        ("Type", "name" | "qualifiedName") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::Str)),
-        }),
-        ("Type", "kind") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::named("TypeKind")),
-        }),
-        ("Type", "asClass") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("ClassType"))),
-        }),
-        ("Type", "asShape") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("ShapeType"))),
-        }),
-        ("Type", "asUnion") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("UnionType"))),
-        }),
-        ("Type", "asInterface") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("InterfaceType"))),
-        }),
-        ("Type", "asObject") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("ObjectType"))),
-        }),
-        ("Type", "asAnnotation") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("AnnotationType"))),
-        }),
-        (
-            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType",
-            "name" | "qualifiedName",
-        ) => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::Str)),
-        }),
-        (
-            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType",
-            "kind",
-        ) => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::named("TypeKind")),
-        }),
-        (
-            "Type" | "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType" | "Field" | "Method" | "UnionAlternative",
-            "annotation",
-        ) => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::option(ir::Type::named("AnnotationValue"))),
-        }),
-        (
-            "Type" | "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType" | "Field" | "Method" | "UnionAlternative",
-            "hasAnnotation",
-        ) => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Bool),
-        }),
-        ("AnnotationValue", "name") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Str),
-        }),
-        ("AnnotationValue", "field") => Some(ir::Type::Function {
-            params: vec![ir::Type::Str],
-            ret: Box::new(ir::Type::option(ir::Type::named("Any"))),
-        }),
-        ("AnnotationValue", "str") => Some(ir::Type::Function {
-            params: vec![ir::Type::Str],
-            ret: Box::new(ir::Type::option(ir::Type::Str)),
-        }),
-        ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields") => {
-            Some(ir::Type::Function {
-                params: Vec::new(),
-                ret: Box::new(ir::Type::list(ir::Type::named("Field"))),
-            })
-        }
-        ("ClassType" | "ObjectType", "field") => Some(ir::Type::Function {
-            params: vec![ir::Type::Str],
-            ret: Box::new(ir::Type::option(ir::Type::named("Field"))),
-        }),
-        ("ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType", "methods") => {
-            Some(ir::Type::Function {
-                params: Vec::new(),
-                ret: Box::new(ir::Type::list(ir::Type::named("Method"))),
-            })
-        }
-        ("ClassType" | "ObjectType", "method") => Some(ir::Type::Function {
-            params: vec![ir::Type::Str],
-            ret: Box::new(ir::Type::option(ir::Type::named("Method"))),
-        }),
-        ("ClassType" | "ShapeType", "construct") => Some(ir::Type::Function {
-            params: vec![ir::Type::list(ir::Type::named("Any"))],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
-            }),
-        }),
-        ("UnionType", "alternatives") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::list(ir::Type::named("UnionAlternative"))),
-        }),
-        ("UnionType", "alternative") => Some(ir::Type::Function {
-            params: vec![ir::Type::Str],
-            ret: Box::new(ir::Type::option(ir::Type::named("UnionAlternative"))),
-        }),
-        ("Field", "name") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Str),
-        }),
-        ("Field", "fieldType") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
-        }),
-        ("Field", "isPrivate") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Bool),
-        }),
-        ("Field", "get") => Some(ir::Type::Function {
-            params: vec![ir::Type::named("Any")],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
-            }),
-        }),
-        ("Method", "name") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Str),
-        }),
-        ("Method", "params") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::list(ir::Type::named("Param"))),
-        }),
-        ("Method", "returnType") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
-        }),
-        ("Method", "call") => Some(ir::Type::Function {
-            params: vec![
-                ir::Type::named("Any"),
-                ir::Type::list(ir::Type::named("Any")),
-            ],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
-            }),
-        }),
-        ("Param", "name") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Str),
-        }),
-        ("Param", "paramType") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir_exact_runtime_type(ir::Type::Unknown)),
-        }),
-        ("UnionAlternative", "name") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Str),
-        }),
-        ("UnionAlternative", "fields") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::list(ir::Type::named("Field"))),
-        }),
-        ("UnionAlternative", "construct") => Some(ir::Type::Function {
-            params: vec![ir::Type::list(ir::Type::named("Any"))],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::named("Any"), ir::Type::named("ReflectionError")],
-            }),
-        }),
-        ("Vector" | "LinkedList" | "Array", "first" | "last" | "removeFirst" | "removeLast") => {
-            Some(ir::Type::Function {
-                params: Vec::new(),
-                ret: Box::new(ir::Type::option(item)),
-            })
-        }
-        ("Vector" | "LinkedList" | "Array", "at") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int],
-            ret: Box::new(ir::Type::option(item)),
-        }),
-        ("Vector", "slice") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int, ir::Type::Int],
-            ret: Box::new(receiver.clone()),
-        }),
-        ("Str", "slice") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int, ir::Type::Int],
-            ret: Box::new(ir::Type::Str),
-        }),
-        ("Str", "startsWith" | "endsWith") => Some(ir::Type::Function {
-            params: vec![ir::Type::Str],
-            ret: Box::new(ir::Type::Bool),
-        }),
-        ("Str", "replaceFirst" | "replaceAll") => Some(ir::Type::Function {
-            params: vec![ir::Type::Str, ir::Type::Str],
-            ret: Box::new(ir::Type::Str),
-        }),
-        ("Vector" | "LinkedList" | "Array", "setAt") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int, item.clone()],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![item, ir::Type::named("InvalidIndex")],
-            }),
-        }),
-        ("Vector" | "LinkedList", "insertAt") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int, item],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::Unit, ir::Type::named("InvalidIndex")],
-            }),
-        }),
-        ("Vector" | "LinkedList", "removeAt") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![item, ir::Type::named("InvalidIndex")],
-            }),
-        }),
-        ("Vector" | "LinkedList" | "Array" | "Set", "contains") => Some(ir::Type::Function {
-            params: vec![item],
-            ret: Box::new(ir::Type::Bool),
-        }),
-        ("Vector" | "LinkedList" | "Array" | "Set" | "Map" | "Str", "size" | "length") => {
-            Some(ir::Type::Function {
-                params: Vec::new(),
-                ret: Box::new(ir::Type::Int),
-            })
-        }
-        ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "isEmpty" | "nonEmpty") => {
-            Some(ir::Type::Function {
-                params: Vec::new(),
-                ret: Box::new(ir::Type::Bool),
-            })
-        }
-        ("LinkedList", "add") => Some(ir::Type::Function {
-            params: vec![item],
-            ret: Box::new(receiver.clone()),
-        }),
-        ("LinkedList", "fold") => Some(ir::Type::Function {
-            params: vec![
-                ir::Type::Unknown,
-                ir::Type::Function {
-                    params: vec![ir::Type::Unknown, item],
-                    ret: Box::new(ir::Type::Unknown),
-                },
-            ],
-            ret: Box::new(ir::Type::Unknown),
-        }),
-        ("Vector" | "LinkedList" | "Set", "reduce") => Some(ir::Type::Function {
-            params: vec![ir::Type::Function {
-                params: vec![item.clone(), item.clone()],
-                ret: Box::new(item.clone()),
-            }],
-            ret: Box::new(ir::Type::option(item)),
-        }),
-        ("Map", "entries") if args.len() == 2 => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::list(ir::Type::Tuple(vec![
-                args[0].clone(),
-                args[1].clone(),
-            ]))),
-        }),
-        ("Map", "keys") if args.len() == 2 => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::list(args[0].clone())),
-        }),
-        ("FileStream", "read") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],
-            }),
-        }),
-        ("FileStream", "readToEnd") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::list(ir::Type::Int), ir::Type::named("FileError")],
-            }),
-        }),
-        ("FileStream", "seek") => Some(ir::Type::Function {
-            params: vec![ir::Type::Int],
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::Int, ir::Type::named("FileError")],
-            }),
-        }),
-        ("FileStream" | "TextFileReader", "close") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::Unit, ir::Type::named("FileError")],
-            }),
-        }),
-        ("TextFileReader", "readLine") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![
-                    ir::Type::option(ir::Type::Str),
-                    ir::Type::named("FileError"),
-                ],
-            }),
-        }),
-        ("TextFileReader", "readToEnd") => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Named {
-                name: "Result".to_string(),
-                args: vec![ir::Type::Str, ir::Type::named("FileError")],
-            }),
-        }),
-        _ => None,
-    }
+    })
 }
 
 fn builtin_getter_type(receiver: &ir::Type, name: &str) -> Option<ir::Type> {
-    if name == "scale" && matches!(receiver, ir::Type::Named { name, .. } if name == "Decimal") {
-        return Some(ir::Type::Int);
-    }
-    if matches!(receiver, ir::Type::Str) {
-        return match name {
-            "size" => Some(ir::Type::Int),
-            "isEmpty" | "nonEmpty" => Some(ir::Type::Bool),
-            _ => None,
-        };
-    }
+    let signature = crate::stdlib::method_signature(receiver, name, 0)?;
+    signature.getter.then_some(signature.return_ty)
+}
 
-    let ir::Type::Named {
-        name: type_name,
-        args,
-    } = receiver
-    else {
-        return None;
+fn stdlib_receiver_declaration(receiver: &ir::Type) -> Option<&'static ast::TypeDecl> {
+    let owner = match receiver {
+        ir::Type::Bool => "Bool",
+        ir::Type::Int => "Int",
+        ir::Type::Float => "Float",
+        ir::Type::Str => "Str",
+        ir::Type::Unit => "Unit",
+        ir::Type::Never => "Never",
+        ir::Type::Named { name, .. } => name,
+        _ => return None,
     };
-    let item = args.first().cloned().unwrap_or(ir::Type::Unknown);
-
-    match (type_name.as_str(), name) {
-        ("Str", "size") => Some(ir::Type::Int),
-        ("Str", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
-        ("Option", "isSet" | "isDefined" | "isSuccess" | "isEmpty")
-        | ("Result", "isOk" | "isSuccess" | "isErr")
-        | ("Either", "isLeft" | "isRight" | "isSuccess") => Some(ir::Type::Bool),
-        ("Vector" | "LinkedList" | "Array", "first" | "last") => Some(ir::Type::option(item)),
-        ("Vector" | "LinkedList" | "Array" | "Set" | "Map", "size") => Some(ir::Type::Int),
-        ("Vector" | "LinkedList" | "Set", "isEmpty" | "nonEmpty") => Some(ir::Type::Bool),
-        ("Type", "name" | "qualifiedName")
-        | (
-            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType",
-            "name" | "qualifiedName",
-        ) => Some(ir::Type::option(ir::Type::Str)),
-        ("Type", "kind")
-        | (
-            "ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType"
-            | "AnnotationType",
-            "kind",
-        ) => Some(ir::Type::named("TypeKind")),
-        ("AnnotationValue", "name")
-        | ("Field" | "Method" | "Param" | "UnionAlternative", "name") => Some(ir::Type::Str),
-        ("ClassType" | "ShapeType" | "ObjectType" | "AnnotationType", "fields")
-        | ("UnionAlternative", "fields") => Some(ir::Type::list(ir::Type::named("Field"))),
-        ("ClassType" | "ShapeType" | "UnionType" | "InterfaceType" | "ObjectType", "methods") => {
-            Some(ir::Type::list(ir::Type::named("Method")))
-        }
-        ("Method", "params") => Some(ir::Type::list(ir::Type::named("Param"))),
-        ("UnionType", "alternatives") => Some(ir::Type::list(ir::Type::named("UnionAlternative"))),
-        ("Field", "fieldType") | ("Method", "returnType") | ("Param", "paramType") => {
-            Some(ir_exact_runtime_type(ir::Type::Unknown))
-        }
-        ("Field", "isPrivate") => Some(ir::Type::Bool),
-        ("FileStream" | "TextFileReader", "path") => Some(ir::Type::Str),
-        ("FileStream", "position") => Some(ir::Type::Int),
-        ("FileStream" | "TextFileReader", "closed") => Some(ir::Type::Bool),
-        _ => None,
-    }
+    Some(&crate::stdlib::descriptor(owner)?.declaration)
 }
 
 fn is_known_getter_name(name: &str) -> bool {
@@ -11183,21 +10588,17 @@ fn contains_type_param(ty: &ir::Type) -> bool {
 }
 
 fn universal_member_type(name: &str) -> Option<ir::Type> {
-    match name {
-        "toStr" => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Str),
-        }),
-        "equals" => Some(ir::Type::Function {
-            params: vec![ir::Type::named("Any")],
-            ret: Box::new(ir::Type::Bool),
-        }),
-        "hash" => Some(ir::Type::Function {
-            params: Vec::new(),
-            ret: Box::new(ir::Type::Int),
-        }),
-        _ => None,
-    }
+    let owner = if name == "hash" { "Hashed" } else { "Any" };
+    let receiver = ir::Type::named(owner);
+    let declaration = stdlib_receiver_declaration(&receiver)?;
+    let method = crate::stdlib::member_declarations(declaration, name)
+        .into_iter()
+        .next()?;
+    let signature = crate::stdlib::method_signature(&receiver, name, method.params.len())?;
+    Some(ir::Type::Function {
+        params: signature.params,
+        ret: Box::new(signature.return_ty),
+    })
 }
 
 fn function_type_returns_unknown(ty: &ir::Type) -> bool {
@@ -11658,10 +11059,59 @@ fn ir_type_has_hashed_bound(
     found
 }
 
+fn ir_type_as_supertype(
+    actual: &ir::Type,
+    name: &str,
+    program: &ir::Program,
+    seen: &mut HashSet<String>,
+) -> Option<ir::Type> {
+    if matches!(actual, ir::Type::Named { name: actual_name, .. } if actual_name == name) {
+        return Some(actual.clone());
+    }
+    let (owner, args) = match actual {
+        ir::Type::Named { name, args } => (name.as_str(), args.as_slice()),
+        _ => return None,
+    };
+    if !seen.insert(owner.to_string()) {
+        return None;
+    }
+    let (parameters, bounds) = if let Some(ty) = program
+        .types
+        .iter()
+        .find(|ty| ty.name == owner && ty.kind != ast::TypeKind::Object)
+    {
+        (ty.type_params.clone(), ty.with_bounds.clone())
+    } else {
+        let ty = stdlib_receiver_declaration(actual)?;
+        let variables = ty
+            .type_params
+            .iter()
+            .map(|param| param.name.as_str())
+            .collect::<Vec<_>>();
+        (
+            ty.type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+            ty.with_bounds
+                .iter()
+                .map(|bound| crate::stdlib::type_to_ir(bound, &variables))
+                .collect(),
+        )
+    };
+    let subst = parameters.into_iter().zip(args.iter().cloned()).collect();
+    let projected = bounds.iter().find_map(|bound| {
+        ir_type_as_supertype(&substitute_ir_type(bound, &subst), name, program, seen)
+    });
+    seen.remove(owner);
+    projected
+}
+
 fn infer_ir_type_subst(
     expected: &ir::Type,
     actual: &ir::Type,
     subst: &mut HashMap<String, ir::Type>,
+    program: &ir::Program,
 ) {
     match expected {
         ir::Type::TypeParam(name) => {
@@ -11677,14 +11127,14 @@ fn infer_ir_type_subst(
             name: expected_name,
             args: expected_args,
         } => {
-            if let ir::Type::Named {
+            if let Some(ir::Type::Named {
                 name: actual_name,
                 args: actual_args,
-            } = actual
+            }) = ir_type_as_supertype(actual, expected_name, program, &mut HashSet::new())
             {
-                if expected_name == actual_name && expected_args.len() == actual_args.len() {
+                if expected_name == &actual_name && expected_args.len() == actual_args.len() {
                     for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
-                        infer_ir_type_subst(expected_arg, actual_arg, subst);
+                        infer_ir_type_subst(expected_arg, actual_arg, subst, program);
                     }
                 }
             }
@@ -11694,14 +11144,14 @@ fn infer_ir_type_subst(
                 for (expected_member, actual_member) in
                     expected_members.iter().zip(actual_members.iter())
                 {
-                    infer_ir_type_subst(expected_member, actual_member, subst);
+                    infer_ir_type_subst(expected_member, actual_member, subst, program);
                 }
             }
         }
         ir::Type::Tuple(expected_items) => {
             if let ir::Type::Tuple(actual_items) = actual {
                 for (expected_item, actual_item) in expected_items.iter().zip(actual_items.iter()) {
-                    infer_ir_type_subst(expected_item, actual_item, subst);
+                    infer_ir_type_subst(expected_item, actual_item, subst, program);
                 }
             }
         }
@@ -11712,7 +11162,7 @@ fn infer_ir_type_subst(
                         .iter()
                         .find(|actual_field| actual_field.name == expected_field.name)
                     {
-                        infer_ir_type_subst(&expected_field.ty, &actual_field.ty, subst);
+                        infer_ir_type_subst(&expected_field.ty, &actual_field.ty, subst, program);
                     }
                 }
             }
@@ -11730,10 +11180,10 @@ fn infer_ir_type_subst(
                     for (expected_param, actual_param) in
                         expected_params.iter().zip(actual_params.iter())
                     {
-                        infer_ir_type_subst(expected_param, actual_param, subst);
+                        infer_ir_type_subst(expected_param, actual_param, subst, program);
                     }
                 }
-                infer_ir_type_subst(expected_ret, actual_ret, subst);
+                infer_ir_type_subst(expected_ret, actual_ret, subst, program);
             }
         }
         ir::Type::Unknown
@@ -12961,6 +12411,95 @@ mod tests {
                 args: vec![ir::Type::Unit, ir::Type::named("Str")],
             }
         );
+    }
+
+    #[test]
+    fn ambient_type_aliases_lower_before_source_overrides() {
+        for (declaration, expected) in [
+            ("", ir::Type::named("Int")),
+            ("type Byte = Str", ir::Type::named("Str")),
+        ] {
+            let program = parse_inline(&format!(
+                "{declaration}\nfn bytes(values [Byte]) [Byte] = values"
+            ));
+            let lowered = lower_program(&program);
+            assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+            let ir = lowered.program.expect("lowered program");
+            let function = ir
+                .functions
+                .iter()
+                .find(|function| function.name == "bytes")
+                .expect("bytes");
+            assert_eq!(function.return_ty, ir::Type::list(expected.clone()));
+            assert_eq!(
+                function.locals[function.params[0].0].ty,
+                ir::Type::list(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn infers_stdlib_contract_generics_without_signature_tables() {
+        let program = parse_inline(
+            r#"
+fn main(values Vector[Int], pairs Map[Str, Int], optional Option[Int]) Unit {
+    mapped = values.map(value => value.toStr())
+    total = values.fold(0, (sum, value) => sum + value)
+    flattened = [values].flatten()
+    flatMapped = values.flatMap(value => Some(value))
+    copied = Vector.from(optional)
+    merged = [...pairs, "more": 2]
+    filled = Vector.fill(2, "value")
+    generated = Array.generate(2, index => index + 1)
+    keyed = pairs.mapValues(value => value.toStr())
+    conditional = Option.when(true, "value")
+    println(mapped, total, flattened, flatMapped, copied, filled, generated, keyed, conditional)
+}
+"#,
+        );
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("lowered program");
+        let main = ir.entry.and_then(|id| ir.function(id)).expect("main");
+        for (name, expected) in [
+            ("mapped", ir::Type::list(ir::Type::Str)),
+            ("total", ir::Type::Int),
+            ("flattened", ir::Type::list(ir::Type::Int)),
+            ("flatMapped", ir::Type::list(ir::Type::Int)),
+            ("copied", ir::Type::list(ir::Type::Int)),
+            (
+                "merged",
+                ir::Type::Named {
+                    name: "Map".into(),
+                    args: vec![ir::Type::Str, ir::Type::Int],
+                },
+            ),
+            ("filled", ir::Type::list(ir::Type::Str)),
+            (
+                "generated",
+                ir::Type::Named {
+                    name: "Array".into(),
+                    args: vec![ir::Type::Int],
+                },
+            ),
+            (
+                "keyed",
+                ir::Type::Named {
+                    name: "Map".into(),
+                    args: vec![ir::Type::Str, ir::Type::Str],
+                },
+            ),
+            ("conditional", ir::Type::option(ir::Type::Str)),
+        ] {
+            assert_eq!(
+                main.locals
+                    .iter()
+                    .find(|local| local.name == name)
+                    .map(|local| &local.ty),
+                Some(&expected),
+                "{name}"
+            );
+        }
     }
 
     #[test]

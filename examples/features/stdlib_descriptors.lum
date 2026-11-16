@@ -1,0 +1,37 @@
+# EXPECT:
+# value,length 2 7
+# 3 1
+# HI 4
+# 5 2.50
+
+class Effects {
+    var order Str = ""
+
+    fn mark(label Str, value Int) Int {
+        if order.nonEmpty {
+            order := order + ","
+        }
+        order := order + label
+        value
+    }
+}
+
+fn copyItems[T](items Iterable[T]) [T] =
+    Vector.from(items)
+
+fn main() {
+    effects = Effects()
+    filled = Vector.fill(
+        value = effects.mark("value", 7),
+        length = effects.mark("length", 2)
+    )
+    println(effects.order, filled.size, filled[0])
+
+    copied = copyItems([1, 2, 3])
+    optional [Int]? = Option.when(true, [])
+    optional!.add(9)
+    println(copied.size, optional!.size)
+
+    println("  hi  ".trim().toUpper(), Int.parse(value = "4")!)
+    println(2 + 3, 1.25d + 1.25d)
+}

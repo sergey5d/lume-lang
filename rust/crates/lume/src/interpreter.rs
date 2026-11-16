@@ -9,6 +9,8 @@ use std::{
 };
 
 mod regex;
+#[cfg(test)]
+mod native_tests;
 use self::regex::{RegexMatchValue, RegexValue};
 
 use crate::{
@@ -1097,6 +1099,12 @@ pub(crate) struct TextFileReaderValue {
 }
 
 impl Value {
+    pub(crate) fn variant_case_name_and_fields(&self) -> Option<(String, Vec<Value>)> {
+        let Value::Aggregate(variant) = self else { return None; };
+        let variant = variant.borrow();
+        Some((variant.case_name.clone()?, variant.fields.clone()))
+    }
+
     pub(crate) fn list(items: Vec<Value>) -> Self {
         Self::List(Rc::new(RefCell::new(items)))
     }
@@ -1114,24 +1122,6 @@ impl Value {
             items: Rc::new(RefCell::new(items)),
             index: 0,
         })))
-    }
-
-    pub(crate) fn variant_case_ids_and_fields(
-        &self,
-    ) -> Option<(
-        runtime::RuntimeTypeId,
-        runtime::RuntimeEnumCaseId,
-        Vec<Value>,
-    )> {
-        let Value::Aggregate(aggregate) = self else {
-            return None;
-        };
-        let aggregate = aggregate.borrow();
-        Some((
-            aggregate.runtime_type_id?,
-            aggregate.case_id?,
-            aggregate.fields.clone(),
-        ))
     }
 
     pub(crate) fn render(&self) -> String {
@@ -1537,6 +1527,9 @@ impl<'a> Interpreter<'a> {
             .function(id)
             .cloned()
             .ok_or_else(|| self.runtime_error(span, format!("unknown function id {}", id.0)))?;
+        if let Some(handler) = crate::stdlib::native::root_function_for_ir(&function) {
+            return handler(self, Value::Unit, args, span);
+        }
         let mut frame = Frame {
             function: function.id,
             locals: function
@@ -2160,9 +2153,8 @@ impl<'a> Interpreter<'a> {
         field_names: &[&str],
         fields: Vec<Value>,
     ) -> Value {
-        let runtime_type_id = self
-            .runtime
-            .type_id_by_name_kind(enum_name, crate::ast::TypeKind::Enum);
+        let runtime_type_id = self.runtime.native_type_by_name_kind(enum_name, crate::ast::TypeKind::Enum)
+            .map(|ty| ty.id).or_else(|| self.runtime.type_id_by_name_kind(enum_name, crate::ast::TypeKind::Enum));
         let case_id = runtime_type_id
             .and_then(|type_id| self.runtime.enum_case_by_name(type_id, case_name))
             .map(|case| case.id);
@@ -2211,7 +2203,7 @@ impl<'a> Interpreter<'a> {
             ir::Type::Float => RuntimeTypeValue::Primitive("Float".to_string()),
             ir::Type::Str => self
                 .runtime
-                .type_id_by_name_kind("Str", crate::ast::TypeKind::Class)
+                .type_id_by_name_any_kind("Str")
                 .map(|id| RuntimeTypeValue::Runtime {
                     id,
                     args: Vec::new(),
@@ -2299,312 +2291,466 @@ impl<'a> Interpreter<'a> {
     }
 
     fn runtime_type_id_for_value(&self, value: &Value) -> Option<runtime::RuntimeTypeId> {
-        match value {
-            Value::Bool(_) => self
-                .runtime
-                .type_id_by_name_kind("Bool", crate::ast::TypeKind::Class),
-            Value::Int(_) => self
-                .runtime
-                .type_id_by_name_kind("Int", crate::ast::TypeKind::Class),
-            Value::Float(_) => self
-                .runtime
-                .type_id_by_name_kind("Float", crate::ast::TypeKind::Class),
-            Value::Decimal(_) => self
-                .runtime
-                .type_id_by_name_kind("Decimal", crate::ast::TypeKind::Class),
-            Value::Char(_) => self
-                .runtime
-                .type_id_by_name_kind("Char", crate::ast::TypeKind::Class),
-            Value::List(_) => self
-                .runtime
-                .type_id_by_name_kind("Vector", crate::ast::TypeKind::Class),
-            Value::Set(_) => self
-                .runtime
-                .type_id_by_name_kind("Set", crate::ast::TypeKind::Class),
-            Value::Map(_) => self
-                .runtime
-                .type_id_by_name_kind("Map", crate::ast::TypeKind::Class),
-            Value::ReferenceId(_) => self
-                .runtime
-                .type_id_by_name_kind("ReferenceId", crate::ast::TypeKind::Class),
-            Value::FileStream(_) | Value::TextFileReader(_) => None,
-            Value::String(_) => self
-                .runtime
-                .type_id_by_name_kind("Str", crate::ast::TypeKind::Class),
-            Value::Aggregate(aggregate) => {
-                let aggregate = aggregate.borrow();
-                aggregate.runtime_type_id.or_else(|| {
-                    self.runtime
-                        .type_id_by_name_kind(&aggregate.type_name, aggregate.kind)
-                })
-            }
-            _ => None,
+        if let Value::Aggregate(aggregate) = value {
+            let aggregate = aggregate.borrow();
+            return aggregate.runtime_type_id.or_else(|| self.runtime.type_id_by_name_kind(&aggregate.type_name, aggregate.kind));
         }
+        if let Value::RuntimeType(runtime_type) = value {
+            let name = crate::stdlib::native::metadata_type(self.runtime_type_kind_case(runtime_type));
+            return self.runtime.type_id_by_name_any_kind(name);
+        }
+        let (name, kind) = crate::stdlib::native::value_type(value)?;
+        self.runtime.native_type_by_name_kind(name, kind).map(|ty| ty.id)
     }
 
     fn try_invoke_runtime_method(
-        &mut self,
-        receiver: Value,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
+        &mut self, receiver: Value, method: &str, args: Vec<Value>, span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
-        if let Some(value) =
-            self.try_invoke_metadata_method(receiver.clone(), method, args.clone(), span)?
-        {
-            return Ok(Some(value));
+        let Some(type_id) = self.runtime_type_id_for_value(&receiver) else { return Ok(None); };
+        let Some(ty) = self.runtime.type_by_id(type_id) else { return Ok(None); };
+        let methods = ty.methods.iter().filter(|method| matches!(method.target, runtime::RuntimeMethodTarget::Builtin(_)) || !matches!(&receiver, Value::Aggregate(_))).cloned().collect::<Vec<_>>();
+        let Some(binding) = self.choose_runtime_method_overload(&methods, method, &args).cloned() else { return Ok(None); };
+        match binding.target {
+            runtime::RuntimeMethodTarget::Builtin(handler) => handler(self, receiver, args, span).map(Some),
+            runtime::RuntimeMethodTarget::Ir(function) => self.call_function(function, Some(receiver), None, args, span).map(Some),
         }
+    }
 
-        let Some(type_id) = self.runtime_type_id_for_value(&receiver) else {
-            return Ok(None);
-        };
-        let Some(runtime_ty) = self.runtime.type_by_id(type_id) else {
-            return Ok(None);
-        };
-        if runtime_ty.ir_type_id.is_some() {
-            return Ok(None);
+    fn try_invoke_universal_method(
+        &mut self, receiver: Value, method: &str, args: &[Value], span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        let own = self.runtime.native_type_by_name_kind("Any", ast::TypeKind::Interface)
+            .and_then(|ty| self.choose_runtime_method_overload(&ty.methods, method, args));
+        let conditional = crate::stdlib::native::conditional_trait(&receiver, method)
+            .and_then(|owner| self.runtime.native_type_by_name_kind(owner, ast::TypeKind::Interface))
+            .and_then(|ty| self.choose_runtime_method_overload(&ty.methods, method, args));
+        let Some(binding) = own.or(conditional).cloned() else { return Ok(None); };
+        let runtime::RuntimeMethodTarget::Builtin(handler) = binding.target else { unreachable!() };
+        handler(self, receiver, args.to_vec(), span).map(Some)
+    }
+
+    fn try_invoke_native_getter(
+        &mut self, receiver: Value, name: &str, span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        if let Some(binding) = crate::stdlib::native::synthetic_getter(name) {
+            let runtime::RuntimeMethodTarget::Builtin(handler) = binding.target else { unreachable!() };
+            return handler(self, receiver, Vec::new(), span).map(Some);
         }
-        let Some(runtime_method) = self
-            .choose_runtime_method_overload(&runtime_ty.methods, method, &args)
-            .cloned()
-        else {
-            return Ok(None);
-        };
-
-        let value = match runtime_method.target {
-            runtime::RuntimeMethodTarget::Ir(function) => {
-                self.call_function(function, Some(receiver), None, args, span)?
-            }
-            runtime::RuntimeMethodTarget::Builtin(handler) => handler(self, receiver, args, span)?,
-        };
-        Ok(Some(value))
+        if let Some(handler) = self.runtime_type_id_for_value(&receiver)
+            .and_then(|id| self.runtime.type_by_id(id))
+            .filter(|ty| ty.native)
+            .and_then(|ty| crate::stdlib::native::field_getter(&ty.name, ty.kind, name)) {
+            return handler(self, receiver, Vec::new(), span).map(Some);
+        }
+        let own = self.runtime_type_id_for_value(&receiver)
+            .and_then(|id| self.runtime.type_by_id(id))
+            .and_then(|ty| ty.methods.iter().find(|method| method.name == name && method.kind == runtime::RuntimeMethodKind::Getter));
+        let universal = self.runtime.type_by_name_kind("Any", ast::TypeKind::Interface)
+            .and_then(|ty| ty.methods.iter().find(|method| method.name == name && method.kind == runtime::RuntimeMethodKind::Getter));
+        let Some(binding) = own.or(universal).cloned() else { return Ok(None); };
+        let runtime::RuntimeMethodTarget::Builtin(handler) = binding.target else { return Ok(None); };
+        handler(self, receiver, Vec::new(), span).map(Some)
     }
 
     fn choose_runtime_method_overload<'m>(
-        &self,
-        methods: &'m [runtime::RuntimeMethod],
-        name: &str,
-        args: &[Value],
+        &self, methods: &'m [runtime::RuntimeMethod], name: &str, args: &[Value],
     ) -> Option<&'m runtime::RuntimeMethod> {
-        let mut best = None;
-        let mut best_score = i32::MIN;
-
-        for method in methods.iter().filter(|candidate| candidate.name == name) {
-            if method.params.len() != args.len() {
-                continue;
+        let candidates = methods.iter().filter(|method| method.name == name).collect::<Vec<_>>();
+        candidates.iter().copied().rev().filter_map(|method| {
+            let public_count = args.len().checked_sub(method.reified_params)?;
+            let required = method.params.len().saturating_sub(method.default_count + usize::from(method.variadic));
+            if public_count < required || (!method.variadic && public_count > method.params.len()) { return None; }
+            let mut score = 10i32;
+            for (index, arg) in args.iter().take(public_count).enumerate() {
+                let param = method.params.get(index).or_else(|| method.params.last())?;
+                let param = if method.variadic && index >= method.params.len().saturating_sub(1) {
+                    if let ir::Type::Named { args: elements, .. } = param {
+                        if self.value_matches_type(arg, param) && public_count == method.params.len() { param }
+                        else { elements.first().unwrap_or(param) }
+                    } else { param }
+                } else { param };
+                if !self.value_matches_type(arg, param) { return None; }
+                if !matches!(param, ir::Type::Unknown | ir::Type::TypeParam(_)) { score += 2; }
             }
-
-            let mut score = 10;
-            let mut matches = true;
-            for (param, arg) in method.params.iter().zip(args) {
-                if !self.value_matches_type(arg, param) {
-                    matches = false;
-                    break;
-                }
-                if !matches!(param, ir::Type::Unknown | ir::Type::TypeParam(_)) {
-                    score += 2;
-                }
-            }
-
-            if matches && score > best_score {
-                best = Some(method);
-                best_score = score;
-            }
-        }
-
-        best
+            Some((score, method))
+        }).max_by_key(|(score, _)| *score).map(|(_, method)| method)
+            // Let the operation produce its established arity/type diagnostic.
+            .or_else(|| candidates.first().copied())
     }
 
-    fn try_invoke_metadata_method(
+
+    pub(crate) fn native_type_annotation(
         &mut self,
         receiver: Value,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Option<Value>, Diagnostic> {
-        let value = match receiver {
-            Value::RuntimeType(runtime_type) => {
-                self.invoke_runtime_type_metadata_method(runtime_type, method, args, span)?
-            }
-            Value::RuntimeField {
-                owner,
-                case_id,
-                slot,
-            } => {
-                self.invoke_runtime_field_metadata_method(owner, case_id, slot, method, args, span)?
-            }
-            Value::RuntimeMethod { owner, slot } => {
-                self.invoke_runtime_method_metadata_method(owner, slot, method, args, span)?
-            }
-            Value::RuntimeParam {
-                owner,
-                method_slot,
-                index,
-            } => self.invoke_runtime_param_metadata_method(
-                owner,
-                method_slot,
-                index,
-                method,
-                args,
-                span,
-            )?,
-            Value::RuntimeEnumCase { owner, case_id } => {
-                self.invoke_runtime_enum_case_metadata_method(owner, case_id, method, args, span)?
-            }
-            _ => return Ok(None),
-        };
-        Ok(Some(value))
-    }
-
-    fn invoke_runtime_type_metadata_method(
-        &mut self,
-        runtime_type: RuntimeTypeValue,
-        method: &str,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match method {
-            "annotation" => {
+        let _ = receiver;
+        let method = "annotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
-            }
-            "hasAnnotation" => {
+            
+    }
+
+    pub(crate) fn native_type_has_annotation(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "hasAnnotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
-            }
-            "name" => {
+            
+    }
+
+    pub(crate) fn native_type_name(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "name";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(self
                     .runtime_type_name(&runtime_type)
                     .map(Value::String)
                     .map(|value| self.option_some(value))
                     .unwrap_or_else(|| self.option_none()))
-            }
-            "qualifiedName" => {
+            
+    }
+
+    pub(crate) fn native_type_qualified_name(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "qualifiedName";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(self
                     .runtime_type_qualified_name(&runtime_type)
                     .map(Value::String)
                     .map(|value| self.option_some(value))
                     .unwrap_or_else(|| self.option_none()))
-            }
-            "kind" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
-                Ok(self.runtime_type_kind_value(&runtime_type))
-            }
-            "asClass" => self.runtime_type_cast_value(runtime_type, "Class", method, args, span),
-            "asShape" => self.runtime_type_cast_value(runtime_type, "Shape", method, args, span),
-            "asUnion" => self.runtime_type_cast_value(runtime_type, "Union", method, args, span),
-            "asInterface" => {
-                self.runtime_type_cast_value(runtime_type, "Interface", method, args, span)
-            }
-            "asObject" => self.runtime_type_cast_value(runtime_type, "Object", method, args, span),
-            "asAnnotation" => {
-                self.runtime_type_cast_value(runtime_type, "Annotation", method, args, span)
-            }
-            "fields" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
-                Ok(self.runtime_type_fields_value(&runtime_type))
-            }
-            "methods" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
-                Ok(self.runtime_type_methods_value(&runtime_type))
-            }
-            "field" => {
-                self.expect_metadata_arity(method, &args, 1, span)?;
-                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
-                Ok(self.runtime_type_field_value(&runtime_type, &name))
-            }
-            "method" => {
-                self.expect_metadata_arity(method, &args, 1, span)?;
-                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
-                Ok(self.runtime_type_method_value(&runtime_type, &name))
-            }
-            "alternatives" => {
-                self.expect_metadata_arity(method, &args, 0, span)?;
-                Ok(self.runtime_type_enum_cases_value(&runtime_type))
-            }
-            "alternative" => {
-                self.expect_metadata_arity(method, &args, 1, span)?;
-                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
-                Ok(self.runtime_type_enum_case_value(&runtime_type, &name))
-            }
-            _ => Err(self.unknown_metadata_method(method, span)),
-        }
+            
     }
 
-    fn invoke_runtime_field_metadata_method(
+    pub(crate) fn native_type_kind(
         &mut self,
-        owner: runtime::RuntimeTypeId,
-        case_id: Option<runtime::RuntimeEnumCaseId>,
-        slot: runtime::RuntimeFieldSlot,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match method {
-            "annotation" => {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "kind";
+
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_kind_value(&runtime_type))
+            
+    }
+
+    pub(crate) fn native_type_as_class(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "asClass";
+self.runtime_type_cast_value(runtime_type, "Class", method, args, span)
+    }
+
+    pub(crate) fn native_type_as_shape(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "asShape";
+self.runtime_type_cast_value(runtime_type, "Shape", method, args, span)
+    }
+
+    pub(crate) fn native_type_as_union(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "asUnion";
+self.runtime_type_cast_value(runtime_type, "Union", method, args, span)
+    }
+
+    pub(crate) fn native_type_as_interface(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "asInterface";
+
+                self.runtime_type_cast_value(runtime_type, "Interface", method, args, span)
+            
+    }
+
+    pub(crate) fn native_type_as_object(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "asObject";
+self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
+    }
+
+    pub(crate) fn native_type_as_annotation(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "asAnnotation";
+
+                self.runtime_type_cast_value(runtime_type, "Annotation", method, args, span)
+            
+    }
+
+    pub(crate) fn native_type_fields(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "fields";
+
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_fields_value(&runtime_type))
+            
+    }
+
+    pub(crate) fn native_type_methods(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "methods";
+
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_methods_value(&runtime_type))
+            
+    }
+
+    pub(crate) fn native_type_field(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "field";
+
+                self.expect_metadata_arity(method, &args, 1, span)?;
+                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
+                Ok(self.runtime_type_field_value(&runtime_type, &name))
+            
+    }
+
+    pub(crate) fn native_type_method(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "method";
+
+                self.expect_metadata_arity(method, &args, 1, span)?;
+                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
+                Ok(self.runtime_type_method_value(&runtime_type, &name))
+            
+    }
+
+    pub(crate) fn native_type_alternatives(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "alternatives";
+
+                self.expect_metadata_arity(method, &args, 0, span)?;
+                Ok(self.runtime_type_enum_cases_value(&runtime_type))
+            
+    }
+
+    pub(crate) fn native_type_alternative(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeType(runtime_type) = receiver else { unreachable!() };
+        let method = "alternative";
+
+                self.expect_metadata_arity(method, &args, 1, span)?;
+                let name = self.expect_metadata_string_arg(method, &args[0], span)?;
+                Ok(self.runtime_type_enum_case_value(&runtime_type, &name))
+            
+    }
+
+    pub(crate) fn native_field_annotation(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "annotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
-            }
-            "hasAnnotation" => {
+            
+    }
+
+    pub(crate) fn native_field_has_annotation(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "hasAnnotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
-            }
-            "name" => {
+            
+    }
+
+    pub(crate) fn native_field_name(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeField { owner, case_id, slot } = receiver else { unreachable!() };
+        let method = "name";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::String(
                     self.runtime_field_metadata(owner, case_id, slot)
                         .map(|field| field.name.clone())
                         .unwrap_or_default(),
                 ))
-            }
-            "fieldType" => {
+            
+    }
+
+    pub(crate) fn native_field_field_type(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeField { owner, case_id, slot } = receiver else { unreachable!() };
+        let method = "fieldType";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 let ty = self
                     .runtime_field_metadata(owner, case_id, slot)
                     .map(|field| field.ty.clone())
                     .unwrap_or(ir::Type::Unknown);
                 Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
-            }
-            "isPrivate" => {
+            
+    }
+
+    pub(crate) fn native_field_is_private(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeField { owner, case_id, slot } = receiver else { unreachable!() };
+        let method = "isPrivate";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::Bool(
                     self.runtime_field_metadata(owner, case_id, slot)
                         .map(|field| field.visibility == ast::Visibility::Private)
                         .unwrap_or(false),
                 ))
-            }
-            _ => Err(self.unknown_metadata_method(method, span)),
-        }
+            
     }
 
-    fn invoke_runtime_method_metadata_method(
+    pub(crate) fn native_method_annotation(
         &mut self,
-        owner: runtime::RuntimeTypeId,
-        slot: runtime::RuntimeMethodSlot,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match method {
-            "annotation" => {
+        let _ = receiver;
+        let method = "annotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
-            }
-            "hasAnnotation" => {
+            
+    }
+
+    pub(crate) fn native_method_has_annotation(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "hasAnnotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
-            }
-            "name" => {
+            
+    }
+
+    pub(crate) fn native_method_name(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeMethod { owner, slot } = receiver else { unreachable!() };
+        let method = "name";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::String(
                     self.runtime_method_metadata(owner, slot)
                         .map(|method| method.name.clone())
                         .unwrap_or_default(),
                 ))
-            }
-            "params" => {
+            
+    }
+
+    pub(crate) fn native_method_params(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeMethod { owner, slot } = receiver else { unreachable!() };
+        let method = "params";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 let count = self
                     .runtime_method_metadata(owner, slot)
@@ -2619,30 +2765,36 @@ impl<'a> Interpreter<'a> {
                         })
                         .collect(),
                 ))
-            }
-            "returnType" => {
+            
+    }
+
+    pub(crate) fn native_method_return_type(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeMethod { owner, slot } = receiver else { unreachable!() };
+        let method = "returnType";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 let ty = self
                     .runtime_method_metadata(owner, slot)
                     .map(|method| method.return_ty.clone())
                     .unwrap_or(ir::Type::Unknown);
                 Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
-            }
-            _ => Err(self.unknown_metadata_method(method, span)),
-        }
+            
     }
 
-    fn invoke_runtime_param_metadata_method(
+    pub(crate) fn native_param_name(
         &mut self,
-        owner: runtime::RuntimeTypeId,
-        method_slot: runtime::RuntimeMethodSlot,
-        index: usize,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match method {
-            "name" => {
+        let Value::RuntimeParam { owner, method_slot, index } = receiver else { unreachable!() };
+        let method = "name";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::String(
                     self.runtime_method_metadata(owner, method_slot)
@@ -2650,8 +2802,18 @@ impl<'a> Interpreter<'a> {
                         .cloned()
                         .unwrap_or_default(),
                 ))
-            }
-            "paramType" => {
+            
+    }
+
+    pub(crate) fn native_param_param_type(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeParam { owner, method_slot, index } = receiver else { unreachable!() };
+        let method = "paramType";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 let ty = self
                     .runtime_method_metadata(owner, method_slot)
@@ -2659,37 +2821,64 @@ impl<'a> Interpreter<'a> {
                     .cloned()
                     .unwrap_or(ir::Type::Unknown);
                 Ok(Value::RuntimeType(self.runtime_type_value_for_ir_type(&ty)))
-            }
-            _ => Err(self.unknown_metadata_method(method, span)),
-        }
+            
     }
 
-    fn invoke_runtime_enum_case_metadata_method(
+    pub(crate) fn native_alternative_annotation(
         &mut self,
-        owner: runtime::RuntimeTypeId,
-        case_id: runtime::RuntimeEnumCaseId,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match method {
-            "annotation" => {
+        let _ = receiver;
+        let method = "annotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(self.option_none())
-            }
-            "hasAnnotation" => {
+            
+    }
+
+    pub(crate) fn native_alternative_has_annotation(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "hasAnnotation";
+
                 self.expect_metadata_arity(method, &args, 1, span)?;
                 Ok(Value::Bool(false))
-            }
-            "name" => {
+            
+    }
+
+    pub(crate) fn native_alternative_name(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeEnumCase { owner, case_id } = receiver else { unreachable!() };
+        let method = "name";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::String(
                     self.runtime_enum_case_metadata(owner, case_id)
                         .map(|case| case.name.clone())
                         .unwrap_or_default(),
                 ))
-            }
-            "fields" => {
+            
+    }
+
+    pub(crate) fn native_alternative_fields(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let Value::RuntimeEnumCase { owner, case_id } = receiver else { unreachable!() };
+        let method = "fields";
+
                 self.expect_metadata_arity(method, &args, 0, span)?;
                 Ok(Value::list(
                     self.runtime_enum_case_metadata(owner, case_id)
@@ -2705,9 +2894,7 @@ impl<'a> Interpreter<'a> {
                         })
                         .unwrap_or_default(),
                 ))
-            }
-            _ => Err(self.unknown_metadata_method(method, span)),
-        }
+            
     }
 
     fn runtime_type_cast_value(
@@ -2960,13 +3147,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn unknown_metadata_method(&self, method: &str, span: Option<Span>) -> Diagnostic {
-        self.runtime_error(
-            span,
-            format!("metadata method '{}' is not available", method),
-        )
-    }
-
     fn read_place(
         &mut self,
         frame: Option<&Frame>,
@@ -3098,41 +3278,23 @@ impl<'a> Interpreter<'a> {
     }
 
     fn coerce_collection_method_args(
-        &self,
-        receiver_ty: Option<&ir::Type>,
-        method: &str,
-        mut args: Vec<Value>,
+        &self, receiver_ty: Option<&ir::Type>, method: &str, mut args: Vec<Value>,
     ) -> Vec<Value> {
-        let Some(ir::Type::Named { name, args: types }) = receiver_ty else {
-            return args;
-        };
-
-        let mut coerce = |index: usize, ty: &ir::Type| {
-            if let Some(value) = args.get_mut(index) {
-                *value = self.coerce_value_to_type(value.clone(), ty);
-            }
-        };
-
-        match (name.as_str(), method) {
-            ("Vector" | "Array" | "LinkedList", "add" | "contains") if types.len() == 1 => {
-                coerce(0, &types[0]);
-            }
-            ("Vector" | "Array" | "LinkedList", "setAt" | "insertAt") if types.len() == 1 => {
-                coerce(1, &types[0]);
-            }
-            ("Set", "add" | "contains") if types.len() == 1 => {
-                coerce(0, &types[0]);
-            }
-            ("Map", "put") if types.len() == 2 => {
-                coerce(0, &types[0]);
-                coerce(1, &types[1]);
-            }
-            ("Map", "get" | "contains") if types.len() == 2 => {
-                coerce(0, &types[0]);
-            }
-            _ => {}
+        let Some(receiver_ty) = receiver_ty else { return args; };
+        if let ir::Type::Named { name, .. } = receiver_ty {
+            if !self.runtime.active_name_is_native(name) { return args; }
         }
-
+        let Some(signature) = crate::stdlib::method_signature(receiver_ty, method, args.len()) else { return args; };
+        let count = args.len();
+        for (index, value) in args.iter_mut().enumerate() {
+            let Some(param) = signature.params.get(index).or_else(|| signature.variadic.then(|| signature.params.last()).flatten()) else { continue; };
+            let param = if signature.variadic && index >= signature.params.len().saturating_sub(1) {
+                if count == signature.params.len() && self.value_matches_type(value, param) { param }
+                else if let ir::Type::Named { args, .. } = param { args.first().unwrap_or(param) }
+                else { param }
+            } else { param };
+            *value = self.coerce_value_to_type(value.clone(), param);
+        }
         args
     }
 
@@ -3156,6 +3318,15 @@ impl<'a> Interpreter<'a> {
                     .cloned();
                 let args = self.coerce_collection_method_args(receiver_ty.as_ref(), method, args);
                 let receiver = self.eval_operand_ref(frame, receiver, span)?;
+                if let Some((owner, kind)) = receiver_ty.as_ref().and_then(|ty| crate::stdlib::native::declared_value_type(ty, &receiver)) {
+                    if let Some(ty) = self.runtime.type_by_name_kind(owner, kind) {
+                        if let Some(binding) = self.choose_runtime_method_overload(&ty.methods, method, &args).cloned() {
+                            if let runtime::RuntimeMethodTarget::Builtin(handler) = binding.target {
+                                return handler(self, receiver, args, span);
+                            }
+                        }
+                    }
+                }
                 self.invoke_method(receiver, method, args, span)
             }
             ir::Callee::Intrinsic(intrinsic) => self.invoke_intrinsic(intrinsic, args, span),
@@ -3191,199 +3362,33 @@ impl<'a> Interpreter<'a> {
     }
 
     fn invoke_named_path(
-        &mut self,
-        frame: Option<&Frame>,
-        path: &[String],
-        args: Vec<Value>,
-        span: Option<Span>,
-        structural: bool,
+        &mut self, frame: Option<&Frame>, path: &[String], args: Vec<Value>, span: Option<Span>, structural: bool,
     ) -> Result<Value, Diagnostic> {
-        if path.is_empty() {
-            return Err(self.runtime_error(span, "empty callee path"));
-        }
-
+        let Some(first) = path.first() else { return Err(self.runtime_error(span, "empty callee path")); };
         if path.len() == 1 {
-            let name = &path[0];
-            if let Some(function) = self.lookup_function(name) {
+            if let Some(function) = self.lookup_function(first) {
                 return self.call_function(function, None, None, args, span);
             }
-            return self.invoke_root_named(name, args, span, structural);
+            return self.invoke_root_named(first, args, span, structural);
         }
-
-        if path[0] == "OS" && path.len() == 2 {
-            return self.invoke_os_method(&path[1], args, span);
-        }
-        if path[0] == "OS" && path.len() == 3 && matches!(path[1].as_str(), "stdout" | "stderr") {
-            return self.invoke_os_method(&path[2], args, span);
-        }
-        if path[0] == "Math" && path.len() == 2 {
-            return self.invoke_math_method(&path[1], args, span);
-        }
-        if path[0] == "File" && path.len() == 2 {
-            return self.invoke_file_method(&path[1], args, span);
-        }
-        if path[0] == "Json" && path.len() == 2 {
-            return self.invoke_json_method(&path[1], args, span);
-        }
-        if path[0] == "Regex" && path.len() == 2 {
-            return self.invoke_regex_static(&path[1], args, span);
-        }
-
-        if matches!(path[0].as_str(), "Array" | "Vector") && path.len() == 2 {
-            let collection = path[0].as_str();
-            let method = path[1].as_str();
-            match method {
-                "fill" => {
-                    if args.len() != 2 {
-                        return Err(self.runtime_error(
-                            span,
-                            format!("{collection}.fill expects 2 arguments, got {}", args.len()),
-                        ));
-                    }
-                    let context = format!("{collection}.fill length");
-                    let len = args[0].as_int(self, span, &context)?;
-                    if len < 0 {
-                        return Err(self.runtime_error(
-                            span,
-                            format!("{collection}.fill length must be non-negative"),
-                        ));
-                    }
-                    return Ok(Value::List(Rc::new(RefCell::new(vec![
-                        args[1].clone();
-                        len as usize
-                    ]))));
+        if let Some(owner) = crate::stdlib::native::static_namespace(&path[..path.len() - 1]) {
+            let ty = self.runtime.type_by_name_kind(owner, ast::TypeKind::Object)
+                .filter(|ty| ty.native && self.runtime.active_name_is_native(owner));
+            let binding = ty.and_then(|ty| self.choose_runtime_method_overload(&ty.methods, &path[path.len() - 1], &args)).cloned();
+            if let Some(binding) = binding {
+                if let runtime::RuntimeMethodTarget::Builtin(handler) = binding.target {
+                    let receiver = self.lookup_singleton(owner, span)?.unwrap_or(Value::Unit);
+                    return handler(self, receiver, args, span);
                 }
-                "generate" => {
-                    if args.len() != 2 {
-                        return Err(self.runtime_error(
-                            span,
-                            format!(
-                                "{collection}.generate expects 2 arguments, got {}",
-                                args.len()
-                            ),
-                        ));
-                    }
-                    let context = format!("{collection}.generate length");
-                    let len = args[0].as_int(self, span, &context)?;
-                    if len < 0 {
-                        return Err(self.runtime_error(
-                            span,
-                            format!("{collection}.generate length must be non-negative"),
-                        ));
-                    }
-                    let callback = args[1].clone();
-                    let mut values = Vec::with_capacity(len as usize);
-                    for index in 0..(len as usize) {
-                        values.push(self.invoke_value(
-                            callback.clone(),
-                            vec![Value::Int(index as i64)],
-                            span,
-                        )?);
-                    }
-                    return Ok(Value::List(Rc::new(RefCell::new(values))));
-                }
-                _ => {}
             }
         }
-
-        if path[0] == "Vector" && path.len() == 2 && path[1] == "from" {
-            if args.len() != 1 {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Vector.from expects 1 argument, got {}", args.len()),
-                ));
-            }
-            let values = iterable_values(args[0].clone(), span, self)?;
-            return Ok(Value::list(values));
+        if path.len() == 2 && let Some(value) = self.construct_named_path(path, args.clone(), span, true)? {
+            return Ok(value);
         }
-
-        if path[0] == "Set" && path.len() == 2 && path[1] == "from" {
-            if args.len() != 1 {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Set.from expects 1 argument, got {}", args.len()),
-                ));
-            }
-            let values = iterable_values(args[0].clone(), span, self)?;
-            return Ok(Value::set(self.unique_values(values, span)?));
-        }
-
-        if path[0] == "Decimal" && path.len() == 2 && path[1] == "parse" {
-            expect_runtime_arity(self, "Decimal.parse", &args, 1, span)?;
-            let Value::String(text) = &args[0] else {
-                return Err(self.runtime_error(span, "Decimal.parse expects Str"));
-            };
-            return Ok(Decimal::parse(text)
-                .map(|value| self.option_some(Value::Decimal(value)))
-                .unwrap_or_else(|| self.option_none()));
-        }
-        if path[0] == "Int" && path.len() == 2 && path[1] == "parse" {
-            if args.len() != 1 {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Int.parse expects 1 argument, got {}", args.len()),
-                ));
-            }
-            let Value::String(text) = &args[0] else {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Int.parse expects Str, got {}", args[0].render()),
-                ));
-            };
-            return Ok(match text.parse::<i64>() {
-                Ok(parsed) => self.option_some(Value::Int(parsed)),
-                Err(_) => self.option_none(),
-            });
-        }
-
-        if path[0] == "Float" && path.len() == 2 && path[1] == "parse" {
-            if args.len() != 1 {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Float.parse expects 1 argument, got {}", args.len()),
-                ));
-            }
-            let Value::String(text) = &args[0] else {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Float.parse expects Str, got {}", args[0].render()),
-                ));
-            };
-            return Ok(match text.parse::<f64>() {
-                Ok(parsed) => self.option_some(Value::Float(parsed)),
-                Err(_) => self.option_none(),
-            });
-        }
-
-        if path[0] == "Option" && path.len() == 2 && path[1] == "when" {
-            if args.len() != 2 {
-                return Err(self.runtime_error(
-                    span,
-                    format!("Option.when expects 2 arguments, got {}", args.len()),
-                ));
-            }
-            let condition = args[0].as_bool(self, span, "Option.when condition")?;
-            return Ok(if condition {
-                self.option_some(args[1].clone())
-            } else {
-                self.option_none()
-            });
-        }
-
-        if path.len() == 2 {
-            if let Some(value) = self.construct_named_path(path, args.clone(), span, true)? {
-                return Ok(value);
-            }
-        }
-
         if let Some(receiver) = self.resolve_runtime_path(frame, &path[..path.len() - 1], span)? {
             return self.invoke_method(receiver, &path[path.len() - 1], args, span);
         }
-
-        Err(self.runtime_error(
-            span,
-            format!("unsupported named callee path '{}'", path.join(".")),
-        ))
+        Err(self.runtime_error(span, format!("unsupported named callee path '{}'", path.join("."))))
     }
 
     fn resolve_runtime_path(
@@ -3423,28 +3428,11 @@ impl<'a> Interpreter<'a> {
         Ok(Some(value))
     }
 
-    fn resolve_named_root(
-        &mut self,
-        frame: Option<&Frame>,
-        name: &str,
-        span: Option<Span>,
-    ) -> Result<Option<Value>, Diagnostic> {
-        if let Some(value) = self.lookup_runtime_value(frame, name) {
-            return Ok(Some(value));
-        }
-        if let Some(value) = self.lookup_singleton(name, span)? {
-            return Ok(Some(value));
-        }
-        if name == "None" {
-            return Ok(Some(self.option_none()));
-        }
-        if crate::decimal::is_rounding_name(name) {
-            return Ok(Some(self.builtin_enum_variant(
-                "Rounding",
-                name,
-                &[],
-                vec![],
-            )));
+    fn resolve_named_root(&mut self, frame: Option<&Frame>, name: &str, span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        if let Some(value) = self.lookup_runtime_value(frame, name) { return Ok(Some(value)); }
+        if let Some(value) = self.lookup_singleton(name, span)? { return Ok(Some(value)); }
+        if let Some(owner) = crate::stdlib::native::bare_variant_owner(name) {
+            return Ok(Some(self.builtin_enum_variant(owner, name, &[], Vec::new())));
         }
         match self.construct_enum_case(None, name, Vec::new(), span, false) {
             Ok(value) => Ok(Some(value)),
@@ -3468,166 +3456,272 @@ impl<'a> Interpreter<'a> {
     }
 
     fn invoke_root_named(
-        &mut self,
-        name: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-        structural: bool,
+        &mut self, name: &str, args: Vec<Value>, span: Option<Span>, structural: bool,
     ) -> Result<Value, Diagnostic> {
-        if !structural {
-            if let Some(value) = self.construct_builtin(name, &args, span)? {
-                return Ok(value);
-            }
+        if !structural && !self.runtime.source_type_named(name) && crate::stdlib::native::constructor_owner(name)
+            .is_some_and(|(owner, kind)| self.runtime.active_type_is_native(owner, kind))
+            && let Some(constructor) = crate::stdlib::native::constructor(name) {
+            return constructor(self, Value::Unit, args, span);
         }
-        if args.is_empty() {
-            if let Some(value) = self.lookup_singleton(name, span)? {
-                return Ok(value);
-            }
+        if !self.runtime.source_type_named(name) && crate::stdlib::native::constructor_owner(name).is_none()
+            && let Some(function) = crate::stdlib::native::root_function(name) {
+            return function(self, Value::Unit, args, span);
         }
-        if let Some(value) = self.construct_named_type(name, args.clone(), span, structural)? {
-            return Ok(value);
-        }
-        if let Some(value) = self.lookup_runtime_value(None, name) {
-            return self.invoke_value(value, args, span);
-        }
+        let source_value_type = self.runtime.type_id_by_name_any_kind(name)
+            .and_then(|id| self.runtime.type_by_id(id))
+            .is_some_and(|ty| !ty.native && ty.kind != ast::TypeKind::Object);
+        if args.is_empty() && !source_value_type && let Some(value) = self.lookup_singleton(name, span)? { return Ok(value); }
+        if let Some(value) = self.construct_named_type(name, args.clone(), span, structural)? { return Ok(value); }
+        if let Some(value) = self.lookup_runtime_value(None, name) { return self.invoke_value(value, args, span); }
         Err(self.runtime_error(span, format!("unknown callable '{}'", name)))
     }
 
-    fn construct_named_path(
-        &mut self,
-        path: &[String],
-        args: Vec<Value>,
-        span: Option<Span>,
-        from_call: bool,
-    ) -> Result<Option<Value>, Diagnostic> {
-        if path.len() != 2 {
-            return Ok(None);
+    fn construct_named_path(&mut self, path: &[String], args: Vec<Value>, span: Option<Span>, from_call: bool) -> Result<Option<Value>, Diagnostic> {
+        let [owner, member] = path else { return Ok(None); };
+        if !from_call && args.is_empty() && let Some(namespace) = crate::stdlib::native::static_namespace(&path[..1])
+            && self.runtime.active_name_is_native(namespace) {
+            if let Some(receiver) = self.lookup_singleton(namespace, span)? {
+                if let Some(value) = self.try_invoke_native_getter(receiver, member, span)? { return Ok(Some(value)); }
+            }
         }
-        let type_name = &path[0];
-        let member = &path[1];
-        if type_name == "Rounding" && crate::decimal::is_rounding_name(member) && args.is_empty() {
-            return Ok(Some(self.builtin_enum_variant(
-                "Rounding",
-                member,
-                &[],
-                vec![],
-            )));
-        }
-
-        if type_name == "OS" && matches!(member.as_str(), "stdout" | "stderr") && args.is_empty() {
-            return self.lookup_singleton("OS", span);
-        }
-
-        if type_name == "SeekFrom"
-            && matches!(member.as_str(), "Start" | "Current" | "End")
-            && args.is_empty()
-        {
-            return Ok(Some(self.builtin_enum_variant(
-                "SeekFrom",
-                member,
-                &[],
-                Vec::new(),
-            )));
-        }
-
-        if self
-            .lookup_type_by_kind(type_name, crate::ast::TypeKind::Enum)
-            .is_some_and(|ty| ty.enum_cases.iter().any(|case| case.name == *member))
-        {
-            return self
-                .construct_enum_case(Some(type_name), member, args, span, from_call)
-                .map(Some);
+        if self.lookup_type_by_kind(owner, ast::TypeKind::Enum).is_some_and(|ty| ty.enum_cases.iter().any(|case| case.name == *member)) {
+            return self.construct_enum_case(Some(owner), member, args, span, from_call).map(Some);
         }
         Ok(None)
     }
 
-    fn construct_builtin(
-        &mut self,
-        name: &str,
-        args: &[Value],
-        span: Option<Span>,
-    ) -> Result<Option<Value>, Diagnostic> {
-        let value = match name {
-            "Range" => {
-                if !(args.len() == 2 || args.len() == 3) {
-                    return Err(self.runtime_error(
-                        span,
-                        format!("Range expects 2 or 3 arguments, got {}", args.len()),
-                    ));
+    pub(crate) fn native_vector_fill(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Vector.fill", &args, 2, span)?;
+        let len = args[0].as_int(self, span, "Vector.fill length")?;
+        if len < 0 { return Err(self.runtime_error(span, "Vector.fill length must be non-negative")); }
+        Ok(Value::list(vec![args[1].clone(); len as usize]))
+    }
+
+    pub(crate) fn native_vector_generate(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Vector.generate", &args, 2, span)?;
+        let len = args[0].as_int(self, span, "Vector.generate length")?;
+        if len < 0 { return Err(self.runtime_error(span, "Vector.generate length must be non-negative")); }
+        let mut values = Vec::with_capacity(len as usize);
+        for index in 0..len as usize { values.push(self.invoke_value(args[1].clone(), vec![Value::Int(index as i64)], span)?); }
+        Ok(Value::list(values))
+    }
+
+    pub(crate) fn native_array_fill(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Array.fill", &args, 2, span)?;
+        let len = args[0].as_int(self, span, "Array.fill length")?;
+        if len < 0 { return Err(self.runtime_error(span, "Array.fill length must be non-negative")); }
+        Ok(Value::list(vec![args[1].clone(); len as usize]))
+    }
+
+    pub(crate) fn native_array_generate(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Array.generate", &args, 2, span)?;
+        let len = args[0].as_int(self, span, "Array.generate length")?;
+        if len < 0 { return Err(self.runtime_error(span, "Array.generate length must be non-negative")); }
+        let mut values = Vec::with_capacity(len as usize);
+        for index in 0..len as usize { values.push(self.invoke_value(args[1].clone(), vec![Value::Int(index as i64)], span)?); }
+        Ok(Value::list(values))
+    }
+
+    pub(crate) fn native_vector_from(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Vector.from", &args, 1, span)?;
+        Ok(Value::list(iterable_values(args[0].clone(), span, self)?))
+    }
+
+    pub(crate) fn native_set_from(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Set.from", &args, 1, span)?;
+        let values = iterable_values(args[0].clone(), span, self)?;
+        Ok(Value::set(self.unique_values(values, span)?))
+    }
+
+    pub(crate) fn native_int_parse(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Int.parse", &args, 1, span)?;
+        let Value::String(text) = &args[0] else { return Err(self.runtime_error(span, "Int.parse expects Str")); };
+        Ok(text.parse::<i64>().ok().map(|value| self.option_some(Value::Int(value))).unwrap_or_else(|| self.option_none()))
+    }
+
+    pub(crate) fn native_float_parse(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Float.parse", &args, 1, span)?;
+        let Value::String(text) = &args[0] else { return Err(self.runtime_error(span, "Float.parse expects Str")); };
+        Ok(text.parse::<f64>().ok().map(|value| self.option_some(Value::Float(value))).unwrap_or_else(|| self.option_none()))
+    }
+
+    pub(crate) fn native_decimal_parse(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Decimal.parse", &args, 1, span)?;
+        let Value::String(text) = &args[0] else { return Err(self.runtime_error(span, "Decimal.parse expects Str")); };
+        Ok(Decimal::parse(text).map(|value| self.option_some(Value::Decimal(value))).unwrap_or_else(|| self.option_none()))
+    }
+
+    pub(crate) fn native_option_when(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Option.when", &args, 2, span)?;
+        Ok(if args[0].as_bool(self, span, "Option.when condition")? { self.option_some(args[1].clone()) } else { self.option_none() })
+    }
+
+    pub(crate) fn native_runtime_type(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "runtimeType", &args, 0, span)?;
+        Ok(Value::RuntimeType(self.runtime_type_value_for_value(&receiver)))
+    }
+
+    pub(crate) fn native_reference_id(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "referenceId", &args, 0, span)?;
+        if reference_identity_address(&receiver).is_none() { return Err(self.runtime_error(span, format!("referenceId is not available on {}", receiver.render()))); }
+        Ok(Value::ReferenceId(ReferenceIdValue { target: Box::new(receiver) }))
+    }
+
+    pub(crate) fn native_ctor_range(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        if !matches!(args.len(), 2 | 3) { return Err(self.runtime_error(span, format!("Range expects 2 or 3 arguments, got {}", args.len()))); }
+        let start = args[0].as_int(self, span, "Range start")?;
+        let end = args[1].as_int(self, span, "Range end")?;
+        let step = if args.len() == 3 { args[2].as_int(self, span, "Range step")? } else { 1 };
+        if step == 0 { return Err(self.runtime_error(span, "Range step cannot be zero")); }
+        self.construct_named_type("IntRange", vec![Value::Int(start), Value::Int(end), Value::Int(step)], span, false)?
+            .ok_or_else(|| self.runtime_error(span, "IntRange metadata is unavailable"))
+    }
+
+    pub(crate) fn native_ctor_int_range(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "IntRange", &args, 3, span)?;
+        if args[2].as_int(self, span, "IntRange step")? == 0 { return Err(self.runtime_error(span, "Range step cannot be zero")); }
+        self.construct_named_type("IntRange", args, span, false)?.ok_or_else(|| self.runtime_error(span, "IntRange metadata is unavailable"))
+    }
+
+    pub(crate) fn native_ctor_list(&mut self, receiver: Value, args: Vec<Value>, _span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        Ok(Value::list(args))
+    }
+
+    pub(crate) fn native_ctor_set(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        Ok(Value::set(self.unique_values(args, span)?))
+    }
+
+    pub(crate) fn native_ctor_map(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        Ok(Value::map(map_entries_from_tuple_values(args, span, self)?))
+    }
+
+    pub(crate) fn native_ctor_some(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Some", &args, 1, span)?;
+        Ok(self.option_some(args[0].clone()))
+    }
+
+    pub(crate) fn native_ctor_ok(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Ok", &args, 1, span)?;
+        Ok(self.result_ok(args[0].clone()))
+    }
+
+    pub(crate) fn native_ctor_err(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Err", &args, 1, span)?;
+        Ok(self.result_err(args[0].clone()))
+    }
+
+    pub(crate) fn native_ctor_left(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Left", &args, 1, span)?;
+        Ok(self.either_left(args[0].clone()))
+    }
+
+    pub(crate) fn native_ctor_right(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "Right", &args, 1, span)?;
+        Ok(self.either_right(args[0].clone()))
+    }
+
+    pub(crate) fn native_ctor_none(&mut self, receiver: Value, _args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        Err(self.runtime_error(span, "union variant 'None' does not accept call syntax; use 'None'"))
+    }
+
+    pub(crate) fn native_predef_identity(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_intrinsic(&ir::Intrinsic::Identity, args, span)
+    }
+
+    pub(crate) fn native_predef_ensure(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_intrinsic(&ir::Intrinsic::Ensure, args, span)
+    }
+
+    pub(crate) fn native_predef_assert(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_intrinsic(&ir::Intrinsic::Assert, args, span)
+    }
+
+    pub(crate) fn native_predef_panic(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_intrinsic(&ir::Intrinsic::Panic, args, span)
+    }
+
+    pub(crate) fn native_iterator_has_next(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        let Value::Iterator(iterator) = &receiver else { unreachable!() };
+
+                if !args.is_empty() {
+                    return Err(self.runtime_error(span, "Iterator.hasNext expects 0 arguments"));
                 }
-                let start = args[0].as_int(self, span, "Range start")?;
-                let end = args[1].as_int(self, span, "Range end")?;
-                let step = if args.len() == 3 {
-                    args[2].as_int(self, span, "Range step")?
-                } else {
-                    1
+                self.iter_has_next(Value::Iterator(iterator.clone()), span)
+            
+    }
+
+    pub(crate) fn native_iterator_next(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+
+                if !args.is_empty() {
+                    return Err(self.runtime_error(span, "Iterator.next expects 0 arguments"));
+                }
+                self.iter_next(receiver, span)
+            
+    }
+
+    pub(crate) fn native_iterator_zip(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        let Value::Iterator(iterator) = &receiver else { unreachable!() };
+
+                let [other] = args.as_slice() else {
+                    return Err(self.runtime_error(span, "Iterator.zip expects 1 argument"));
                 };
-                if step == 0 {
-                    return Err(self.runtime_error(span, "Range step cannot be zero"));
+                let lhs = iterator_values(iterator, span, self)?;
+                let rhs = iterable_values(other.clone(), span, self)?;
+                let out = lhs
+                    .into_iter()
+                    .zip(rhs)
+                    .map(|(left, right)| Value::Tuple(vec![left, right]))
+                    .collect();
+                Ok(Value::List(Rc::new(RefCell::new(out))))
+            
+    }
+
+    pub(crate) fn native_iterator_zip_with_index(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        let Value::Iterator(iterator) = &receiver else { unreachable!() };
+
+                if !args.is_empty() {
+                    return Err(
+                        self.runtime_error(span, "Iterator.zipWithIndex expects 0 arguments")
+                    );
                 }
-                self.construct_named_type(
-                    "IntRange",
-                    vec![Value::Int(start), Value::Int(end), Value::Int(step)],
-                    span,
-                    false,
-                )?
-            }
-            "IntRange" if args.len() == 3 => {
-                let step = args[2].as_int(self, span, "IntRange step")?;
-                if step == 0 {
-                    return Err(self.runtime_error(span, "Range step cannot be zero"));
-                }
-                self.construct_named_type(name, args.to_vec(), span, false)?
-            }
-            "Vector" | "LinkedList" | "Array" => {
-                Some(Value::List(Rc::new(RefCell::new(args.to_vec()))))
-            }
-            "Set" => Some(Value::Set(Rc::new(RefCell::new(
-                self.unique_values(args.to_vec(), span)?,
-            )))),
-            "Map" => {
-                let entries = map_entries_from_tuple_values(args.to_vec(), span, self)?;
-                Some(Value::Map(Rc::new(RefCell::new(entries))))
-            }
-            "Some" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "Some expects 1 argument"));
-                }
-                Some(self.option_some(args[0].clone()))
-            }
-            "None" => {
-                return Err(self.runtime_error(
-                    span,
-                    "union variant 'None' does not accept call syntax; use 'None'",
-                ));
-            }
-            "Ok" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "Ok expects 1 argument"));
-                }
-                Some(self.result_ok(args[0].clone()))
-            }
-            "Err" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "Err expects 1 argument"));
-                }
-                Some(self.result_err(args[0].clone()))
-            }
-            "Left" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "Left expects 1 argument"));
-                }
-                Some(self.either_left(args[0].clone()))
-            }
-            "Right" => {
-                if args.len() != 1 {
-                    return Err(self.runtime_error(span, "Right expects 1 argument"));
-                }
-                Some(self.either_right(args[0].clone()))
-            }
-            _ => None,
-        };
-        Ok(value)
+                let out = iterator_values(iterator, span, self)?
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, value)| Value::Tuple(vec![value, Value::Int(index as i64)]))
+                    .collect();
+                Ok(Value::List(Rc::new(RefCell::new(out))))
+            
     }
 
     fn construct_named_type(
@@ -3637,15 +3731,9 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
         structural: bool,
     ) -> Result<Option<Value>, Diagnostic> {
-        let Some(ty) = self
-            .runtime
-            .types
-            .iter()
-            .find(|ty| {
-                ty.name == type_name
-                    && ty.kind != crate::ast::TypeKind::Enum
-                    && ty.kind != crate::ast::TypeKind::Object
-            })
+        let Some(ty) = self.runtime.type_id_by_name_any_kind(type_name)
+            .and_then(|id| self.runtime.type_by_id(id))
+            .filter(|ty| ty.kind != crate::ast::TypeKind::Enum && ty.kind != crate::ast::TypeKind::Object)
             .cloned()
         else {
             return Ok(None);
@@ -4045,6 +4133,7 @@ impl<'a> Interpreter<'a> {
             .iter()
             .filter(|ty| {
                 ty.kind == crate::ast::TypeKind::Enum
+                    && self.runtime.type_id_by_name_kind(&ty.name, ty.kind) == Some(ty.id)
                     && explicit_enum.is_none_or(|name| ty.name == name)
                     && ty.enum_cases.iter().any(|case| case.name == case_name)
             })
@@ -4354,26 +4443,47 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn invoke_os_method(
-        &mut self,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        match method {
-            "print" => self.invoke_print(false, args, span),
-            "println" => self.invoke_print(true, args, span),
-            "printf" => self.invoke_printf(args, span),
-            _ => Err(self.runtime_error(span, format!("unknown OS method '{}'", method))),
-        }
+    pub(crate) fn native_os_print(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_print(false, args, span)
     }
 
-    fn invoke_file_method(
-        &mut self,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
+    pub(crate) fn native_os_println(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_print(true, args, span)
+    }
+
+    pub(crate) fn native_os_printf(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_printf(args, span)
+    }
+
+    pub(crate) fn native_os_args(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_intrinsic(&ir::Intrinsic::ProgramArgs, args, span)
+    }
+
+    pub(crate) fn native_os_env(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        self.invoke_intrinsic(&ir::Intrinsic::ProgramEnv, args, span)
+    }
+
+    pub(crate) fn native_os_stdout(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "OS.stdout", &args, 0, span)?;
+        Ok(receiver)
+    }
+
+    pub(crate) fn native_os_stderr(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = &receiver;
+        expect_runtime_arity(self, "OS.stderr", &args, 0, span)?;
+        Ok(receiver)
+    }
+
+    pub(crate) fn native_file_read_bytes(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "readBytes";
+
         if args.len() != 1 {
             return Err(self.runtime_error(
                 span,
@@ -4385,12 +4495,28 @@ impl<'a> Interpreter<'a> {
         };
         let path = path.clone();
 
-        match method {
-            "readBytes" => match fs::read(&path) {
+        match fs::read(&path) {
                 Ok(bytes) => Ok(self.result_ok(bytes_value(bytes))),
                 Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
-            },
-            "readText" => match fs::read(&path) {
+            }
+    }
+
+    pub(crate) fn native_file_read_text(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "readText";
+
+        if args.len() != 1 {
+            return Err(self.runtime_error(
+                span,
+                format!("File.{method} expects 1 argument, got {}", args.len()),
+            ));
+        }
+        let Value::String(path) = &args[0] else {
+            return Err(self.runtime_error(span, format!("File.{method} expects a Str path")));
+        };
+        let path = path.clone();
+
+        match fs::read(&path) {
                 Ok(bytes) => match String::from_utf8(bytes) {
                     Ok(text) => Ok(self.result_ok(Value::String(text))),
                     Err(error) => Ok(self.result_err(
@@ -4398,8 +4524,25 @@ impl<'a> Interpreter<'a> {
                     )),
                 },
                 Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
-            },
-            "open" => match fs::File::open(&path) {
+            }
+    }
+
+    pub(crate) fn native_file_open(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "open";
+
+        if args.len() != 1 {
+            return Err(self.runtime_error(
+                span,
+                format!("File.{method} expects 1 argument, got {}", args.len()),
+            ));
+        }
+        let Value::String(path) = &args[0] else {
+            return Err(self.runtime_error(span, format!("File.{method} expects a Str path")));
+        };
+        let path = path.clone();
+
+        match fs::File::open(&path) {
                 Ok(file) => Ok(self.result_ok(Value::FileStream(Rc::new(RefCell::new(
                     FileStreamValue {
                         path,
@@ -4407,8 +4550,25 @@ impl<'a> Interpreter<'a> {
                     },
                 ))))),
                 Err(error) => Ok(self.result_err(self.file_io_error("open", &path, error))),
-            },
-            "openText" => match fs::File::open(&path) {
+            }
+    }
+
+    pub(crate) fn native_file_open_text(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+        let method = "openText";
+
+        if args.len() != 1 {
+            return Err(self.runtime_error(
+                span,
+                format!("File.{method} expects 1 argument, got {}", args.len()),
+            ));
+        }
+        let Value::String(path) = &args[0] else {
+            return Err(self.runtime_error(span, format!("File.{method} expects a Str path")));
+        };
+        let path = path.clone();
+
+        match fs::File::open(&path) {
                 Ok(file) => Ok(self.result_ok(Value::TextFileReader(Rc::new(RefCell::new(
                     TextFileReaderValue {
                         path,
@@ -4417,29 +4577,33 @@ impl<'a> Interpreter<'a> {
                     },
                 ))))),
                 Err(error) => Ok(self.result_err(self.file_io_error("open", &path, error))),
-            },
-            _ => Err(self.runtime_error(span, format!("unknown File method '{method}'"))),
-        }
+            }
     }
 
-    fn invoke_file_stream_method(
-        &mut self,
-        stream: Rc<RefCell<FileStreamValue>>,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
+    pub(crate) fn native_stream_path(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::FileStream(stream) = receiver else { unreachable!() };
+
         let path = stream.borrow().path.clone();
-        match method {
-            "path" => {
+        
                 expect_runtime_arity(self, "FileStream.path", &args, 0, span)?;
                 Ok(Value::String(path))
-            }
-            "closed" => {
+            
+    }
+
+    pub(crate) fn native_stream_closed(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::FileStream(stream) = receiver else { unreachable!() };
+
+        
                 expect_runtime_arity(self, "FileStream.closed", &args, 0, span)?;
                 Ok(Value::Bool(stream.borrow().file.is_none()))
-            }
-            "position" => {
+            
+    }
+
+    pub(crate) fn native_stream_position(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::FileStream(stream) = receiver else { unreachable!() };
+
+        let path = stream.borrow().path.clone();
+        
                 expect_runtime_arity(self, "FileStream.position", &args, 0, span)?;
                 let mut stream = stream.borrow_mut();
                 let Some(file) = stream.file.as_mut() else {
@@ -4460,8 +4624,14 @@ impl<'a> Interpreter<'a> {
                         format!("cannot read the position of file '{path}': {error}"),
                     )),
                 }
-            }
-            "read" => {
+            
+    }
+
+    pub(crate) fn native_stream_read(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::FileStream(stream) = receiver else { unreachable!() };
+
+        let path = stream.borrow().path.clone();
+        
                 expect_runtime_arity(self, "FileStream.read", &args, 1, span)?;
                 let max_bytes = args[0].as_int(self, span, "FileStream.read maxBytes")?;
                 if max_bytes < 0 {
@@ -4498,8 +4668,14 @@ impl<'a> Interpreter<'a> {
                     }
                     Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
                 }
-            }
-            "readToEnd" => {
+            
+    }
+
+    pub(crate) fn native_stream_read_to_end(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::FileStream(stream) = receiver else { unreachable!() };
+
+        let path = stream.borrow().path.clone();
+        
                 expect_runtime_arity(self, "FileStream.readToEnd", &args, 0, span)?;
                 let mut stream = stream.borrow_mut();
                 let Some(file) = stream.file.as_mut() else {
@@ -4510,8 +4686,14 @@ impl<'a> Interpreter<'a> {
                     Ok(_) => Ok(self.result_ok(bytes_value(bytes))),
                     Err(error) => Ok(self.result_err(self.file_io_error("read", &path, error))),
                 }
-            }
-            "seek" => {
+            
+    }
+
+    pub(crate) fn native_stream_seek(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::FileStream(stream) = receiver else { unreachable!() };
+
+        let path = stream.borrow().path.clone();
+        
                 if !matches!(args.len(), 1 | 2) {
                     return Err(self.runtime_error(
                         span,
@@ -4557,34 +4739,43 @@ impl<'a> Interpreter<'a> {
                     },
                     Err(error) => Ok(self.result_err(self.file_io_error("seek", &path, error))),
                 }
-            }
-            "close" => {
+            
+    }
+
+    pub(crate) fn native_stream_close(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::FileStream(stream) = receiver else { unreachable!() };
+
+        
                 expect_runtime_arity(self, "FileStream.close", &args, 0, span)?;
                 stream.borrow_mut().file.take();
                 Ok(self.result_ok(Value::Unit))
-            }
-            _ => Err(self.runtime_error(span, format!("unknown FileStream method '{method}'"))),
-        }
+            
     }
 
-    fn invoke_text_file_reader_method(
-        &mut self,
-        reader: Rc<RefCell<TextFileReaderValue>>,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
+    pub(crate) fn native_reader_path(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::TextFileReader(reader) = receiver else { unreachable!() };
+
         let path = reader.borrow().path.clone();
-        match method {
-            "path" => {
+        
                 expect_runtime_arity(self, "TextFileReader.path", &args, 0, span)?;
                 Ok(Value::String(path))
-            }
-            "closed" => {
+            
+    }
+
+    pub(crate) fn native_reader_closed(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::TextFileReader(reader) = receiver else { unreachable!() };
+
+        
                 expect_runtime_arity(self, "TextFileReader.closed", &args, 0, span)?;
                 Ok(Value::Bool(reader.borrow().reader.is_none()))
-            }
-            "readLine" => {
+            
+    }
+
+    pub(crate) fn native_reader_read_line(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::TextFileReader(reader) = receiver else { unreachable!() };
+
+        let path = reader.borrow().path.clone();
+        
                 expect_runtime_arity(self, "TextFileReader.readLine", &args, 0, span)?;
                 let mut reader = reader.borrow_mut();
                 let start = reader.position;
@@ -4616,8 +4807,14 @@ impl<'a> Interpreter<'a> {
                     }
                     Err(error) => Ok(self.result_err(self.file_io_error("readLine", &path, error))),
                 }
-            }
-            "readToEnd" => {
+            
+    }
+
+    pub(crate) fn native_reader_read_to_end(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::TextFileReader(reader) = receiver else { unreachable!() };
+
+        let path = reader.borrow().path.clone();
+        
                 expect_runtime_arity(self, "TextFileReader.readToEnd", &args, 0, span)?;
                 let mut reader = reader.borrow_mut();
                 let start = reader.position;
@@ -4644,14 +4841,17 @@ impl<'a> Interpreter<'a> {
                         Ok(self.result_err(self.file_io_error("readToEnd", &path, error)))
                     }
                 }
-            }
-            "close" => {
+            
+    }
+
+    pub(crate) fn native_reader_close(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let Value::TextFileReader(reader) = receiver else { unreachable!() };
+
+        
                 expect_runtime_arity(self, "TextFileReader.close", &args, 0, span)?;
                 reader.borrow_mut().reader.take();
                 Ok(self.result_ok(Value::Unit))
-            }
-            _ => Err(self.runtime_error(span, format!("unknown TextFileReader method '{method}'"))),
-        }
+            
     }
 
     fn file_closed(&self, path: &str) -> Value {
@@ -4704,42 +4904,87 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn invoke_json_method(
+    pub(crate) fn native_json_str(
         &mut self,
-        method: &str,
+        receiver: Value,
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match method {
-            "str" => {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.str", &args, 1, span)?;
                 let Value::String(value) = &args[0] else {
                     return Err(self.runtime_error(span, "Json.str expects Str"));
                 };
                 Ok(self.json_variant("JsonString", &["value"], vec![Value::String(value.clone())]))
-            }
-            "int" => {
+            
+    }
+
+    pub(crate) fn native_json_int(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.int", &args, 1, span)?;
                 let value = args[0].as_int(self, span, "Json.int value")?;
                 Ok(self.json_number(value.to_string()))
-            }
-            "float" => {
+            
+    }
+
+    pub(crate) fn native_json_float(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.float", &args, 1, span)?;
                 let Value::Float(value) = args[0] else {
                     return Err(self.runtime_error(span, "Json.float expects Float"));
                 };
                 Ok(self.json_number(render_json_float(value)))
-            }
-            "bool" => {
+            
+    }
+
+    pub(crate) fn native_json_bool(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.bool", &args, 1, span)?;
                 let value = args[0].as_bool(self, span, "Json.bool value")?;
                 Ok(self.json_variant("JsonBool", &["value"], vec![Value::Bool(value)]))
-            }
-            "nil" => {
+            
+    }
+
+    pub(crate) fn native_json_nil(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.nil", &args, 0, span)?;
                 Ok(self.json_null())
-            }
-            "field" => {
+            
+    }
+
+    pub(crate) fn native_json_field(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.field", &args, 2, span)?;
                 let Value::String(name) = &args[0] else {
                     return Err(self.runtime_error(span, "Json.field name must be Str"));
@@ -4748,15 +4993,33 @@ impl<'a> Interpreter<'a> {
                     return Err(self.runtime_error(span, "Json.field value must be JsonValue"));
                 }
                 Ok(self.json_field(name.clone(), args[1].clone()))
-            }
-            "array" => {
+            
+    }
+
+    pub(crate) fn native_json_array(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 let values = self.json_variadic_values(args, false);
                 if !values.iter().all(|value| self.is_json_value(value)) {
                     return Err(self.runtime_error(span, "Json.array expects JsonValue arguments"));
                 }
                 Ok(self.json_array(values))
-            }
-            "obj" => {
+            
+    }
+
+    pub(crate) fn native_json_obj(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 let fields = self.json_variadic_values(args.clone(), true);
                 if !fields.is_empty() && fields.iter().all(|value| self.is_json_field(value)) {
                     return Ok(self.json_object(fields));
@@ -4766,25 +5029,61 @@ impl<'a> Interpreter<'a> {
                 }
                 expect_runtime_arity(self, "Json.obj", &args, 1, span)?;
                 Ok(self.json_encode(&args[0]))
-            }
-            "encode" => {
+            
+    }
+
+    pub(crate) fn native_json_encode(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.encode", &args, 1, span)?;
                 Ok(self.json_encode(&args[0]))
-            }
-            "stringify" => {
+            
+    }
+
+    pub(crate) fn native_json_stringify(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.stringify", &args, 1, span)?;
                 let encoded = self.json_encode(&args[0]);
                 self.render_json_value(&encoded)
                     .map(Value::String)
                     .map_err(|message| self.runtime_error(span, message))
-            }
-            "textContent" => {
+            
+    }
+
+    pub(crate) fn native_json_text_content(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.textContent", &args, 1, span)?;
                 self.json_text_content(&args[0])
                     .map(Value::String)
                     .map_err(|message| self.runtime_error(span, message))
-            }
-            "decode" => {
+            
+    }
+
+    pub(crate) fn native_json_decode(
+        &mut self,
+        receiver: Value,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
+        let _ = receiver;
+
                 expect_runtime_arity(self, "Json.decode", &args, 2, span)?;
                 let Value::String(text) = &args[0] else {
                     return Err(self.runtime_error(span, "Json.decode text must be Str"));
@@ -4801,9 +5100,7 @@ impl<'a> Interpreter<'a> {
                     Ok(value) => Ok(self.result_ok(value)),
                     Err(message) => Ok(self.result_err(Value::String(message))),
                 }
-            }
-            _ => Err(self.runtime_error(span, format!("unknown Json method '{method}'"))),
-        }
+            
     }
 
     fn json_null(&self) -> Value {
@@ -5534,12 +5831,9 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    fn invoke_math_method(
-        &mut self,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
+    pub(crate) fn native_math_min(&mut self, _receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let method = "min";
+
         if !matches!(method, "min" | "max") || args.len() != 2 {
             return Err(
                 self.runtime_error(span, format!("Math.{method} expects 2 numeric arguments"))
@@ -5562,6 +5856,35 @@ impl<'a> Interpreter<'a> {
                 format!("Math.{method} requires two Int values or two Float values"),
             )),
         }
+    
+    }
+
+    pub(crate) fn native_math_max(&mut self, _receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        let method = "max";
+
+        if !matches!(method, "min" | "max") || args.len() != 2 {
+            return Err(
+                self.runtime_error(span, format!("Math.{method} expects 2 numeric arguments"))
+            );
+        }
+
+        match (&args[0], &args[1]) {
+            (Value::Int(left), Value::Int(right)) => Ok(Value::Int(if method == "min" {
+                (*left).min(*right)
+            } else {
+                (*left).max(*right)
+            })),
+            (Value::Float(left), Value::Float(right)) => Ok(Value::Float(if method == "min" {
+                left.min(*right)
+            } else {
+                left.max(*right)
+            })),
+            _ => Err(self.runtime_error(
+                span,
+                format!("Math.{method} requires two Int values or two Float values"),
+            )),
+        }
+    
     }
 
     fn invoke_print(
@@ -5736,34 +6059,19 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
-        match &receiver {
-            Value::FileStream(stream) => {
-                return self.invoke_file_stream_method(stream.clone(), method, args, span);
-            }
-            Value::TextFileReader(reader) => {
-                return self.invoke_text_file_reader_method(reader.clone(), method, args, span);
-            }
-            Value::Regex(regex) if method != "toStr" => {
-                return self.invoke_regex_method(regex.clone(), method, args, span);
-            }
-            Value::RegexMatch(hit) if method != "toStr" => {
-                return self.invoke_regex_match_method(hit.clone(), method, args, span);
-            }
-            _ => {}
-        }
-
         if let Some(value) =
             self.try_invoke_runtime_method(receiver.clone(), method, args.clone(), span)?
         {
             return Ok(value);
         }
 
+        if let Some(message) = crate::stdlib::native::opaque_method_error(&receiver, method) {
+            return Err(self.runtime_error(span, message));
+        }
+
         match &receiver {
             Value::Aggregate(aggregate) if aggregate.borrow().case_name.is_some() => {
                 return self.invoke_user_variant_method(receiver, method, args, span);
-            }
-            Value::Iterator(iterator) => {
-                return self.invoke_iterator_method(receiver.clone(), iterator, method, args, span);
             }
             Value::Record(fields) => {
                 if let Some(value) = lookup_named_field(&fields.borrow(), method) {
@@ -5832,15 +6140,13 @@ impl<'a> Interpreter<'a> {
         ))
     }
 
-    fn try_invoke_universal_method(
+    pub(crate) fn native_to_str(
         &mut self,
         receiver: Value,
-        method: &str,
         args: &[Value],
         span: Option<Span>,
     ) -> Result<Option<Value>, Diagnostic> {
-        match method {
-            "toStr" => {
+
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -5848,8 +6154,16 @@ impl<'a> Interpreter<'a> {
                     ));
                 }
                 Ok(Some(Value::String(receiver.render())))
-            }
-            "equals" => {
+            
+    }
+
+    pub(crate) fn native_equals(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if args.len() != 1 {
                     return Err(self.runtime_error(
                         span,
@@ -5859,8 +6173,16 @@ impl<'a> Interpreter<'a> {
                 Ok(Some(Value::Bool(
                     self.values_equal(&receiver, &args[0], span)?,
                 )))
-            }
-            "hash" => {
+            
+    }
+
+    pub(crate) fn native_hash(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -5868,8 +6190,16 @@ impl<'a> Interpreter<'a> {
                     ));
                 }
                 Ok(Some(Value::Int(self.hash_value(&receiver, span)?)))
-            }
-            "compareTo" => {
+            
+    }
+
+    pub(crate) fn native_compare_to(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if args.len() != 1 {
                     return Err(self.runtime_error(
                         span,
@@ -5889,8 +6219,16 @@ impl<'a> Interpreter<'a> {
                     std::cmp::Ordering::Greater => 1,
                 };
                 Ok(Some(Value::Int(value)))
-            }
-            "sqrt" => {
+            
+    }
+
+    pub(crate) fn native_sqrt(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -5902,8 +6240,16 @@ impl<'a> Interpreter<'a> {
                     Value::Float(value) => Ok(Some(Value::Float(value.sqrt()))),
                     _ => Ok(None),
                 }
-            }
-            "log" => {
+            
+    }
+
+    pub(crate) fn native_log(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -5914,8 +6260,16 @@ impl<'a> Interpreter<'a> {
                     Value::Float(value) => Ok(Some(Value::Float(value.ln()))),
                     _ => Ok(None),
                 }
-            }
-            "abs" => {
+            
+    }
+
+    pub(crate) fn native_abs(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -5933,8 +6287,16 @@ impl<'a> Interpreter<'a> {
                     Value::Decimal(value) => Ok(Some(Value::Decimal(value.abs()))),
                     _ => Ok(None),
                 }
-            }
-            "pow" => {
+            
+    }
+
+    pub(crate) fn native_pow(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 let [exponent] = args else {
                     return Err(self.runtime_error(
                         span,
@@ -5965,68 +6327,102 @@ impl<'a> Interpreter<'a> {
                     }
                     _ => Ok(None),
                 }
-            }
-            "wrappingNeg" => {
+            
+    }
+
+    pub(crate) fn native_wrapping_neg(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        let method = "wrappingNeg";
+
                 expect_runtime_arity(self, method, args, 0, span)?;
                 match receiver {
                     Value::Int(value) => Ok(Some(Value::Int(value.wrapping_neg()))),
                     _ => Ok(None),
                 }
-            }
-            "wrappingAdd" | "wrappingSub" | "wrappingMul" | "checkedAdd" | "checkedSub"
-            | "checkedMul" | "checkedPow" => {
-                expect_runtime_arity(self, method, args, 1, span)?;
-                let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else {
-                    return Ok(None);
-                };
-                let result = match method {
-                    "wrappingAdd" => return Ok(Some(Value::Int(value.wrapping_add(*other)))),
-                    "wrappingSub" => return Ok(Some(Value::Int(value.wrapping_sub(*other)))),
-                    "wrappingMul" => return Ok(Some(Value::Int(value.wrapping_mul(*other)))),
-                    "checkedAdd" => value.checked_add(*other),
-                    "checkedSub" => value.checked_sub(*other),
-                    "checkedMul" => value.checked_mul(*other),
-                    "checkedPow" => checked_int_pow(value, *other),
-                    _ => unreachable!(),
-                };
-                Ok(Some(
-                    result
-                        .map(|value| self.option_some(Value::Int(value)))
-                        .unwrap_or_else(|| self.option_none()),
-                ))
-            }
-            "floor" | "ceil" | "round" => {
-                if let Value::Decimal(value) = &receiver {
-                    if method != "round" {
-                        return Ok(None);
-                    }
-                    expect_runtime_arity(self, method, args, 2, span)?;
-                    let scale = args[0].as_int(self, span, "decimal scale")?;
-                    let rounding = decimal_rounding_name(&args[1])
-                        .ok_or_else(|| self.runtime_error(span, "expected a Rounding value"))?;
-                    return value
-                        .divide(&Decimal::from_int(1), scale, &rounding)
-                        .map(|value| Some(Value::Decimal(value)))
-                        .map_err(|message| self.runtime_error(span, message));
-                }
-                if !args.is_empty() {
-                    return Err(self.runtime_error(
-                        span,
-                        format!("{method} expects 0 arguments, got {}", args.len()),
-                    ));
-                }
-                let Value::Float(value) = receiver else {
-                    return Ok(None);
-                };
-                let value = match method {
-                    "floor" => value.floor(),
-                    "ceil" => value.ceil(),
-                    "round" => value.round(),
-                    _ => unreachable!(),
-                };
-                Ok(Some(Value::Float(value)))
-            }
-            "toInt" => {
+            
+    }
+
+    pub(crate) fn native_wrapping_add(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "wrappingAdd", args, 1, span)?;
+        let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else { return Ok(None); };
+        Ok(Some(Value::Int(value.wrapping_add(*other))))
+    }
+
+    pub(crate) fn native_wrapping_sub(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "wrappingSub", args, 1, span)?;
+        let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else { return Ok(None); };
+        Ok(Some(Value::Int(value.wrapping_sub(*other))))
+    }
+
+    pub(crate) fn native_wrapping_mul(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "wrappingMul", args, 1, span)?;
+        let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else { return Ok(None); };
+        Ok(Some(Value::Int(value.wrapping_mul(*other))))
+    }
+
+    pub(crate) fn native_checked_add(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "checkedAdd", args, 1, span)?;
+        let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else { return Ok(None); };
+        let result = value.checked_add(*other);
+        Ok(Some(result.map(|value| self.option_some(Value::Int(value))).unwrap_or_else(|| self.option_none())))
+    }
+
+    pub(crate) fn native_checked_sub(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "checkedSub", args, 1, span)?;
+        let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else { return Ok(None); };
+        let result = value.checked_sub(*other);
+        Ok(Some(result.map(|value| self.option_some(Value::Int(value))).unwrap_or_else(|| self.option_none())))
+    }
+
+    pub(crate) fn native_checked_mul(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "checkedMul", args, 1, span)?;
+        let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else { return Ok(None); };
+        let result = value.checked_mul(*other);
+        Ok(Some(result.map(|value| self.option_some(Value::Int(value))).unwrap_or_else(|| self.option_none())))
+    }
+
+    pub(crate) fn native_checked_pow(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "checkedPow", args, 1, span)?;
+        let (Value::Int(value), Value::Int(other)) = (receiver, &args[0]) else { return Ok(None); };
+        let result = checked_int_pow(value, *other);
+        Ok(Some(result.map(|value| self.option_some(Value::Int(value))).unwrap_or_else(|| self.option_none())))
+    }
+
+    pub(crate) fn native_floor(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "floor", args, 0, span)?;
+        let Value::Float(value) = receiver else { return Ok(None); };
+        Ok(Some(Value::Float(value.floor())))
+    }
+
+    pub(crate) fn native_ceil(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        expect_runtime_arity(self, "ceil", args, 0, span)?;
+        let Value::Float(value) = receiver else { return Ok(None); };
+        Ok(Some(Value::Float(value.ceil())))
+    }
+
+    pub(crate) fn native_round(&mut self, receiver: Value, args: &[Value], span: Option<Span>) -> Result<Option<Value>, Diagnostic> {
+        if let Value::Decimal(value) = &receiver {
+            expect_runtime_arity(self, "round", args, 2, span)?;
+            let scale = args[0].as_int(self, span, "decimal scale")?;
+            let rounding = decimal_rounding_name(&args[1]).ok_or_else(|| self.runtime_error(span, "expected a Rounding value"))?;
+            return value.divide(&Decimal::from_int(1), scale, &rounding).map(|value| Some(Value::Decimal(value))).map_err(|message| self.runtime_error(span, message));
+        }
+        expect_runtime_arity(self, "round", args, 0, span)?;
+        let Value::Float(value) = receiver else { return Ok(None); };
+        Ok(Some(Value::Float(value.round())))
+    }
+
+    pub(crate) fn native_to_int(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -6043,8 +6439,16 @@ impl<'a> Interpreter<'a> {
                     )),
                     _ => Ok(None),
                 }
-            }
-            "toFloat" => {
+            
+    }
+
+    pub(crate) fn native_to_float(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+
                 if !args.is_empty() {
                     return Err(self.runtime_error(
                         span,
@@ -6056,12 +6460,29 @@ impl<'a> Interpreter<'a> {
                     Value::Decimal(value) => Ok(Some(Value::Float(value.to_float()))),
                     _ => Ok(None),
                 }
-            }
-            "scale" => match receiver {
+            
+    }
+
+    pub(crate) fn native_scale(
+        &mut self,
+        receiver: Value,
+        _args: &[Value],
+        _span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+match receiver {
                 Value::Decimal(value) => Ok(Some(Value::Int(value.scale as i64))),
                 _ => Ok(None),
-            },
-            "toDecimal" => {
+            }
+    }
+
+    pub(crate) fn native_to_decimal(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        let method = "toDecimal";
+
                 expect_runtime_arity(self, method, args, 0, span)?;
                 match receiver {
                     Value::Int(value) => Ok(Some(Value::Decimal(Decimal::from_int(value)))),
@@ -6072,8 +6493,17 @@ impl<'a> Interpreter<'a> {
                     )),
                     _ => Ok(None),
                 }
-            }
-            "divide" => {
+            
+    }
+
+    pub(crate) fn native_divide(
+        &mut self,
+        receiver: Value,
+        args: &[Value],
+        span: Option<Span>,
+    ) -> Result<Option<Value>, Diagnostic> {
+        let method = "divide";
+
                 let Value::Decimal(value) = receiver else {
                     return Ok(None);
                 };
@@ -6088,9 +6518,7 @@ impl<'a> Interpreter<'a> {
                     .divide(other, scale, &rounding)
                     .map(|value| Some(Value::Decimal(value)))
                     .map_err(|message| self.runtime_error(span, message))
-            }
-            _ => Ok(None),
-        }
+            
     }
 
     pub(crate) fn values_equal(
@@ -6508,56 +6936,6 @@ impl<'a> Interpreter<'a> {
         ))
     }
 
-    fn invoke_iterator_method(
-        &mut self,
-        receiver: Value,
-        iterator: &Rc<RefCell<IteratorState>>,
-        method: &str,
-        args: Vec<Value>,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        match method {
-            "hasNext" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Iterator.hasNext expects 0 arguments"));
-                }
-                self.iter_has_next(Value::Iterator(iterator.clone()), span)
-            }
-            "next" => {
-                if !args.is_empty() {
-                    return Err(self.runtime_error(span, "Iterator.next expects 0 arguments"));
-                }
-                self.iter_next(receiver, span)
-            }
-            "zip" => {
-                let [other] = args.as_slice() else {
-                    return Err(self.runtime_error(span, "Iterator.zip expects 1 argument"));
-                };
-                let lhs = iterator_values(iterator, span, self)?;
-                let rhs = iterable_values(other.clone(), span, self)?;
-                let out = lhs
-                    .into_iter()
-                    .zip(rhs)
-                    .map(|(left, right)| Value::Tuple(vec![left, right]))
-                    .collect();
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            "zipWithIndex" => {
-                if !args.is_empty() {
-                    return Err(
-                        self.runtime_error(span, "Iterator.zipWithIndex expects 0 arguments")
-                    );
-                }
-                let out = iterator_values(iterator, span, self)?
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, value)| Value::Tuple(vec![value, Value::Int(index as i64)]))
-                    .collect();
-                Ok(Value::List(Rc::new(RefCell::new(out))))
-            }
-            _ => Err(self.runtime_error(span, format!("unsupported Iterator method '{}'", method))),
-        }
-    }
 
     fn lookup_runtime_value(&self, frame: Option<&Frame>, name: &str) -> Option<Value> {
         frame
@@ -6808,53 +7186,20 @@ impl<'a> Interpreter<'a> {
         best
     }
 
-    fn get_member(
-        &mut self,
-        base: Value,
-        name: &str,
-        span: Option<Span>,
-    ) -> Result<Value, Diagnostic> {
-        if name == "runtimeType" {
-            return Ok(Value::RuntimeType(self.runtime_type_value_for_value(&base)));
-        }
-        if name == "referenceId" {
-            if reference_identity_address(&base).is_none() {
-                return Err(self.runtime_error(
-                    span,
-                    format!("referenceId is not available on {}", base.render()),
-                ));
-            }
-            return Ok(Value::ReferenceId(ReferenceIdValue {
-                target: Box::new(base),
-            }));
-        }
-
+    fn get_member(&mut self, base: Value, name: &str, span: Option<Span>) -> Result<Value, Diagnostic> {
+        if let Some(value) = self.try_invoke_native_getter(base.clone(), name, span)? { return Ok(value); }
         match base {
             Value::Aggregate(aggregate) => {
-                if matches!(name, "stdout" | "stderr")
-                    && aggregate.borrow().type_name == "OS"
-                    && aggregate.borrow().case_name.is_none()
-                {
-                    return Ok(Value::Aggregate(aggregate.clone()));
-                }
-                let field = {
-                    let aggregate_ref = aggregate.borrow();
-                    self.aggregate_field_value(&aggregate_ref, name)
-                };
-                if let Some(field) = field {
-                    return Ok(field);
-                }
+                let field = self.aggregate_field_value(&aggregate.borrow(), name);
+                if let Some(field) = field { return Ok(field); }
                 self.invoke_method(Value::Aggregate(aggregate), name, Vec::new(), span)
             }
             Value::Record(fields) => {
                 let field = lookup_named_field(&fields.borrow(), name);
-                if let Some(field) = field {
-                    return Ok(field);
-                }
+                if let Some(field) = field { return Ok(field); }
                 self.invoke_method(Value::Record(fields), name, Vec::new(), span)
             }
-            Value::Tuple(items) => tuple_member(&items, name)
-                .ok_or_else(|| self.runtime_error(span, format!("tuple has no member '{}'", name))),
+            Value::Tuple(items) => tuple_member(&items, name).ok_or_else(|| self.runtime_error(span, format!("tuple has no member '{}'", name))),
             other => self.invoke_method(other, name, Vec::new(), span),
         }
     }
@@ -7169,6 +7514,7 @@ impl<'a> Interpreter<'a> {
             ir::Type::Int => matches!(value, Value::Int(_)),
             ir::Type::Float => matches!(value, Value::Float(_)),
             ir::Type::Str => matches!(value, Value::String(_)),
+            ir::Type::Named { name, .. } if name == "Any" => true,
             ir::Type::Named { name, .. } if name.contains("::") => {
                 let Some((owner, case_name)) = name.split_once("::") else {
                     return false;

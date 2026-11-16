@@ -2,62 +2,37 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     Diagnostic, Span,
-    ast::TypeKind,
     interpreter::{Interpreter, Value, iterable_values},
-    ir,
 };
 
 use super::builtin_method;
-use crate::runtime::{RuntimeType, RuntimeTypeId};
+use crate::runtime::RuntimeType;
 
 pub(super) fn define() -> RuntimeType {
-    RuntimeType {
-        id: RuntimeTypeId(usize::MAX),
-        ir_type_id: None,
-        kind: TypeKind::Class,
-        name: "Set".to_string(),
-        fields: Vec::new(),
-        field_init: None,
-        mixin_init: None,
-        methods: vec![
-            builtin_method(2, "add", vec![ir::Type::Unknown], set_add),
-            builtin_method(14, "addAll", vec![ir::Type::Unknown], set_add_all),
-            builtin_method(3, "iterator", Vec::new(), set_iterator),
-            builtin_method(4, "map", vec![function_unknown()], set_map),
-            builtin_method(5, "flatMap", vec![function_unknown()], set_flat_map),
-            builtin_method(6, "filter", vec![function_unknown()], set_filter),
-            builtin_method(
-                7,
-                "fold",
-                vec![ir::Type::Unknown, function_unknown()],
-                set_fold,
-            ),
-            builtin_method(8, "reduce", vec![function_unknown()], set_reduce),
-            builtin_method(9, "exists", vec![function_unknown()], set_exists),
-            builtin_method(10, "forAll", vec![function_unknown()], set_for_all),
-            builtin_method(11, "forEach", vec![function_unknown()], set_for_each),
-            builtin_method(12, "contains", vec![ir::Type::Unknown], set_contains),
-            builtin_method(13, "size", Vec::new(), set_size),
-            builtin_method(15, "isEmpty", Vec::new(), set_is_empty),
-            builtin_method(16, "nonEmpty", Vec::new(), set_non_empty),
-            builtin_method(17, "makeStr", vec![ir::Type::Str], set_make_str),
-            builtin_method(
-                18,
-                "makeStr",
-                vec![ir::Type::Str, function_unknown()],
-                set_make_str,
-            ),
-        ],
-        enum_cases: Vec::new(),
-        with_bounds: Vec::new(),
-    }
-}
-
-fn function_unknown() -> ir::Type {
-    ir::Type::Function {
-        params: Vec::new(),
-        ret: Box::new(ir::Type::Unknown),
-    }
+    let mut ty = super::empty_builtin_type("Set");
+    ty.methods = vec![
+        builtin_method("Set", "add", 1, set_add),
+        builtin_method("Set", "addAll", 1, set_add_all),
+        builtin_method("Set", "iterator", 0, set_iterator),
+        builtin_method("Set", "map", 1, set_map),
+        builtin_method("Set", "flatMap", 1, set_flat_map),
+        builtin_method("Set", "filter", 1, set_filter),
+        builtin_method("Set", "fold", 2, set_fold),
+        builtin_method("Set", "reduce", 1, set_reduce),
+        builtin_method("Set", "exists", 1, set_exists),
+        builtin_method("Set", "forAll", 1, set_for_all),
+        builtin_method("Set", "forEach", 1, set_for_each),
+        builtin_method("Set", "contains", 1, set_contains),
+        builtin_method("Set", "size", 0, set_size),
+        builtin_method("Set", "isEmpty", 0, set_is_empty),
+        builtin_method("Set", "nonEmpty", 0, set_non_empty),
+        builtin_method("Set", "makeStr", 1, set_make_str),
+        builtin_method("Set", "makeStr", 2, set_make_str),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    ty
 }
 
 fn set_items(receiver: &Value) -> Rc<RefCell<Vec<Value>>> {

@@ -5,12 +5,13 @@ use crate::{
     ir,
 };
 
-type BuiltinMethodFn = for<'a> fn(
-    &mut crate::interpreter::Interpreter<'a>,
-    crate::interpreter::Value,
-    Vec<crate::interpreter::Value>,
-    Option<crate::source::Span>,
-) -> Result<crate::interpreter::Value, crate::Diagnostic>;
+pub(crate) type BuiltinMethodFn =
+    for<'a> fn(
+        &mut crate::interpreter::Interpreter<'a>,
+        crate::interpreter::Value,
+        Vec<crate::interpreter::Value>,
+        Option<crate::source::Span>,
+    ) -> Result<crate::interpreter::Value, crate::Diagnostic>;
 
 /// Stable id for one runtime-visible type metadata entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -50,6 +51,17 @@ pub struct RuntimeMethod {
     pub param_names: Vec<String>,
     pub params: Vec<ir::Type>,
     pub return_ty: ir::Type,
+    pub(crate) kind: RuntimeMethodKind,
+    pub(crate) variadic: bool,
+    pub(crate) default_count: usize,
+    pub(crate) reified_params: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RuntimeMethodKind {
+    Instance,
+    Getter,
+    Static,
 }
 
 /// A runtime method can either jump into lowered IR or invoke a builtin host
@@ -81,6 +93,7 @@ pub struct RuntimeEnumCase {
 #[derive(Debug, Clone)]
 pub struct RuntimeType {
     pub id: RuntimeTypeId,
+    pub(crate) native: bool,
     pub ir_type_id: Option<ir::TypeId>,
     pub kind: TypeKind,
     pub name: String,
@@ -112,8 +125,8 @@ struct RuntimeIndexes {
 
 impl RuntimeProgram {
     pub fn from_ir(program: &ir::Program) -> Self {
-        let mut types = super::builtins::builtin_types();
-        super::builtins::assign_type_ids(&mut types, 0);
+        let mut types = crate::stdlib::native::runtime_types();
+        crate::stdlib::native::assign_type_ids(&mut types, 0);
         let mut by_name_kind = HashMap::with_capacity(program.types.len() + types.len());
         for ty in &types {
             by_name_kind.insert((ty.name.clone(), ty.kind), ty.id);
@@ -134,9 +147,33 @@ impl RuntimeProgram {
                 .get(ir_ty.id.0)
                 .copied()
                 .unwrap_or(RuntimeTypeId(usize::MAX));
-            if Self::is_builtin_merge_target(ir_ty) && runtime_id.0 < types.len() {
-                let methods = Self::build_methods(program, &ir_ty.methods);
-                types[runtime_id.0].methods.extend(methods);
+            if runtime_id.0 < types.len() {
+                let mut lowered = Self::build_runtime_type(program, ir_ty, runtime_id);
+                let native = &mut types[runtime_id.0];
+                // Shared declaration bodies are markers, not executable IR.
+                // Unbound capabilities must remain unsupported at runtime.
+                if Self::is_native_declaration(ir_ty) {
+                    lowered.methods.clear();
+                }
+                lowered.methods.retain(|method| {
+                    !native.methods.iter().any(|existing| {
+                        existing.name == method.name && existing.params.len() == method.params.len()
+                    })
+                });
+                native.methods.extend(lowered.methods);
+                native.ir_type_id = Some(ir_ty.id);
+                if !lowered.fields.is_empty() {
+                    native.fields = lowered.fields;
+                }
+                if lowered.field_init.is_some() {
+                    native.field_init = lowered.field_init;
+                }
+                if lowered.mixin_init.is_some() {
+                    native.mixin_init = lowered.mixin_init;
+                }
+                if !lowered.enum_cases.is_empty() {
+                    native.enum_cases = lowered.enum_cases;
+                }
                 continue;
             }
             types.push(Self::build_runtime_type(program, ir_ty, runtime_id));
@@ -146,6 +183,12 @@ impl RuntimeProgram {
         // known, so aggregate instances can answer type-relationship questions
         // without rescanning the IR graph.
         Self::populate_with_bounds(&mut types, program, &indexes.by_ir_type, &by_name_kind);
+
+        for ty in &mut types {
+            for (index, method) in ty.methods.iter_mut().enumerate() {
+                method.slot = RuntimeMethodSlot(index);
+            }
+        }
 
         Self {
             types,
@@ -164,15 +207,28 @@ impl RuntimeProgram {
         let mut next_index = start_index;
 
         for ir_ty in &program.types {
-            let runtime_id = if Self::is_builtin_merge_target(ir_ty) {
-                builtin_by_name_kind
-                    .get(&(ir_ty.name.clone(), ir_ty.kind))
-                    .copied()
-                    .unwrap_or_else(|| {
-                        let id = RuntimeTypeId(next_index);
-                        next_index += 1;
-                        id
-                    })
+            let native = builtin_by_name_kind
+                .get(&(ir_ty.name.clone(), ir_ty.kind))
+                .copied()
+                .filter(|_| Self::is_native_declaration(ir_ty))
+                .or_else(|| {
+                    // Primitive extensions lower into Class buckets even when
+                    // the public native contract is an Interface.
+                    if ir_ty.kind != TypeKind::Class
+                        || !crate::stdlib::is_primitive(&ir_ty.name)
+                        || !ir_ty.fields.is_empty()
+                        || !ir_ty.enum_cases.is_empty()
+                        || ir_ty.field_init.is_some()
+                    {
+                        return None;
+                    }
+                    builtin_by_name_kind
+                        .get(&(ir_ty.name.clone(), TypeKind::Interface))
+                        .copied()
+                });
+            let runtime_id = if let Some(id) = native {
+                by_name_kind.insert((ir_ty.name.clone(), ir_ty.kind), id);
+                id
             } else {
                 let id = RuntimeTypeId(next_index);
                 next_index += 1;
@@ -190,17 +246,6 @@ impl RuntimeProgram {
         }
     }
 
-    fn is_builtin_merge_target(ir_ty: &ir::TypeDef) -> bool {
-        ir_ty.kind == TypeKind::Class
-            && matches!(
-                ir_ty.name.as_str(),
-                "Bool" | "Decimal" | "Float" | "Int" | "Char" | "Str"
-            )
-            && ir_ty.fields.is_empty()
-            && ir_ty.enum_cases.is_empty()
-            && ir_ty.field_init.is_none()
-    }
-
     fn build_runtime_type(
         program: &ir::Program,
         ir_ty: &ir::TypeDef,
@@ -208,6 +253,7 @@ impl RuntimeProgram {
     ) -> RuntimeType {
         RuntimeType {
             id: runtime_id,
+            native: false,
             ir_type_id: Some(ir_ty.id),
             kind: ir_ty.kind,
             name: ir_ty.name.clone(),
@@ -218,6 +264,45 @@ impl RuntimeProgram {
             enum_cases: Self::build_enum_cases(&ir_ty.enum_cases),
             with_bounds: Vec::new(),
         }
+    }
+
+    fn is_native_declaration(ty: &ir::TypeDef) -> bool {
+        crate::stdlib::type_declaration(&ty.name, ty.kind)
+            .is_some_and(|declaration| ty.span == Some(declaration.span))
+    }
+
+    pub(crate) fn native_type_by_name_kind(
+        &self,
+        name: &str,
+        kind: TypeKind,
+    ) -> Option<&RuntimeType> {
+        self.types
+            .iter()
+            .find(|ty| ty.native && ty.name == name && ty.kind == kind)
+    }
+
+    pub(crate) fn active_type_is_native(&self, name: &str, kind: TypeKind) -> bool {
+        self.type_by_name_kind(name, kind)
+            .is_some_and(|ty| ty.native)
+    }
+
+    pub(crate) fn active_name_is_native(&self, name: &str) -> bool {
+        let mut found = false;
+        for ((candidate, _), id) in &self.by_name_kind {
+            if candidate == name {
+                found = true;
+                if !self.types[id.0].native {
+                    return false;
+                }
+            }
+        }
+        found
+    }
+
+    pub(crate) fn source_type_named(&self, name: &str) -> bool {
+        self.by_name_kind
+            .iter()
+            .any(|((candidate, _), id)| candidate == name && !self.types[id.0].native)
     }
 
     fn build_fields(fields: &[ir::Field]) -> Vec<RuntimeField> {
@@ -264,6 +349,18 @@ impl RuntimeProgram {
                     param_names,
                     params,
                     return_ty: function.return_ty.clone(),
+                    kind: if function.getter {
+                        RuntimeMethodKind::Getter
+                    } else {
+                        RuntimeMethodKind::Instance
+                    },
+                    variadic: function.param_variadic.iter().any(|value| *value),
+                    default_count: function
+                        .param_defaults
+                        .iter()
+                        .filter(|value| value.is_some())
+                        .count(),
+                    reified_params: function.reified_type_params.len(),
                 })
             })
             .collect()
@@ -291,11 +388,16 @@ impl RuntimeProgram {
             let Some(runtime_id) = by_ir_type.get(ir_ty.id.0).copied() else {
                 continue;
             };
-            types[runtime_id.0].with_bounds = ir_ty
+            let bounds = ir_ty
                 .with_bounds
                 .iter()
                 .filter_map(|bound| Self::resolve_bound_type_id(bound, by_name_kind))
-                .collect();
+                .collect::<Vec<_>>();
+            for bound in bounds {
+                if !types[runtime_id.0].with_bounds.contains(&bound) {
+                    types[runtime_id.0].with_bounds.push(bound);
+                }
+            }
         }
     }
 

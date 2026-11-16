@@ -2,93 +2,63 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     Diagnostic, Span,
-    ast::TypeKind,
     interpreter::{Interpreter, Value, iterable_values},
-    ir,
 };
 
 use super::builtin_method;
-use crate::runtime::{RuntimeType, RuntimeTypeId};
+use crate::runtime::RuntimeType;
 
 pub(super) fn define() -> RuntimeType {
-    RuntimeType {
-        id: RuntimeTypeId(usize::MAX),
-        ir_type_id: None,
-        kind: TypeKind::Class,
-        name: "Vector".to_string(),
-        fields: Vec::new(),
-        field_init: None,
-        mixin_init: None,
-        methods: vec![
-            builtin_method(29, "add", vec![ir::Type::Unknown], list_add),
-            builtin_method(30, "addAll", vec![ir::Type::Unknown], list_add_all),
-            builtin_method(3, "map", vec![function_unknown()], list_map),
-            builtin_method(4, "flatMap", vec![function_unknown()], list_flat_map),
-            builtin_method(41, "flatten", Vec::new(), list_flatten),
-            builtin_method(5, "filter", vec![function_unknown()], list_filter),
-            builtin_method(
-                6,
-                "fold",
-                vec![ir::Type::Unknown, function_unknown()],
-                list_fold,
-            ),
-            builtin_method(7, "reduce", vec![function_unknown()], list_reduce),
-            builtin_method(8, "exists", vec![function_unknown()], list_exists),
-            builtin_method(9, "forEach", vec![function_unknown()], list_for_each),
-            builtin_method(10, "forAll", vec![function_unknown()], list_for_all),
-            builtin_method(11, "sort", vec![function_unknown()], list_sort),
-            builtin_method(43, "sort", Vec::new(), list_sort),
-            builtin_method(40, "take", vec![ir::Type::Int], list_take),
-            builtin_method(12, "zip", vec![ir::Type::Unknown], list_zip),
-            builtin_method(13, "zipWithIndex", Vec::new(), list_zip_with_index),
-            builtin_method(14, "size", Vec::new(), list_size),
-            builtin_method(15, "isEmpty", Vec::new(), list_is_empty),
-            builtin_method(31, "nonEmpty", Vec::new(), list_non_empty),
-            builtin_method(32, "makeStr", vec![ir::Type::Str], list_make_str),
-            builtin_method(
-                42,
-                "makeStr",
-                vec![ir::Type::Str, function_unknown()],
-                list_make_str,
-            ),
-            builtin_method(16, "at", vec![ir::Type::Int], list_at),
-            builtin_method(37, "slice", Vec::new(), list_slice),
-            builtin_method(38, "slice", vec![ir::Type::Int], list_slice),
-            builtin_method(39, "slice", vec![ir::Type::Int, ir::Type::Int], list_slice),
-            builtin_method(
-                17,
-                "setAt",
-                vec![ir::Type::Int, ir::Type::Unknown],
-                list_set_at,
-            ),
-            builtin_method(
-                35,
-                "insertAt",
-                vec![ir::Type::Int, ir::Type::Unknown],
-                list_insert_at,
-            ),
-            builtin_method(36, "removeAt", vec![ir::Type::Int], list_remove_at),
-            builtin_method(34, "removeFirst", Vec::new(), list_remove_first),
-            builtin_method(18, "removeLast", Vec::new(), list_remove_last),
-            builtin_method(20, "tail", Vec::new(), list_tail),
-            builtin_method(21, "first", Vec::new(), list_first),
-            builtin_method(22, "last", Vec::new(), list_last),
-            builtin_method(24, "count", vec![function_unknown()], list_count),
-            builtin_method(25, "contains", vec![ir::Type::Unknown], list_contains),
-            builtin_method(26, "find", vec![ir::Type::Unknown], list_find),
-            builtin_method(27, "indexOf", vec![ir::Type::Unknown], list_index_of),
-            builtin_method(28, "iterator", Vec::new(), list_iterator),
-        ],
-        enum_cases: Vec::new(),
-        with_bounds: Vec::new(),
-    }
+    define_for("Vector")
 }
 
-fn function_unknown() -> ir::Type {
-    ir::Type::Function {
-        params: Vec::new(),
-        ret: Box::new(ir::Type::Unknown),
-    }
+pub(super) fn define_for(owner: &str) -> RuntimeType {
+    let mut ty = super::empty_builtin_type(owner);
+    ty.methods = vec![
+        builtin_method(owner, "add", 1, list_add),
+        builtin_method(owner, "addAll", 1, list_add_all),
+        builtin_method(owner, "map", 1, list_map),
+        builtin_method(owner, "flatMap", 1, list_flat_map),
+        builtin_method(owner, "flatten", 0, list_flatten),
+        builtin_method(owner, "filter", 1, list_filter),
+        builtin_method(owner, "fold", 2, list_fold),
+        builtin_method(owner, "reduce", 1, list_reduce),
+        builtin_method(owner, "exists", 1, list_exists),
+        builtin_method(owner, "forEach", 1, list_for_each),
+        builtin_method(owner, "forAll", 1, list_for_all),
+        builtin_method(owner, "sort", 1, list_sort),
+        builtin_method(owner, "sort", 0, list_sort),
+        builtin_method(owner, "take", 1, list_take),
+        builtin_method(owner, "zip", 1, list_zip),
+        builtin_method(owner, "zipWithIndex", 0, list_zip_with_index),
+        builtin_method(owner, "size", 0, list_size),
+        builtin_method(owner, "isEmpty", 0, list_is_empty),
+        builtin_method(owner, "nonEmpty", 0, list_non_empty),
+        builtin_method(owner, "makeStr", 1, list_make_str),
+        builtin_method(owner, "makeStr", 2, list_make_str),
+        builtin_method(owner, "at", 1, list_at),
+        builtin_method(owner, "slice", 0, list_slice),
+        builtin_method(owner, "slice", 1, list_slice),
+        builtin_method(owner, "slice", 2, list_slice),
+        builtin_method(owner, "setAt", 2, list_set_at),
+        builtin_method(owner, "insertAt", 2, list_insert_at),
+        builtin_method(owner, "removeAt", 1, list_remove_at),
+        builtin_method(owner, "removeFirst", 0, list_remove_first),
+        builtin_method(owner, "removeLast", 0, list_remove_last),
+        builtin_method(owner, "tail", 0, list_tail),
+        builtin_method(owner, "first", 0, list_first),
+        builtin_method(owner, "last", 0, list_last),
+        builtin_method(owner, "contains", 1, list_contains),
+        builtin_method(owner, "indexOf", 1, list_index_of),
+        builtin_method(owner, "iterator", 0, list_iterator),
+        builtin_method(owner, "clone", 0, list_clone),
+        builtin_method(owner, "count", 1, list_count),
+        builtin_method(owner, "find", 1, list_find),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    ty
 }
 
 fn list_items(receiver: &Value) -> Rc<RefCell<Vec<Value>>> {
@@ -724,7 +694,7 @@ fn list_last(
     })
 }
 
-fn list_count(
+pub(super) fn list_count(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
@@ -764,7 +734,7 @@ fn list_contains(
     Ok(Value::Bool(false))
 }
 
-fn list_find(
+pub(super) fn list_find(
     interpreter: &mut Interpreter<'_>,
     receiver: Value,
     args: Vec<Value>,
@@ -812,4 +782,21 @@ fn list_iterator(
     Ok(Value::iterator_from_values(
         list_items(&receiver).borrow().clone(),
     ))
+}
+
+fn list_clone(
+    interpreter: &mut Interpreter<'_>,
+    receiver: Value,
+    args: Vec<Value>,
+    span: Option<Span>,
+) -> Result<Value, Diagnostic> {
+    if !args.is_empty() {
+        return Err(interpreter.runtime_error(span, "Array.clone expects 0 arguments"));
+    }
+    Ok(Value::list(list_values(
+        interpreter,
+        &receiver,
+        span,
+        "Array.clone",
+    )?))
 }

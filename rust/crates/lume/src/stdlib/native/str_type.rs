@@ -1,89 +1,47 @@
 use crate::{
     Diagnostic, Span,
-    ast::TypeKind,
     interpreter::{Interpreter, Value},
 };
 use regex::Regex;
 
 use super::builtin_method;
-use crate::runtime::{RuntimeType, RuntimeTypeId};
+use crate::runtime::RuntimeType;
 
 pub(super) fn define() -> RuntimeType {
-    RuntimeType {
-        id: RuntimeTypeId(usize::MAX),
-        ir_type_id: None,
-        kind: TypeKind::Class,
-        name: "Str".to_string(),
-        fields: Vec::new(),
-        field_init: None,
-        mixin_init: None,
-        methods: vec![
-            builtin_method(0, "size", Vec::new(), str_size),
-            builtin_method(1, "split", vec![crate::ir::Type::Str], str_split),
-            builtin_method(2, "charAt", vec![crate::ir::Type::Int], str_char_at),
-            builtin_method(3, "compare", vec![crate::ir::Type::Str], str_compare),
-            builtin_method(4, "trim", Vec::new(), str_trim),
-            builtin_method(5, "isEmpty", Vec::new(), str_is_empty),
-            builtin_method(6, "nonEmpty", Vec::new(), str_non_empty),
-            builtin_method(7, "splitRegex", vec![crate::ir::Type::Str], str_split_regex),
-            builtin_method(8, "trimLeft", Vec::new(), str_trim_left),
-            builtin_method(9, "trimRight", Vec::new(), str_trim_right),
-            builtin_method(10, "toLower", Vec::new(), str_to_lower),
-            builtin_method(11, "toUpper", Vec::new(), str_to_upper),
-            builtin_method(12, "contains", vec![crate::ir::Type::Str], str_contains),
-            builtin_method(13, "indexOf", vec![crate::ir::Type::Str], str_index_of),
-            builtin_method(
-                14,
-                "replaceFirstRegex",
-                vec![crate::ir::Type::Str, crate::ir::Type::Str],
-                str_replace_first_regex,
-            ),
-            builtin_method(
-                15,
-                "replaceAllRegex",
-                vec![crate::ir::Type::Str, crate::ir::Type::Str],
-                str_replace_all_regex,
-            ),
-            builtin_method(16, "slice", Vec::new(), str_slice),
-            builtin_method(17, "slice", vec![crate::ir::Type::Int], str_slice),
-            builtin_method(
-                18,
-                "slice",
-                vec![crate::ir::Type::Int, crate::ir::Type::Int],
-                str_slice,
-            ),
-            builtin_method(
-                19,
-                "startsWith",
-                vec![crate::ir::Type::Str],
-                str_starts_with,
-            ),
-            builtin_method(20, "endsWith", vec![crate::ir::Type::Str], str_ends_with),
-            builtin_method(
-                21,
-                "replaceFirst",
-                vec![crate::ir::Type::Str, crate::ir::Type::Str],
-                str_replace_first,
-            ),
-            builtin_method(
-                22,
-                "replaceAll",
-                vec![crate::ir::Type::Str, crate::ir::Type::Str],
-                str_replace_all,
-            ),
-            builtin_method(23, "isBlank", Vec::new(), str_is_blank),
-            builtin_method(24, "lines", Vec::new(), str_lines),
-            builtin_method(25, "repeat", vec![crate::ir::Type::Int], str_repeat),
-            builtin_method(
-                26,
-                "lastIndexOf",
-                vec![crate::ir::Type::Str],
-                str_last_index_of,
-            ),
-        ],
-        enum_cases: Vec::new(),
-        with_bounds: Vec::new(),
-    }
+    let mut ty = super::empty_builtin_type("Str");
+    ty.methods = vec![
+        builtin_method("Str", "size", 0, str_size),
+        builtin_method("Str", "split", 1, str_split),
+        builtin_method("Str", "charAt", 1, str_char_at),
+        builtin_method("Str", "compareTo", 1, str_compare),
+        builtin_method("Str", "trim", 0, str_trim),
+        builtin_method("Str", "isEmpty", 0, str_is_empty),
+        builtin_method("Str", "nonEmpty", 0, str_non_empty),
+        builtin_method("Str", "splitRegex", 1, str_split_regex),
+        builtin_method("Str", "trimLeft", 0, str_trim_left),
+        builtin_method("Str", "trimRight", 0, str_trim_right),
+        builtin_method("Str", "toLower", 0, str_to_lower),
+        builtin_method("Str", "toUpper", 0, str_to_upper),
+        builtin_method("Str", "contains", 1, str_contains),
+        builtin_method("Str", "indexOf", 1, str_index_of),
+        builtin_method("Str", "replaceFirstRegex", 2, str_replace_first_regex),
+        builtin_method("Str", "replaceAllRegex", 2, str_replace_all_regex),
+        builtin_method("Str", "slice", 0, str_slice),
+        builtin_method("Str", "slice", 1, str_slice),
+        builtin_method("Str", "slice", 2, str_slice),
+        builtin_method("Str", "startsWith", 1, str_starts_with),
+        builtin_method("Str", "endsWith", 1, str_ends_with),
+        builtin_method("Str", "replaceFirst", 2, str_replace_first),
+        builtin_method("Str", "replaceAll", 2, str_replace_all),
+        builtin_method("Str", "isBlank", 0, str_is_blank),
+        builtin_method("Str", "lines", 0, str_lines),
+        builtin_method("Str", "repeat", 1, str_repeat),
+        builtin_method("Str", "lastIndexOf", 1, str_last_index_of),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    ty
 }
 
 fn str_compare(

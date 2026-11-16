@@ -2485,6 +2485,14 @@ mod tests {
             method.return_type,
             Some(TypeRef::Named { ref name, .. }) if name == "Result"
         ));
+        let TypeMember::Method(declaration) =
+            java_library_method(&method.name, &method, method.return_type.clone(), span)
+        else {
+            panic!("expected normalized Java stub method");
+        };
+        assert_eq!(declaration.type_params[0].name, "T");
+        assert!(declaration.type_params[0].reified);
+        assert!(declaration.params.is_empty());
     }
 
     #[test]
@@ -6832,6 +6840,70 @@ fn main() Unit {
     }
 
     #[test]
+    fn java_stub_overlay_uses_normal_member_type_checking() {
+        if !command_available("javac") || !command_available("jar") || !command_available("javap") {
+            eprintln!("skipping Java stub checking test because a JDK tool is not available");
+            return;
+        }
+
+        let temp = temp_path("lume-java-stub-checking");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        let jar = create_widget_jar(&temp);
+        for (name, statement, expected_codes) in [
+            (
+                "instance",
+                "widget.count(1)",
+                &["no_matching_overload", "invalid_argument_count"][..],
+            ),
+            (
+                "static",
+                "Widget.create(1)",
+                &["no_matching_overload", "invalid_argument_type"][..],
+            ),
+            (
+                "generic",
+                "value Int = boxed.value()",
+                &["invalid_binding_type"][..],
+            ),
+        ] {
+            let source = temp.join(format!("{name}.lum"));
+            let out = temp.join(format!("{name}-out"));
+            fs::write(
+                &source,
+                format!(
+                    r#"
+module demo/stubchecking
+use third/party/{{Widget, GenericBox}}
+fn main() Unit {{
+    widget Widget = Widget("Ada", 7)
+    boxed GenericBox[Str] = GenericBox("hello")
+    {statement}
+}}
+"#
+                ),
+            )
+            .expect("write source");
+
+            let result = generate_java_path(
+                &source,
+                JavaBackendOptions::new(&out).with_classpath_entry(&jar),
+            )
+            .expect("check Java stub overlay");
+            assert!(result.written_files.is_empty(), "{name}");
+            assert!(!out.exists(), "{name}");
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| { expected_codes.contains(&diagnostic.diagnostic.code) }),
+                "{name}: {:#?}",
+                result.diagnostics
+            );
+        }
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
     fn rejects_missing_java_method_from_jar() {
         if !command_available("javac") || !command_available("jar") || !command_available("javap") {
             eprintln!("skipping Java missing method test because a JDK tool is not available");
@@ -8317,6 +8389,65 @@ fn run() Str {
         assert!(out.join("demo/nested/NamespaceLabel.java").exists());
         assert!(out.join("demo/nested/NamespaceOutcome.java").exists());
 
+        let _ = fs::remove_dir_all(temp);
+    }
+
+    #[test]
+    fn native_reflection_varargs_keep_java_calling_convention() {
+        if !command_available("javac") || !command_available("java") {
+            eprintln!("skipping Java reflection vararg test because javac/java is unavailable");
+            return;
+        }
+        let temp = temp_path("lume-java-reflection-varargs");
+        let source = temp.join("reflection_varargs.lum");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        fs::create_dir_all(&temp).expect("create temp dir");
+        fs::write(
+            &source,
+            r#"
+module demo/reflectionvarargs
+public shape Pair {
+    left Int
+    right Int
+}
+public class Counter {
+    base Int
+    fn sum(extra Int) Int = this.base + extra
+}
+fn main() Unit {
+    pairType = typeOf[Pair].asShape()!
+    pair Pair = pairType.construct(2, 3)!
+    println(pair.left + pair.right)
+    counter Counter = Counter(2)
+    method = typeOf[Counter].asClass()!.method("sum")!
+    println(method.call(counter, 3)!)
+}
+"#,
+        )
+        .expect("write source");
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out)).expect("generate");
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let module =
+            fs::read_to_string(out.join("demo/reflectionvarargs/ReflectionvarargsModule.java"))
+                .expect("read module");
+        assert!(module.contains(".construct(2L, 3L)"), "{module}");
+        assert!(module.contains(".call(counter, 3L)"), "{module}");
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).expect("collect generated Java");
+        fs::create_dir_all(&classes).expect("create classes dir");
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("demo.reflectionvarargs.ReflectionvarargsMain"),
+            "java",
+        );
+        assert_eq!(String::from_utf8(output.stdout).unwrap(), "5\n5\n");
         let _ = fs::remove_dir_all(temp);
     }
 

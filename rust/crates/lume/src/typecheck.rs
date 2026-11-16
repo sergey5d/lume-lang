@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs,
     path::{Path, PathBuf},
 };
 
@@ -17,8 +16,7 @@ use crate::{
     numeric::{parse_float_literal, parse_integer_literal},
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
-        collect_module_order, find_stdlib_dir, load_module_graph_with_options,
-        parse_program_from_path, read_directives, resolve_path_with_options,
+        collect_module_order, load_module_graph_with_options, resolve_path_with_options,
     },
     typecheck_diagnostics,
 };
@@ -72,8 +70,7 @@ pub(crate) fn check_path_with_load_options(
     }
 
     let (graph, root_path) = load_module_graph_with_options(path.as_ref(), options)?;
-    let stdlib_dir = find_stdlib_dir(path.as_ref().parent().unwrap_or_else(|| Path::new(".")))?;
-    let mut world = World::from_graph(graph, root_path, stdlib_dir)?;
+    let mut world = World::from_graph(graph, root_path)?;
 
     let mut diagnostics = Vec::new();
     for module_path in world.order.clone() {
@@ -113,89 +110,8 @@ pub(crate) fn check_path_with_load_options(
     })
 }
 
-fn default_stdlib_dir() -> Option<PathBuf> {
-    find_stdlib_dir(Path::new(env!("CARGO_MANIFEST_DIR")))
-        .ok()
-        .or_else(|| find_stdlib_dir(Path::new(".")).ok())
-}
-
 fn default_inline_ambient() -> AmbientInfo {
-    default_stdlib_dir()
-        .and_then(|stdlib_dir| AmbientInfo::load(&stdlib_dir).ok())
-        .unwrap_or_default()
-}
-
-/// Native calls still use the parameter names declared by the standard library.
-pub(crate) fn runtime_callable_parameters(
-    owner: &str,
-    member: &str,
-    static_member: bool,
-) -> Option<(Vec<String>, Vec<Vec<crate::ir::SourceCallParamSpec>>)> {
-    let world = World::from_program(&Program::default());
-    let checker = Checker::new(&world, world.root_module.as_ref()?);
-    let sig = if static_member {
-        world.ambient.objects.get(owner)?
-    } else {
-        world.ambient.types.get(owner)?
-    };
-    let methods = checker.method_sigs_for_type(sig, member)?;
-    let signatures = methods
-        .into_iter()
-        .filter(|method| !method.getter)
-        .map(|method| {
-            method
-                .params
-                .into_iter()
-                .map(|param| crate::ir::SourceCallParamSpec {
-                    name: Some(param.name),
-                    ty: runtime_signature_type(&param.ty),
-                    variadic: param.variadic,
-                    default: None,
-                })
-                .collect()
-        })
-        .collect();
-    Some((sig.type_params.clone(), signatures))
-}
-
-fn runtime_signature_type(ty: &Ty) -> crate::ir::Type {
-    use crate::ir::Type;
-    match ty {
-        Ty::Unknown | Ty::Wildcard | Ty::Capture(_) => Type::Unknown,
-        Ty::Never => Type::Never,
-        Ty::Named(name, args) => {
-            if args.is_empty() {
-                match name.as_str() {
-                    "Unit" => return Type::Unit,
-                    "Bool" => return Type::Bool,
-                    "Int" => return Type::Int,
-                    "Float" => return Type::Float,
-                    "Str" => return Type::Str,
-                    _ => {}
-                }
-            }
-            Type::Named {
-                name: name.clone(),
-                args: args.iter().map(runtime_signature_type).collect(),
-            }
-        }
-        Ty::Union(members) => Type::Union(members.iter().map(runtime_signature_type).collect()),
-        Ty::Tuple(items) => Type::Tuple(items.iter().map(runtime_signature_type).collect()),
-        Ty::Record(fields) => Type::Record(
-            fields
-                .iter()
-                .map(|(name, ty)| crate::ir::NamedType {
-                    name: name.clone(),
-                    ty: runtime_signature_type(ty),
-                })
-                .collect(),
-        ),
-        Ty::Function(params, ret) => Type::Function {
-            params: params.iter().map(runtime_signature_type).collect(),
-            ret: Box::new(runtime_signature_type(ret)),
-        },
-        Ty::TypeParam(name) => Type::TypeParam(name.clone()),
-    }
+    AmbientInfo::from_declarations(crate::stdlib::declarations())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -529,48 +445,23 @@ fn universal_member_type(name: &str) -> Option<Ty> {
 }
 
 fn hash_method_sig() -> FunctionSig {
-    FunctionSig {
-        type_params: Vec::new(),
-        reified_type_params: Vec::new(),
-        generic_conditions: Vec::new(),
-        params: Vec::new(),
-        ret: Ty::int(),
-        visibility: Visibility::Default,
-        has_body: true,
-        getter: false,
-    }
+    let declaration =
+        crate::stdlib::type_declaration("Hashed", TypeKind::Interface).expect("hashing contract");
+    let method = crate::stdlib::member_declarations(declaration, "hash")
+        .into_iter()
+        .next()
+        .expect("hashing method");
+    function_sig_from_method(&method, &[])
 }
 
 fn universal_method_sigs(name: &str) -> Option<Vec<FunctionSig>> {
-    let sig = match name {
-        "toStr" => FunctionSig {
-            type_params: Vec::new(),
-            reified_type_params: Vec::new(),
-            generic_conditions: Vec::new(),
-            params: Vec::new(),
-            ret: Ty::str(),
-            visibility: Visibility::Default,
-            has_body: true,
-            getter: false,
-        },
-        "equals" => FunctionSig {
-            type_params: Vec::new(),
-            reified_type_params: Vec::new(),
-            generic_conditions: Vec::new(),
-            params: vec![ParamSig {
-                name: "other".to_string(),
-                ty: Ty::any(),
-                variadic: false,
-                has_initializer: false,
-            }],
-            ret: Ty::bool(),
-            visibility: Visibility::Default,
-            has_body: true,
-            getter: false,
-        },
-        _ => return None,
-    };
-    Some(vec![sig])
+    let declaration = crate::stdlib::type_declaration("Any", TypeKind::Interface)?;
+    let methods = crate::stdlib::member_declarations(declaration, name)
+        .iter()
+        .filter(|method| !method.getter)
+        .map(|method| function_sig_from_method(method, &[]))
+        .collect::<Vec<_>>();
+    (!methods.is_empty()).then_some(methods)
 }
 
 #[derive(Debug, Clone)]
@@ -1037,6 +928,7 @@ struct ModuleInfo {
     display_path: String,
     module_id: String,
     program: Program,
+    source: crate::resolver::ModuleSource,
     imports: HashMap<String, PathBuf>,
     symbol_imports: HashMap<String, ImportedSymbol>,
     extension_imports: Vec<PathBuf>,
@@ -1056,6 +948,7 @@ impl ModuleInfo {
             display_path: module.display_path.clone(),
             module_id: module_identity(&module.path, &module.program),
             program: module.program.clone(),
+            source: module.source,
             imports: module.imports.clone(),
             symbol_imports: module.symbol_imports.clone(),
             extension_imports: module.extension_imports.clone(),
@@ -1078,6 +971,7 @@ impl ModuleInfo {
             path,
             display_path: display_path.to_string(),
             program: program.clone(),
+            source: crate::resolver::ModuleSource::Source,
             imports: HashMap::new(),
             symbol_imports: HashMap::new(),
             extension_imports: Vec::new(),
@@ -1274,23 +1168,10 @@ struct AmbientInfo {
 }
 
 impl AmbientInfo {
-    fn load(stdlib_dir: &Path) -> Result<Self, String> {
-        let mut entries = fs::read_dir(stdlib_dir)
-            .map_err(|err| format!("read stdlib {}: {err}", stdlib_dir.display()))?
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "lum"))
-            .collect::<Vec<_>>();
-        entries.sort();
-
+    fn from_declarations(program: &Program) -> Self {
         let mut ambient = AmbientInfo::default();
-        for path in entries {
-            let directives = read_directives(&path)?;
-            if !directives.interpreter {
-                continue;
-            }
-            let program = parse_program_from_path(&path)?;
-            let module = ModuleInfo::from_program(&path.display().to_string(), &program);
+        {
+            let module = ModuleInfo::from_program("<stdlib>", program);
             for (name, overloads) in module.functions.clone() {
                 let visible = overloads
                     .into_iter()
@@ -1334,7 +1215,7 @@ impl AmbientInfo {
             }
         }
 
-        Ok(ambient)
+        ambient
     }
 }
 
@@ -1402,7 +1283,7 @@ fn custom_constructor_error(sig: &TypeSig) -> String {
 }
 
 fn is_builtin_primitive_type_name(name: &str) -> bool {
-    matches!(name, "Bool" | "Decimal" | "Float" | "Int" | "Char" | "Str")
+    crate::stdlib::is_primitive(name)
 }
 
 fn primitive_implementation_diagnostic(name: &str, span: crate::source::Span) -> Diagnostic {
@@ -1420,17 +1301,10 @@ fn builtin_extension_type_sig(name: &str) -> Option<TypeSig> {
     if !is_builtin_primitive_type_name(name) {
         return None;
     }
-    Some(TypeSig {
-        kind: TypeKind::Class,
-        name: name.to_string(),
-        module_id: "<builtin>".to_string(),
-        type_params: Vec::new(),
-        generic_conditions: Vec::new(),
-        with_bounds: Vec::new(),
-        fields: Vec::new(),
-        methods: HashMap::new(),
-        enum_cases: HashMap::new(),
-    })
+    let declaration = &crate::stdlib::descriptor(name)?.declaration;
+    let mut sig = type_sig_from_decl(declaration);
+    sig.module_id = "<stdlib>".to_string();
+    Some(sig)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1453,8 +1327,8 @@ impl World {
         world
     }
 
-    fn from_graph(graph: ModuleGraph, root: PathBuf, stdlib_dir: PathBuf) -> Result<Self, String> {
-        let ambient = AmbientInfo::load(&stdlib_dir)?;
+    fn from_graph(graph: ModuleGraph, root: PathBuf) -> Result<Self, String> {
+        let ambient = default_inline_ambient();
         let mut modules = HashMap::new();
         for (path, loaded) in graph.modules {
             modules.insert(path, ModuleInfo::from_loaded(&loaded));
@@ -1849,6 +1723,9 @@ impl<'a> Checker<'a> {
     }
 
     fn check_module(&mut self) {
+        if self.module.source == crate::resolver::ModuleSource::Library {
+            return;
+        }
         self.check_global_bindings();
         self.check_api_type_visibility();
         for item in &self.module.program.items {
@@ -4792,10 +4669,6 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         uses_brace_syntax: bool,
     ) -> bool {
-        if self.is_builtin_panic_call(callee) {
-            return true;
-        }
-
         if let Some((_, ret)) =
             self.callable_signature_for_args_probe(callee, args, uses_brace_syntax)
         {
@@ -5984,7 +5857,10 @@ impl<'a> Checker<'a> {
                     }
                     item_ty = join_types(&item_ty, &current);
                 }
-                if items_fit_expected && let Some(expected_item) = expected_item_ty {
+                if items_fit_expected
+                    && let Some(expected_item) = expected_item_ty
+                    && !type_contains_unresolved_constructor_type(&expected_item)
+                {
                     return Ty::list(materialize_type(&expected_item));
                 }
                 Ty::list(item_ty)
@@ -6439,7 +6315,9 @@ impl<'a> Checker<'a> {
                 let inner = self.check_expr(expr);
                 match op {
                     crate::ast::UnaryOp::Neg => {
-                        if inner.is_numeric() || matches!(inner, Ty::Unknown) {
+                        if matches!(&inner, Ty::Named(name, _) if crate::stdlib::supports_unary_operator(name, *op))
+                            || matches!(inner, Ty::Unknown)
+                        {
                             inner
                         } else if let Some(methods) = self.member_method_sigs(&inner, "-") {
                             methods
@@ -6863,48 +6741,14 @@ impl<'a> Checker<'a> {
             return ty;
         }
         let source_args = normalized_args;
-        let has_shape_spread = source_args.iter().any(|arg| {
-            matches!(&arg.value, Expr::Spread { value, .. } if self.shape_target_fields(&self.probe_shape_argument_source(value)).is_some())
-        });
         let normalized_args = self.expand_shape_call_arguments(&source_args);
         if let Expr::Member { receiver, name, .. } = callee
             && normalized_args.len() == 1
             && name == "equals"
         {
-            let left = self.check_expr(receiver);
-            let right = self.check_expr(&normalized_args[0].value);
+            let left = self.probe_expr_type(receiver);
+            let right = self.probe_expr_type(&normalized_args[0].value);
             self.check_equality_operands(&left, &right, span);
-            return Ty::bool();
-        }
-        if self.is_builtin_panic_call(callee) {
-            for arg in &normalized_args {
-                self.check_expr(&arg.value);
-            }
-            return Ty::never();
-        }
-        if self.is_builtin_print_call(callee) {
-            if has_shape_spread {
-                self.add_error(
-                    "invalid_shape_argument_spread_target",
-                    "shape argument expansion requires a callable with named parameters",
-                    span,
-                );
-            }
-            for arg in &normalized_args {
-                self.check_expr(&arg.value);
-            }
-            return Ty::unit();
-        }
-        if !has_shape_spread
-            && let Some(ty) =
-                self.check_builtin_static_method_call(callee, &normalized_args, span, expected)
-        {
-            return ty;
-        }
-        if !has_shape_spread
-            && let Some(ty) = self.check_builtin_static_factory_call(callee, &normalized_args, span)
-        {
-            return ty;
         }
         self.check_shape_call_argument_layout(&source_args);
         if self.check_extension_private_method_call(callee, &normalized_args) {
@@ -7699,223 +7543,6 @@ impl<'a> Checker<'a> {
         true
     }
 
-    fn check_builtin_static_factory_call(
-        &mut self,
-        callee: &Expr,
-        args: &[crate::ast::CallArg],
-        span: crate::source::Span,
-    ) -> Option<Ty> {
-        let Expr::Member { receiver, name, .. } = callee else {
-            return None;
-        };
-        if name != "from" {
-            return None;
-        }
-        let Expr::Identifier {
-            name: type_name, ..
-        } = receiver.as_ref()
-        else {
-            return None;
-        };
-
-        let result_name = match type_name.as_str() {
-            "Vector" => "Vector",
-            "Set" => "Set",
-            _ => return None,
-        };
-
-        if args.len() != 1 {
-            self.add_error(
-                "invalid_argument_count",
-                format!("{result_name}.from expects 1 argument, got {}", args.len()),
-                span,
-            );
-        }
-
-        let source_ty = args
-            .first()
-            .map(|arg| self.check_expr(&arg.value))
-            .unwrap_or(Ty::Unknown);
-        let item_ty = self.iterable_item_type(&source_ty);
-        if matches!(item_ty, Ty::Unknown) && !matches!(source_ty, Ty::Unknown) {
-            let arg_span = args.first().map(|arg| arg.span).unwrap_or(span);
-            self.add_error(
-                "invalid_argument_type",
-                format!(
-                    "{result_name}.from expects iterable argument, got '{}'",
-                    source_ty.describe()
-                ),
-                arg_span,
-            );
-        }
-        Some(Ty::Named(result_name.to_string(), vec![item_ty]))
-    }
-
-    fn check_builtin_static_method_call(
-        &mut self,
-        callee: &Expr,
-        args: &[crate::ast::CallArg],
-        span: crate::source::Span,
-        expected: &Ty,
-    ) -> Option<Ty> {
-        let Expr::Member { receiver, name, .. } = callee else {
-            return None;
-        };
-        let Expr::Identifier {
-            name: type_name, ..
-        } = receiver.as_ref()
-        else {
-            return None;
-        };
-
-        match (type_name.as_str(), name.as_str()) {
-            (collection @ ("Array" | "Vector"), "fill") => {
-                if args.len() != 2 {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!("{collection}.fill expects 2 arguments, got {}", args.len()),
-                        span,
-                    );
-                }
-                if let Some(arg) = args.first() {
-                    let ty = self.check_expr(&arg.value);
-                    self.require_assignable(
-                        &ty,
-                        &Ty::int(),
-                        arg.span,
-                        "invalid_argument_type",
-                        format!(
-                            "{collection}.fill expects Int length, got '{}'",
-                            ty.describe()
-                        ),
-                    );
-                }
-                let expected_item = match expected {
-                    Ty::Named(name, type_args) if name == collection && type_args.len() == 1 => {
-                        type_args.first()
-                    }
-                    _ => None,
-                };
-                let item_ty = args
-                    .get(1)
-                    .map(|arg| {
-                        expected_item
-                            .map(|expected| self.check_expr_against(&arg.value, expected))
-                            .unwrap_or_else(|| self.check_expr(&arg.value))
-                    })
-                    .unwrap_or(Ty::Unknown);
-                Some(Ty::Named(collection.to_string(), vec![item_ty]))
-            }
-            (collection @ ("Array" | "Vector"), "generate") => {
-                if args.len() != 2 {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!(
-                            "{collection}.generate expects 2 arguments, got {}",
-                            args.len()
-                        ),
-                        span,
-                    );
-                }
-                if let Some(arg) = args.first() {
-                    let ty = self.check_expr(&arg.value);
-                    self.require_assignable(
-                        &ty,
-                        &Ty::int(),
-                        arg.span,
-                        "invalid_argument_type",
-                        format!(
-                            "{collection}.generate expects Int length, got '{}'",
-                            ty.describe()
-                        ),
-                    );
-                }
-                let expected_item = match expected {
-                    Ty::Named(name, type_args) if name == collection && type_args.len() == 1 => {
-                        type_args[0].clone()
-                    }
-                    _ => Ty::Unknown,
-                };
-                let item_ty = args
-                    .get(1)
-                    .map(|arg| {
-                        let generator =
-                            Ty::Function(vec![Ty::int()], Box::new(expected_item.clone()));
-                        let generator_ty = self.check_expr_against(&arg.value, &generator);
-                        match generator_ty {
-                            Ty::Function(params, ret) if params.len() == 1 => {
-                                if !matches!(params[0], Ty::Unknown)
-                                    && !self.is_assignable(&Ty::int(), &params[0])
-                                {
-                                    self.add_error(
-                                        "invalid_argument_type",
-                                        format!(
-                                            "{collection}.generate expects fn(Int) T generator, got '{}'",
-                                            Ty::Function(params.clone(), ret.clone()).describe()
-                                        ),
-                                        arg.span,
-                                    );
-                                }
-                                *ret
-                            }
-                            Ty::Unknown => Ty::Unknown,
-                            other => {
-                                self.add_error(
-                                    "invalid_argument_type",
-                                    format!(
-                                        "{collection}.generate expects fn(Int) T generator, got '{}'",
-                                        other.describe()
-                                    ),
-                                    arg.span,
-                                );
-                                Ty::Unknown
-                            }
-                        }
-                    })
-                    .unwrap_or(Ty::Unknown);
-                Some(Ty::Named(collection.to_string(), vec![item_ty]))
-            }
-            ("Option", "when") => {
-                if args.len() != 2 {
-                    self.add_error(
-                        "invalid_argument_count",
-                        format!("Option.when expects 2 arguments, got {}", args.len()),
-                        span,
-                    );
-                }
-                if let Some(arg) = args.first() {
-                    let ty = self.check_expr(&arg.value);
-                    self.require_assignable(
-                        &ty,
-                        &Ty::bool(),
-                        arg.span,
-                        "invalid_argument_type",
-                        format!(
-                            "Option.when expects Bool condition, got '{}'",
-                            ty.describe()
-                        ),
-                    );
-                }
-                let expected_value = match expected {
-                    Ty::Named(name, type_args) if name == "Option" && type_args.len() == 1 => {
-                        type_args.first()
-                    }
-                    _ => None,
-                };
-                let value_ty = args
-                    .get(1)
-                    .map(|arg| {
-                        expected_value
-                            .map(|expected| self.check_expr_against(&arg.value, expected))
-                            .unwrap_or_else(|| self.check_expr(&arg.value))
-                    })
-                    .unwrap_or(Ty::Unknown);
-                Some(Ty::option(value_ty))
-            }
-            _ => None,
-        }
-    }
-
     fn check_discarded_expr_in_statement(&mut self, expr: &Expr) {
         match expr {
             Expr::Call { .. }
@@ -8043,7 +7670,7 @@ impl<'a> Checker<'a> {
         args: &[crate::ast::CallArg],
         span: crate::source::Span,
     ) -> Ty {
-        self.check_signature_call_with_subst(params, ret, args, span, HashMap::new(), None)
+        self.check_signature_call_with_subst(params, ret, args, span, HashMap::new(), None, &[])
             .0
     }
 
@@ -8065,7 +7692,7 @@ impl<'a> Checker<'a> {
             &mut subst,
         );
         if !matches!(expected, Ty::Unknown) {
-            infer_type_subst(&selection.sig.ret, expected, &mut subst);
+            self.infer_type_subst(&selection.sig.ret, expected, &mut subst);
         }
         let callee_name = callable_name_for_diagnostic(callee);
         let (ret, subst, argument_shape_valid) = self.check_signature_call_with_subst(
@@ -8075,6 +7702,7 @@ impl<'a> Checker<'a> {
             span,
             subst,
             Some(&callee_name),
+            &selection.sig.generic_conditions,
         );
         if argument_shape_valid {
             self.check_call_generic_conditions(&selection.sig.generic_conditions, &subst, span);
@@ -8107,27 +7735,145 @@ impl<'a> Checker<'a> {
         ret
     }
 
+    fn infer_type_subst(&self, expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>) {
+        match expected {
+            Ty::Wildcard => {}
+            Ty::Capture(_) => {}
+            Ty::TypeParam(name) => {
+                let actual = materialize_type(actual);
+                if matches!(actual, Ty::Unknown) {
+                    return;
+                }
+                subst
+                    .entry(name.clone())
+                    .and_modify(|existing| *existing = join_types(existing, &actual))
+                    .or_insert(actual);
+            }
+            Ty::Named(expected_name, expected_args) => {
+                if let Some(Ty::Named(actual_name, actual_args)) =
+                    self.type_as_supertype(actual, expected_name)
+                {
+                    if expected_name == &actual_name && expected_args.len() == actual_args.len() {
+                        for (expected_arg, actual_arg) in
+                            expected_args.iter().zip(actual_args.iter())
+                        {
+                            self.infer_type_subst(expected_arg, actual_arg, subst);
+                        }
+                    }
+                }
+            }
+            Ty::Union(expected_members) => {
+                if let Ty::Union(actual_members) = actual {
+                    for (expected_member, actual_member) in
+                        expected_members.iter().zip(actual_members.iter())
+                    {
+                        self.infer_type_subst(expected_member, actual_member, subst);
+                    }
+                }
+            }
+            Ty::Tuple(expected_items) => {
+                if let Ty::Tuple(actual_items) = actual {
+                    for (expected_item, actual_item) in
+                        expected_items.iter().zip(actual_items.iter())
+                    {
+                        self.infer_type_subst(expected_item, actual_item, subst);
+                    }
+                }
+            }
+            Ty::Record(expected_fields) => {
+                if let Ty::Record(actual_fields) = actual {
+                    for (expected_name, expected_ty) in expected_fields {
+                        if let Some((_, actual_ty)) = actual_fields
+                            .iter()
+                            .find(|(actual_name, _)| actual_name == expected_name)
+                        {
+                            self.infer_type_subst(expected_ty, actual_ty, subst);
+                        }
+                    }
+                }
+            }
+            Ty::Function(expected_params, expected_ret) => {
+                if let Ty::Function(actual_params, actual_ret) = actual {
+                    if expected_params.len() == actual_params.len() {
+                        for (expected_param, actual_param) in
+                            expected_params.iter().zip(actual_params.iter())
+                        {
+                            self.infer_type_subst(expected_param, actual_param, subst);
+                        }
+                    }
+                    self.infer_type_subst(expected_ret, actual_ret, subst);
+                }
+            }
+            Ty::Never => {}
+            Ty::Unknown => {}
+        }
+    }
+
     fn infer_type_subst_from_generic_conditions(
         &self,
         conditions: &[GenericConditionSig],
         subst: &mut HashMap<String, Ty>,
     ) {
-        for condition in conditions {
-            let GenericConditionSig::Bound { subject, bound } = condition else {
-                continue;
-            };
-            let subject = substitute_type(subject, subst);
-            let bound = substitute_type(bound, subst);
-            let Ty::Named(bound_name, bound_args) = bound else {
-                continue;
-            };
-            if bound_name != "Iterable" || bound_args.len() != 1 {
-                continue;
+        for _ in 0..=conditions.len() {
+            let before = subst.clone();
+            for condition in conditions {
+                match substitute_generic_condition(condition, subst) {
+                    GenericConditionSig::Bound { subject, bound } => {
+                        self.infer_type_subst(&bound, &subject, subst);
+                    }
+                    GenericConditionSig::Equal { left, right } => {
+                        self.infer_type_subst(&left, &right, subst);
+                        self.infer_type_subst(&right, &left, subst);
+                    }
+                }
             }
-            let Some(item) = self.known_iterable_item_type(&subject) else {
-                continue;
-            };
-            infer_type_subst(&bound_args[0], &item, subst);
+            if *subst == before {
+                break;
+            }
+        }
+    }
+
+    fn type_as_supertype(&self, actual: &Ty, name: &str) -> Option<Ty> {
+        self.type_as_supertype_inner(actual, name, &mut HashSet::new())
+    }
+
+    fn type_as_supertype_inner(
+        &self,
+        actual: &Ty,
+        name: &str,
+        seen: &mut HashSet<String>,
+    ) -> Option<Ty> {
+        match actual {
+            Ty::Named(actual_name, _) if actual_name == name => Some(actual.clone()),
+            Ty::Named(actual_name, args) => {
+                if !seen.insert(actual_name.clone()) {
+                    return None;
+                }
+                let sig = self.lookup_any_type(actual_name)?;
+                let subst = sig
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .zip(args.iter().cloned())
+                    .collect();
+                let projected = sig.with_bounds.iter().find_map(|bound| {
+                    self.type_as_supertype_inner(&substitute_type(bound, &subst), name, seen)
+                });
+                seen.remove(actual_name);
+                projected
+            }
+            Ty::TypeParam(param) => {
+                if !seen.insert(param.clone()) {
+                    return None;
+                }
+                let projected = self
+                    .type_param_bounds(param)
+                    .iter()
+                    .find_map(|bound| self.type_as_supertype_inner(bound, name, seen));
+                seen.remove(param);
+                projected
+            }
+            _ => None,
         }
     }
 
@@ -8206,8 +7952,14 @@ impl<'a> Checker<'a> {
         span: crate::source::Span,
         mut subst: HashMap<String, Ty>,
         callee_name: Option<&str>,
+        conditions: &[GenericConditionSig],
     ) -> (Ty, HashMap<String, Ty>, bool) {
         let arrangement = arrange_param_args(params, args);
+        let bounds = conditions
+            .iter()
+            .filter(|condition| matches!(condition, GenericConditionSig::Bound { .. }))
+            .cloned()
+            .collect::<Vec<_>>();
         let unknown_named_args = args
             .iter()
             .filter(|arg| {
@@ -8274,7 +8026,7 @@ impl<'a> Checker<'a> {
             for (index, param) in params.iter().enumerate() {
                 for arg in &arrangement.slots[index] {
                     let expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
-                    infer_type_subst(
+                    self.infer_type_subst(
                         &expected,
                         &self.probe_expr_type(call_arg_value_expr(arg)),
                         &mut subst,
@@ -8355,11 +8107,13 @@ impl<'a> Checker<'a> {
                 } else {
                     self.check_call_arg_expr_against(call_arg_value_expr(arg), &check_expected)
                 };
-                infer_type_subst(&expected, &actual, &mut subst);
+                self.infer_type_subst(&expected, &actual, &mut subst);
+                self.infer_type_subst_from_generic_conditions(&bounds, &mut subst);
                 checked_args.push((arg.span, actual, raw_expected.clone()));
             }
         }
 
+        self.infer_type_subst_from_generic_conditions(conditions, &mut subst);
         for (arg_span, actual, raw_expected) in checked_args {
             let expected = materialize_type(&substitute_type(&raw_expected, &subst));
             self.require_assignable(
@@ -8487,8 +8241,13 @@ impl<'a> Checker<'a> {
                     );
                     return Some(Ty::Unknown);
                 }
-                if !structural_record_arg {
-                    if let Some(ty) = self.check_intrinsic_collection_constructor(
+                if !structural_record_arg
+                    && name == "Map"
+                    && args
+                        .iter()
+                        .any(|arg| matches!(arg.value, Expr::Spread { .. }))
+                {
+                    if let Some(ty) = self.check_map_spread_constructor(
                         name,
                         args,
                         span,
@@ -8661,7 +8420,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn check_intrinsic_collection_constructor(
+    fn check_map_spread_constructor(
         &mut self,
         name: &str,
         args: &[crate::ast::CallArg],
@@ -8670,123 +8429,52 @@ impl<'a> Checker<'a> {
         expected: &Ty,
         explicit_type_args: &[Ty],
     ) -> Option<Ty> {
-        match name {
-            "Vector" | "Set" => {
-                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-                let mut type_args = self.constructor_type_argument_seed(
-                    name,
-                    1,
-                    explicit_type_args,
-                    expected,
-                    span,
-                );
-                let mut item = type_args.pop().unwrap_or(Ty::Unknown);
-                for arg in args {
-                    let actual = if matches!(item, Ty::Unknown) {
-                        self.check_expr(&arg.value)
-                    } else {
-                        self.check_expr_against(&arg.value, &item)
-                    };
-                    if matches!(item, Ty::Unknown) {
-                        item = join_types(&item, &actual);
-                    }
-                }
-                if explicit_type_args.is_empty() {
-                    self.require_inferred_constructor_type_args(name, &[item.clone()], span);
-                }
-                Some(Ty::Named(name.to_string(), vec![item]))
-            }
-            "Map" => {
-                self.reject_parenthesized_constructor_fields(args, uses_brace_syntax, span);
-                let mut type_args = self.constructor_type_argument_seed(
-                    name,
-                    2,
-                    explicit_type_args,
-                    expected,
-                    span,
-                );
-                let mut value = type_args.pop().unwrap_or(Ty::Unknown);
-                let mut key = type_args.pop().unwrap_or(Ty::Unknown);
-                for arg in args {
-                    if let Expr::Spread { value: spread, .. } = &arg.value {
-                        match self.check_expr(spread) {
-                            Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
-                                key = join_types(&key, &args[0]);
-                                value = join_types(&value, &args[1]);
-                            }
-                            Ty::Unknown => {}
-                            other => {
-                                self.add_error(
-                                    "invalid_map_spread",
-                                    format!(
-                                        "map spread requires a map value, got '{}'",
-                                        other.describe()
-                                    ),
-                                    arg.span,
-                                );
-                            }
-                        }
-                        continue;
-                    }
-                    match self.check_expr(&arg.value) {
-                        Ty::Tuple(items) if items.len() == 2 => {
-                            if matches!(key, Ty::Unknown) {
-                                key = join_types(&key, &items[0]);
-                            } else {
-                                self.require_assignable(
-                                    &items[0],
-                                    &key,
-                                    arg.span,
-                                    "invalid_argument_type",
-                                    self.diagnostic_type_mismatch_message(
-                                        "map key",
-                                        &items[0],
-                                        "constructor type argument",
-                                        &key,
-                                    ),
-                                );
-                            }
-                            if matches!(value, Ty::Unknown) {
-                                value = join_types(&value, &items[1]);
-                            } else {
-                                self.require_assignable(
-                                    &items[1],
-                                    &value,
-                                    arg.span,
-                                    "invalid_argument_type",
-                                    self.diagnostic_type_mismatch_message(
-                                        "map value",
-                                        &items[1],
-                                        "constructor type argument",
-                                        &value,
-                                    ),
-                                );
-                            }
-                        }
-                        other => {
-                            self.add_error(
-                                "invalid_argument_type",
-                                format!(
-                                    "Map constructor expects tuple pair arguments, got '{}'",
-                                    other.describe()
-                                ),
-                                arg.span,
-                            );
-                        }
-                    }
-                }
-                if explicit_type_args.is_empty() {
-                    self.require_inferred_constructor_type_args(
-                        name,
-                        &[key.clone(), value.clone()],
-                        span,
+        let sig = self.lookup_any_non_object_type(name)?;
+        self.push_scope();
+        let mut normalized = args.to_vec();
+        for (index, arg) in normalized.iter_mut().enumerate() {
+            let Expr::Spread { value, span } = &arg.value else {
+                continue;
+            };
+            let source = self.check_expr(value);
+            let item = if matches!(&source, Ty::Named(owner, _) if owner == name) {
+                self.known_iterable_item_type(&source)
+                    .unwrap_or(Ty::Unknown)
+            } else {
+                if !matches!(source, Ty::Unknown) {
+                    self.add_error(
+                        "invalid_map_spread",
+                        format!(
+                            "map spread requires a map value, got '{}'",
+                            source.describe()
+                        ),
+                        arg.span,
                     );
                 }
-                self.require_hashable_map_key(&key, span);
-                Some(Ty::Named("Map".to_string(), vec![key, value]))
-            }
-            _ => None,
+                Ty::Unknown
+            };
+            // A map spread supplies its declared iterable entries to the normal vararg contract.
+            let temporary = format!("$map_spread{index}");
+            self.define_local(&temporary, Ty::list(item), false);
+            arg.value = Expr::Spread {
+                value: Box::new(Expr::Identifier {
+                    name: temporary,
+                    span: *span,
+                }),
+                span: *span,
+            };
         }
+        let constructed = self.check_named_type_constructor(
+            &sig,
+            &normalized,
+            span,
+            uses_brace_syntax,
+            false,
+            expected,
+            explicit_type_args,
+        );
+        self.pop_scope();
+        Some(constructed)
     }
 
     fn constructor_type_argument_seed(
@@ -8848,24 +8536,6 @@ impl<'a> Checker<'a> {
         vec![Ty::Unknown; arity]
     }
 
-    fn require_inferred_constructor_type_args(
-        &mut self,
-        name: &str,
-        args: &[Ty],
-        span: crate::source::Span,
-    ) {
-        if args.iter().any(type_contains_unresolved_constructor_type) {
-            self.add_error(
-                "cannot_infer_constructor_type",
-                format!(
-                    "cannot infer type arguments for '{}'; add explicit type arguments or an expected type",
-                    name
-                ),
-                span,
-            );
-        }
-    }
-
     fn constructor_type_argument_subst(
         &mut self,
         sig: &TypeSig,
@@ -8886,23 +8556,6 @@ impl<'a> Checker<'a> {
             .zip(args)
             .filter(|(_, ty)| !matches!(ty, Ty::Unknown | Ty::Wildcard | Ty::Capture(_)))
             .collect()
-    }
-
-    fn require_hashable_map_key(&mut self, key: &Ty, span: crate::source::Span) {
-        if matches!(key, Ty::Unknown | Ty::Wildcard | Ty::Capture(_)) {
-            return;
-        }
-        if !self.is_hashable_type(key, &mut HashSet::new()) {
-            self.add_error(
-                "map_key_not_hashable",
-                format!(
-                    "map key type '{}' does not satisfy 'Hashed[{}]'; map keys must provide equality-compatible hashing",
-                    key.describe(),
-                    key.describe()
-                ),
-                span,
-            );
-        }
     }
 
     fn check_named_type_constructor(
@@ -9171,13 +8824,13 @@ impl<'a> Checker<'a> {
         constructed: &Ty,
         span: crate::source::Span,
     ) {
-        if sig.generic_conditions.is_empty() {
-            return;
-        }
         let Ty::Named(name, args) = constructed else {
             return;
         };
         if name != &sig.name || args.len() != sig.type_params.len() {
+            return;
+        }
+        if sig.generic_conditions.is_empty() {
             return;
         }
         let subst = sig
@@ -9256,7 +8909,7 @@ impl<'a> Checker<'a> {
                     let raw_expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                     let expected = substitute_type(&raw_expected, &subst);
                     let actual = self.check_expr_against(call_arg_value_expr(arg), &expected);
-                    infer_type_subst(&expected, &actual, &mut subst);
+                    self.infer_type_subst(&expected, &actual, &mut subst);
                     checked_args.push((arg.span, actual, raw_expected, String::new()));
                 }
             }
@@ -9326,7 +8979,7 @@ impl<'a> Checker<'a> {
                 let raw_expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
                 let expected = substitute_type(&raw_expected, &subst);
                 let actual = self.check_expr_against(call_arg_value_expr(arg), &expected);
-                infer_type_subst(&expected, &actual, &mut subst);
+                self.infer_type_subst(&expected, &actual, &mut subst);
                 checked_args.push((arg.span, actual, expected, param.name.clone()));
             }
         }
@@ -9390,7 +9043,7 @@ impl<'a> Checker<'a> {
     ) -> (Vec<FieldSig>, Ty) {
         let mut subst = HashMap::new();
         if !matches!(expected, Ty::Unknown) {
-            infer_type_subst(&case.result, expected, &mut subst);
+            self.infer_type_subst(&case.result, expected, &mut subst);
         }
         let params = case
             .params
@@ -9638,6 +9291,41 @@ impl<'a> Checker<'a> {
             .count()
     }
 
+    fn probe_function_signature(
+        &self,
+        sig: FunctionSig,
+        explicit_type_args: &[Ty],
+        args: &[crate::ast::CallArg],
+        locals: &HashMap<String, Ty>,
+    ) -> (Vec<ParamSig>, Ty) {
+        let mut subst = sig
+            .type_params
+            .iter()
+            .cloned()
+            .zip(explicit_type_args.iter().cloned())
+            .collect::<HashMap<_, _>>();
+        self.infer_type_subst_from_generic_conditions(&sig.generic_conditions, &mut subst);
+        let arrangement = arrange_param_args(&sig.params, args);
+        for (index, param) in sig.params.iter().enumerate() {
+            for arg in &arrangement.slots[index] {
+                let expected = call_arg_expected_ty_for_arg(param.variadic, &param.ty, arg);
+                let actual = self.probe_expr_type_with_locals(call_arg_value_expr(arg), locals);
+                self.infer_type_subst(&expected, &actual, &mut subst);
+                self.infer_type_subst_from_generic_conditions(&sig.generic_conditions, &mut subst);
+            }
+        }
+        let ret = substitute_type(&sig.ret, &subst);
+        let params = sig
+            .params
+            .into_iter()
+            .map(|mut param| {
+                param.ty = substitute_type(&param.ty, &subst);
+                param
+            })
+            .collect();
+        (params, ret)
+    }
+
     fn callable_signature_for_args_probe(
         &self,
         callee: &Expr,
@@ -9666,13 +9354,18 @@ impl<'a> Checker<'a> {
                     let sig = self
                         .choose_overload_with_locals(&functions, args, locals)?
                         .clone();
-                    return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
+                    return Some(self.probe_function_signature(
+                        sig,
+                        &explicit_type_args,
+                        args,
+                        locals,
+                    ));
                 }
                 let methods = self.lookup_implicit_method_functions(name)?;
                 let sig = self
                     .choose_overload_with_locals(&methods, args, locals)?
                     .clone();
-                Some(function_sig_parts_for_probe(sig, &explicit_type_args))
+                Some(self.probe_function_signature(sig, &explicit_type_args, args, locals))
             }
             Expr::Member { receiver, name, .. } => {
                 if let Some((module, member)) =
@@ -9686,21 +9379,31 @@ impl<'a> Checker<'a> {
                         let sig = self
                             .choose_overload_with_locals(functions, args, locals)?
                             .clone();
-                        return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
+                        return Some(self.probe_function_signature(
+                            sig,
+                            &explicit_type_args,
+                            args,
+                            locals,
+                        ));
                     }
                 }
                 if let Some(sigs) = self.static_method_sigs(receiver, name) {
                     let sig = self
                         .choose_overload_with_locals(&sigs, args, locals)?
                         .clone();
-                    return Some(function_sig_parts_for_probe(sig, &explicit_type_args));
+                    return Some(self.probe_function_signature(
+                        sig,
+                        &explicit_type_args,
+                        args,
+                        locals,
+                    ));
                 }
                 let receiver_ty = self.probe_expr_type_with_locals(receiver, locals);
                 let methods = self.member_method_sigs(&receiver_ty, name)?;
                 let method = self
                     .choose_overload_with_locals(&methods, args, locals)?
                     .clone();
-                Some(function_sig_parts_for_probe(method, &explicit_type_args))
+                Some(self.probe_function_signature(method, &explicit_type_args, args, locals))
             }
             _ => None,
         }
@@ -9726,10 +9429,6 @@ impl<'a> Checker<'a> {
                 }
                 self.brace_call_type_sig(callee)
                     .is_some_and(|sig| !sig.type_params.is_empty())
-                    || matches!(
-                        name.as_str(),
-                        "Vector" | "LinkedList" | "Array" | "Set" | "Map"
-                    )
             }
             Expr::Member { receiver, name, .. } => {
                 if let Some((module, member)) =
@@ -9867,8 +9566,8 @@ impl<'a> Checker<'a> {
                 .lookup_type_local(name)
                 .or_else(|| self.world.lookup_imported_type(self.module, name))
                 .or_else(|| self.lookup_unique_module_type(name))
-                .or_else(|| self.lookup_any_object(name))
-                .or_else(|| self.world.ambient.types.get(name).cloned()),
+                .or_else(|| self.world.ambient.types.get(name).cloned())
+                .or_else(|| self.lookup_any_object(name)),
             Expr::Member { .. } => expr_path_for_known_value(callee)
                 .map(|path| path.join("."))
                 .and_then(|name| {
@@ -9997,6 +9696,22 @@ impl<'a> Checker<'a> {
         right: &Ty,
         span: crate::source::Span,
     ) -> Ty {
+        if let Ty::Named(name, _) = left
+            && left.is_numeric()
+            && matches!(
+                op,
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
+            )
+            && !(op == BinaryOp::Add && right.is_str())
+            && !crate::stdlib::supports_operator(name, op)
+        {
+            self.add_error(
+                "invalid_binary_operand",
+                format!("type '{name}' does not support this operator"),
+                span,
+            );
+            return Ty::Unknown;
+        }
         if matches!(
             op,
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod
@@ -10672,7 +10387,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                     let mut subst = HashMap::new();
-                    infer_type_subst(&case.result, scrutinee, &mut subst);
+                    self.infer_type_subst(&case.result, scrutinee, &mut subst);
                     for (pattern, param) in args.iter().zip(extractable.iter()) {
                         self.bind_pattern(
                             pattern,
@@ -10903,7 +10618,7 @@ impl<'a> Checker<'a> {
 
     fn enum_case_view_type(&self, path: &[String], case: &EnumCaseSig, scrutinee: &Ty) -> Ty {
         let mut subst = HashMap::new();
-        infer_type_subst(&case.result, scrutinee, &mut subst);
+        self.infer_type_subst(&case.result, scrutinee, &mut subst);
         let result = materialize_type(&substitute_type(&case.result, &subst));
         let Ty::Named(owner, args) = result else {
             return scrutinee.clone();
@@ -10994,7 +10709,7 @@ impl<'a> Checker<'a> {
         }
         if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
             let mut subst = HashMap::new();
-            infer_type_subst(&case.result, scrutinee, &mut subst);
+            self.infer_type_subst(&case.result, scrutinee, &mut subst);
             let fields = case
                 .params
                 .iter()
@@ -11316,20 +11031,10 @@ impl<'a> Checker<'a> {
     fn known_iterable_item_type_inner(&self, ty: &Ty, seen: &mut HashSet<String>) -> Option<Ty> {
         match ty {
             Ty::Named(name, args)
-                if (name == "Vector"
-                    || name == "LinkedList"
-                    || name == "Set"
-                    || name == "Array"
-                    || name == "Iterable"
-                    || name == "Iterator")
-                    && args.len() == 1 =>
+                if matches!(name.as_str(), "Iterable" | "Iterator") && args.len() == 1 =>
             {
                 Some(args[0].clone())
             }
-            Ty::Named(name, args) if name == "Map" && args.len() == 2 => {
-                Some(Ty::Tuple(vec![args[0].clone(), args[1].clone()]))
-            }
-            Ty::Named(name, args) if name == "IntRange" && args.is_empty() => Some(Ty::int()),
             Ty::Named(name, args) => {
                 if !seen.insert(name.clone()) {
                     return None;
@@ -11447,10 +11152,6 @@ impl<'a> Checker<'a> {
             }
         }
         Some(Ty::list(item_ty))
-    }
-
-    fn iterable_item_type(&self, ty: &Ty) -> Ty {
-        self.known_iterable_item_type(ty).unwrap_or(Ty::Unknown)
     }
 
     fn index_result_type(&self, ty: &Ty) -> Ty {
@@ -12288,26 +11989,6 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn is_builtin_print_call(&self, callee: &Expr) -> bool {
-        match callee {
-            Expr::Identifier { name, .. } => {
-                matches!(name.as_str(), "print" | "println" | "printf")
-            }
-            Expr::Member { receiver, name, .. } => {
-                matches!(name.as_str(), "print" | "println" | "printf")
-                    && path_starts_with_os(receiver)
-            }
-            _ => false,
-        }
-    }
-
-    fn is_builtin_panic_call(&self, callee: &Expr) -> bool {
-        match callee {
-            Expr::Identifier { name, .. } => name == "panic",
-            _ => false,
-        }
-    }
-
     fn check_typeof_type_ref(&mut self, ty_ref: &TypeRef, represented: &Ty) {
         if let Ty::Named(name, _) = represented
             && self
@@ -12975,7 +12656,7 @@ impl<'a> Checker<'a> {
             Pattern::Constructor { path, args, .. } => {
                 let fields = if let Some(case) = self.lookup_case_by_pattern(path, scrutinee) {
                     let mut subst = HashMap::new();
-                    infer_type_subst(&case.result, scrutinee, &mut subst);
+                    self.infer_type_subst(&case.result, scrutinee, &mut subst);
                     self.enum_case_extractable_params(&case)
                         .into_iter()
                         .map(|field| materialize_type(&substitute_type(&field.ty, &subst)))
@@ -16182,15 +15863,6 @@ fn static_integer_literal(expr: &Expr) -> Option<i64> {
     }
 }
 
-fn path_starts_with_os(expr: &Expr) -> bool {
-    match expr {
-        Expr::Identifier { name, .. } => name == "OS",
-        Expr::Member { receiver, .. } => path_starts_with_os(receiver),
-        Expr::Group { inner, .. } => path_starts_with_os(inner),
-        _ => false,
-    }
-}
-
 fn expr_path_for_known_value(expr: &Expr) -> Option<Vec<String>> {
     match expr {
         Expr::Identifier { name, .. } => Some(vec![name.clone()]),
@@ -16201,74 +15873,6 @@ fn expr_path_for_known_value(expr: &Expr) -> Option<Vec<String>> {
         }
         Expr::Group { inner, .. } => expr_path_for_known_value(inner),
         _ => None,
-    }
-}
-
-fn infer_type_subst(expected: &Ty, actual: &Ty, subst: &mut HashMap<String, Ty>) {
-    match expected {
-        Ty::Wildcard => {}
-        Ty::Capture(_) => {}
-        Ty::TypeParam(name) => {
-            let actual = materialize_type(actual);
-            if matches!(actual, Ty::Unknown) {
-                return;
-            }
-            subst
-                .entry(name.clone())
-                .and_modify(|existing| *existing = join_types(existing, &actual))
-                .or_insert(actual);
-        }
-        Ty::Named(expected_name, expected_args) => {
-            if let Ty::Named(actual_name, actual_args) = actual {
-                if expected_name == actual_name && expected_args.len() == actual_args.len() {
-                    for (expected_arg, actual_arg) in expected_args.iter().zip(actual_args.iter()) {
-                        infer_type_subst(expected_arg, actual_arg, subst);
-                    }
-                }
-            }
-        }
-        Ty::Union(expected_members) => {
-            if let Ty::Union(actual_members) = actual {
-                for (expected_member, actual_member) in
-                    expected_members.iter().zip(actual_members.iter())
-                {
-                    infer_type_subst(expected_member, actual_member, subst);
-                }
-            }
-        }
-        Ty::Tuple(expected_items) => {
-            if let Ty::Tuple(actual_items) = actual {
-                for (expected_item, actual_item) in expected_items.iter().zip(actual_items.iter()) {
-                    infer_type_subst(expected_item, actual_item, subst);
-                }
-            }
-        }
-        Ty::Record(expected_fields) => {
-            if let Ty::Record(actual_fields) = actual {
-                for (expected_name, expected_ty) in expected_fields {
-                    if let Some((_, actual_ty)) = actual_fields
-                        .iter()
-                        .find(|(actual_name, _)| actual_name == expected_name)
-                    {
-                        infer_type_subst(expected_ty, actual_ty, subst);
-                    }
-                }
-            }
-        }
-        Ty::Function(expected_params, expected_ret) => {
-            if let Ty::Function(actual_params, actual_ret) = actual {
-                if expected_params.len() == actual_params.len() {
-                    for (expected_param, actual_param) in
-                        expected_params.iter().zip(actual_params.iter())
-                    {
-                        infer_type_subst(expected_param, actual_param, subst);
-                    }
-                }
-                infer_type_subst(expected_ret, actual_ret, subst);
-            }
-        }
-        Ty::Never => {}
-        Ty::Unknown => {}
     }
 }
 
@@ -16448,28 +16052,6 @@ fn materialize_type(ty: &Ty) -> Ty {
         ),
         Ty::Unknown => Ty::Unknown,
     }
-}
-
-fn function_sig_parts_for_probe(
-    sig: FunctionSig,
-    explicit_type_args: &[Ty],
-) -> (Vec<ParamSig>, Ty) {
-    let mut subst = HashMap::new();
-    if explicit_type_args.len() == sig.type_params.len() {
-        for (name, ty) in sig.type_params.iter().zip(explicit_type_args.iter()) {
-            subst.insert(name.clone(), ty.clone());
-        }
-    }
-    let params = sig
-        .params
-        .into_iter()
-        .map(|mut param| {
-            param.ty = substitute_type(&param.ty, &subst);
-            param
-        })
-        .collect();
-    let ret = substitute_type(&sig.ret, &subst);
-    (params, ret)
 }
 
 fn type_arg_refs_from_expr(expr: &Expr) -> Option<Vec<TypeRef>> {
@@ -16756,6 +16338,7 @@ fn module_alias_and_member(expr: &Expr) -> Option<(String, String)> {
 mod tests {
     use super::*;
     use crate::{SourceFile, lex, parse_program};
+    use std::fs;
 
     fn parse_inline(src: &str) -> Program {
         let file = SourceFile::new("test.lum", src);
@@ -16771,6 +16354,115 @@ mod tests {
             .join("../../..")
             .canonicalize()
             .expect("workspace root")
+    }
+
+    #[test]
+    fn generic_collection_construction_prefers_type_over_companion() {
+        let program = parse_inline(
+            r#"
+fn iterator[T]() Iterator[T] = Vector[T]().iterator()
+fn main() Unit {
+    values = Vector[Int]()
+    selected = Set[Int]()
+    println(values.size, selected.size)
+}
+"#,
+        );
+        let checked = check_program(&program);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+    }
+
+    #[test]
+    fn ordinary_stdlib_factories_infer_declared_supertypes() {
+        let program = parse_inline(
+            r#"
+interface Parent[T] {}
+interface Child[T] with Parent[T] {}
+class Concrete with Child[Int] {}
+fn convert[T](value Parent[T]) Vector[T] = Vector[T]()
+fn dependent[S, T when S with Parent[T]](value S) Vector[T] = Vector[T]()
+fn main() Unit {}
+"#,
+        );
+        let world = World::from_program(&program);
+        let mut checker = Checker::new(&world, world.root_module.as_ref().unwrap());
+        for (source, expected) in [
+            ("Vector.from([1, 2])", Ty::list(Ty::int())),
+            (
+                "Array.from([1, 2])",
+                Ty::Named("Array".into(), vec![Ty::int()]),
+            ),
+            (
+                "Set.from(Some(1))",
+                Ty::Named("Set".into(), vec![Ty::int()]),
+            ),
+            (
+                "Vector.from([\"one\": 1])",
+                Ty::list(Ty::Tuple(vec![Ty::str(), Ty::int()])),
+            ),
+            ("convert(Concrete())", Ty::list(Ty::int())),
+            ("dependent(Concrete())", Ty::list(Ty::int())),
+            (
+                "Vector.from([1]).map(value => value.toStr())",
+                Ty::list(Ty::str()),
+            ),
+        ] {
+            let expression = parse_inline(&format!("fn expression() = {source}"));
+            let Item::Function(function) = &expression.items[0] else {
+                panic!("expression")
+            };
+            let CallableBody::Expr(expression) = &function.body else {
+                panic!("expression body")
+            };
+            assert_eq!(checker.check_expr(expression), expected, "{source}");
+            assert!(
+                checker.diagnostics.is_empty(),
+                "{source}: {:#?}",
+                checker.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_stdlib_factories_preserve_context_and_named_arguments() {
+        let program = parse_inline(
+            r#"
+fn consume(values [[Int]]) Unit = ()
+fn main() Unit {
+    nested [[Int]] = Vector.fill(value = [], length = 2)
+    generated Array[[Int]] = Array.generate(generator = (index => []), length = 2)
+    conditional [Int]? = Option.when(value = [], condition = true)
+    copied [Int] = Vector.from(values = [])
+    consume(Vector.generate(2, index => []))
+    println(1, true, nested)
+    print(value = [1, true])
+}
+"#,
+        );
+        let checked = check_program(&program);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+    }
+
+    #[test]
+    fn ordinary_stdlib_calls_validate_names_counts_and_types() {
+        for source in [
+            "fn main() Unit { Vector.fill(misspelled = 1, value = 2) }",
+            "fn main() Unit { Vector.generate(1) }",
+            "fn main() Unit { Vector.fill(\"bad\", 2) }",
+            "fn main() Unit { Option.when(1, 2) }",
+            "fn main() Unit { panic(misspelled = 1) }",
+            "fn main() Unit { println(misspelled = 1) }",
+        ] {
+            let checked = check_program(&parse_inline(source));
+            assert!(
+                checked.diagnostics.iter().any(|diagnostic| matches!(
+                    diagnostic.code,
+                    "unknown_argument_name" | "invalid_argument_count" | "invalid_argument_type"
+                )),
+                "{source}: {:#?}",
+                checked.diagnostics
+            );
+        }
     }
 
     #[test]
@@ -18071,7 +17763,7 @@ fn main() Unit {
         let result = check_program(&program);
         assert!(
             result.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "map_key_not_hashable"
+                diagnostic.code == "generic_bound_not_satisfied"
                     && diagnostic.message.contains("Hashed[MutableKey]")
             }),
             "{:#?}",
@@ -19587,7 +19279,7 @@ fn main() Unit {
             result
                 .diagnostics
                 .iter()
-                .filter(|diagnostic| diagnostic.code == "invalid_binding_type")
+                .filter(|diagnostic| diagnostic.code == "invalid_argument_type")
                 .count(),
             2,
             "{:#?}",

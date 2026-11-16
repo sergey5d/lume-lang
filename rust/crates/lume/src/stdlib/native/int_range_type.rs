@@ -2,44 +2,23 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     Diagnostic, Span,
-    ast::TypeKind,
     interpreter::{Interpreter, IteratorState, Value, aggregate_named_field, iterable_values},
-    ir,
-    runtime::{RuntimeField, RuntimeFieldSlot, RuntimeType, RuntimeTypeId},
+    runtime::RuntimeType,
 };
 
 use super::builtin_method;
 
 pub(super) fn define() -> RuntimeType {
-    RuntimeType {
-        id: RuntimeTypeId(usize::MAX),
-        ir_type_id: None,
-        kind: TypeKind::Class,
-        name: "IntRange".to_string(),
-        fields: vec![field(0, "start"), field(1, "end"), field(2, "step")],
-        field_init: None,
-        mixin_init: None,
-        methods: vec![
-            builtin_method(0, "iterator", Vec::new(), range_iterator),
-            builtin_method(1, "zip", vec![ir::Type::Unknown], range_zip),
-            builtin_method(2, "zipWithIndex", Vec::new(), range_zip_with_index),
-        ],
-        enum_cases: Vec::new(),
-        with_bounds: Vec::new(),
-    }
-}
-
-fn field(slot: usize, name: &str) -> RuntimeField {
-    RuntimeField {
-        from_mixin: false,
-        slot: RuntimeFieldSlot(slot),
-        name: name.to_string(),
-        ty: ir::Type::Int,
-        mutable: false,
-        visibility: crate::ast::Visibility::Default,
-        has_initializer: false,
-        initializer: None,
-    }
+    let mut ty = super::empty_builtin_type("IntRange");
+    ty.methods = vec![
+        builtin_method("IntRange", "iterator", 0, range_iterator),
+        builtin_method("IntRange", "zip", 1, range_zip),
+        builtin_method("IntRange", "zipWithIndex", 0, range_zip_with_index),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    ty
 }
 
 fn range_field(

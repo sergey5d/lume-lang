@@ -17,6 +17,7 @@ pub mod parser;
 pub mod resolver;
 pub mod runtime;
 pub mod source;
+pub mod stdlib;
 pub mod typecheck;
 pub(crate) mod typecheck_diagnostics;
 

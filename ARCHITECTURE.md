@@ -29,9 +29,10 @@ a-lang/
         lower.rs              AST/Core -> IR lowering
         backend/              shared backend metadata and capabilities
         java_backend/         readable Java generation
-        runtime/              runtime type metadata + builtin methods
+        stdlib/               native contracts, capabilities, and implementations
+        runtime/              dense per-program runtime type metadata
         interpreter.rs        IR interpreter
-  stdlib/                     language-visible standard library source
+  stdlib/                     source counterparts and Java runtime generation
   examples/                   runnable and failing language fixtures
   vscode-extension/           editor syntax/config support
   SYNTAX.md                   language reference
@@ -89,7 +90,7 @@ like grouped expressions, parser call style flags, and lambda body variants.
 `resolver.rs` handles source loading and early semantic structure:
 
 - loads modules and `use` declarations into a `ModuleGraph`
-- reads ambient stdlib declarations from `stdlib/`
+- obtains ambient stdlib contracts from the Rust-authored descriptor registry
 - checks symbol visibility and module/member access
 - performs early name-binding and structural diagnostics
 
@@ -164,9 +165,11 @@ AST program
 - `runtime/types.rs` converts `ir::Program` type information into
   `RuntimeProgram`, `RuntimeType`, `RuntimeField`, `RuntimeMethod`, and declared-
   union variant metadata.
-- `runtime/builtins/` provides builtin runtime types and host-implemented
-  methods for currently hardcoded builtins such as `Str`, `Option`, `Result`,
-  `Either`, `Vector`, `Array`, `Set`, and `Map`.
+- `stdlib/declarations/` supplies complete contracts for native types,
+  constructors, methods, getters, and companions.
+- `stdlib/native/` registers native implementation functions. Runtime method
+  names, parameter names/types, return types, getter kinds, and generic
+  information are derived from the contracts rather than placeholder signatures.
 
 One useful mental model is:
 
@@ -174,7 +177,8 @@ One useful mental model is:
 - Runtime metadata owns fast execution-time lookup layout.
 
 Runtime methods can point either to lowered IR functions or to builtin Rust
-functions.
+functions. Both occupy dense method slots; stdlib descriptors are reusable
+contracts, while runtime IDs and field layouts belong to one program.
 
 ### 9. Interpreter
 
@@ -215,16 +219,32 @@ IR interpreter, while `gen` emits Java for JVM compilation.
 
 ## Standard Library and Builtins
 
-There are two different "standard library" layers:
+Native library contracts are authored in `rust/crates/lume/src/stdlib/`.
+Each type has an explicit declaration containing its constructors, members,
+generic parameters and bounds, named parameters, defaults, and visibility.
+These declarations enter normal resolution and call checking, just like user
+declarations and the Java stub adapter's declarations. Ordinary factories and
+methods do not need member-specific typechecker signatures.
 
-- `stdlib/*.lum` contains language-visible source declarations that participate
-  in parsing, resolving, checking, and imported execution.
-- `runtime/builtins/*.rs` contains host-side implementations for builtin
-  runtime behavior the interpreter must execute directly.
+`stdlib/operators.rs` attaches explicit intrinsic capability entries to types.
+The compiler still understands arithmetic, comparison, extraction, indexing,
+and iteration syntax; the registered type contract determines which intrinsic
+operations are supported. Closed native representations are trusted core
+bindings, not interfaces that arbitrary user values can implement.
 
-That split keeps the interpreter slimmer: user code still lowers to IR, while
-builtin behavior is registered as runtime methods instead of being hardcoded
-throughout the interpreter.
+The interpreter builds its runtime tables from these contracts and registered
+native function bindings. Ordinary member calls use those tables rather than
+central switches on type and method names. Operation implementations may still
+inspect runtime values, just as lowered user methods inspect their arguments.
+
+Ambient contracts and the native JSON/regex module contracts do not require
+external `.lum` files. JSON and regex retain their explicit import scopes.
+`LUME_STDLIB` and ancestor-directory lookup remain useful for explicit source
+imports; source counterparts in `stdlib/*.lum` also support navigation and
+Java runtime generation, but are not the interpreter's signature authority.
+
+The implementation plan and migration boundaries are recorded in
+[stdlib-descriptors-plan.md](docs/stdlib-descriptors-plan.md).
 
 ## Examples, Tests, and Docs
 
