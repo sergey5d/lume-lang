@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet, hash_map::DefaultHasher},
     fmt, fs,
     hash::{Hash, Hasher},
@@ -9,6 +9,10 @@ use std::{
 };
 
 mod regex;
+mod limits;
+mod project_sources;
+pub(crate) use project_sources::function_source_paths;
+pub use limits::{ExecutionLimits, RunOptions};
 #[cfg(test)]
 mod native_tests;
 use self::regex::{RegexMatchValue, RegexValue};
@@ -31,6 +35,8 @@ pub struct RunResult {
     pub diagnostics: Vec<Diagnostic>,
     pub output: String,
     pub return_value: Option<String>,
+    /// The innermost callable responsible for the primary runtime diagnostic.
+    pub diagnostic_function: Option<ir::FunctionId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -54,22 +60,33 @@ pub fn run_program_entry_with_args(
     requested_entry: Option<&str>,
     program_args: &[String],
 ) -> RunResult {
-    let mut interpreter = Interpreter::new(program, program_args);
+    run_program_with_options(program, requested_entry, RunOptions { args: program_args.to_vec(), ..RunOptions::default() })
+}
+
+pub fn run_program_with_options(
+    program: &ir::Program,
+    requested_entry: Option<&str>,
+    options: RunOptions,
+) -> RunResult {
+    let mut interpreter = Interpreter::with_options(program, options);
     match interpreter.run(requested_entry) {
         Ok(Some(value)) => RunResult {
             diagnostics: Vec::new(),
             output: interpreter.output,
             return_value: Some(value.render()),
+            diagnostic_function: None,
         },
         Ok(None) => RunResult {
             diagnostics: Vec::new(),
             output: interpreter.output,
             return_value: None,
+            diagnostic_function: None,
         },
         Err(diagnostic) => RunResult {
             diagnostics: vec![diagnostic],
             output: interpreter.output,
             return_value: None,
+            diagnostic_function: interpreter.diagnostic_function,
         },
     }
 }
@@ -81,6 +98,7 @@ pub fn run_program_specs(program: &ir::Program) -> RunResult {
         diagnostics,
         output: interpreter.output,
         return_value: None,
+        diagnostic_function: None,
     }
 }
 
@@ -1332,10 +1350,21 @@ pub(crate) struct Interpreter<'a> {
     singletons: Vec<Option<Value>>,
     program_args: Vec<String>,
     output: String,
+    options: RunOptions,
+    steps_remaining: Cell<u64>,
+    cleanup_remaining: Cell<u64>,
+    call_depth: usize,
+    cleanup_mode: bool,
+    limit_exhausted: Cell<bool>,
+    diagnostic_function: Option<ir::FunctionId>,
 }
 
 impl<'a> Interpreter<'a> {
     fn new(program: &'a ir::Program, program_args: &[String]) -> Self {
+        Self::with_options(program, RunOptions { args: program_args.to_vec(), ..RunOptions::default() })
+    }
+
+    fn with_options(program: &'a ir::Program, options: RunOptions) -> Self {
         let runtime = runtime::RuntimeProgram::from_ir(program);
         let singleton_count = runtime.types.len();
         let mut interpreter = Self {
@@ -1344,8 +1373,15 @@ impl<'a> Interpreter<'a> {
             globals: Vec::new(),
             globals_ready: false,
             singletons: vec![None; singleton_count],
-            program_args: program_args.to_vec(),
+            program_args: options.args.clone(),
             output: String::new(),
+            steps_remaining: Cell::new(options.limits.as_ref().map_or(u64::MAX, |limits| limits.steps)),
+            cleanup_remaining: Cell::new(options.limits.as_ref().map_or(u64::MAX, |limits| limits.cleanup_steps)),
+            options,
+            call_depth: 0,
+            cleanup_mode: false,
+            limit_exhausted: Cell::new(false),
+            diagnostic_function: None,
         };
         interpreter.globals = interpreter
             .program
@@ -1522,6 +1558,25 @@ impl<'a> Interpreter<'a> {
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        self.charge_work(1, span)?;
+        if self.options.limits.as_ref().is_some_and(|limits| self.call_depth >= limits.call_depth.saturating_add(if self.cleanup_mode { 16 } else { 0 })) {
+            return Err(self.limit_error(span, "call depth limit exceeded"));
+        }
+        self.call_depth += 1;
+        let result = self.call_function_inner(id, receiver, captures, args, span);
+        if result.is_err() && self.diagnostic_function.is_none() { self.diagnostic_function = Some(id); }
+        self.call_depth -= 1;
+        result
+    }
+
+    fn call_function_inner(
+        &mut self,
+        id: ir::FunctionId,
+        receiver: Option<Value>,
+        captures: Option<Vec<Value>>,
+        args: Vec<Value>,
+        span: Option<Span>,
+    ) -> Result<Value, Diagnostic> {
         let function = self
             .program
             .function(id)
@@ -1605,6 +1660,7 @@ impl<'a> Interpreter<'a> {
         let execution = (|| -> Result<Value, Diagnostic> {
             let mut block_id = function.entry;
             loop {
+                self.charge_work(1, span)?;
                 let block = function.block(block_id).cloned().ok_or_else(|| {
                     self.runtime_error(span, format!("unknown block id {}", block_id.0))
                 })?;
@@ -1662,6 +1718,7 @@ impl<'a> Interpreter<'a> {
             }
         })();
 
+        if execution.is_err() && self.diagnostic_function.is_none() { self.diagnostic_function = Some(id); }
         let returned = self.finish_callable_exit(&mut frame, execution, span)?;
         if function.name == "new" {
             if let (Some(Value::Aggregate(receiver)), Value::Aggregate(result)) =
@@ -1687,6 +1744,8 @@ impl<'a> Interpreter<'a> {
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
         let mut cleanup_failures = Vec::new();
+        let prior_cleanup = self.cleanup_mode;
+        if self.limit_exhausted.get() || execution.as_ref().err().is_some_and(|error| error.code == "execution_limit") { self.cleanup_mode = true; }
         while let Some(deferred) = frame.defers.pop() {
             if let Err(diagnostic) = self.call_function(
                 deferred.function,
@@ -1699,6 +1758,7 @@ impl<'a> Interpreter<'a> {
             }
         }
 
+        self.cleanup_mode = prior_cleanup;
         match execution {
             Err(mut primary) => {
                 for cleanup_failure in cleanup_failures {
@@ -1742,9 +1802,11 @@ impl<'a> Interpreter<'a> {
         frame: &mut Frame,
         statement: ir::Statement,
     ) -> Result<(), Diagnostic> {
+        self.charge_work(1, statement.span)?;
         match statement.kind {
             ir::StatementKind::Assign { target, value } => {
                 let value = self.eval_rvalue(&value, Some(frame), statement.span)?;
+                self.check_value_size(&value, statement.span)?;
                 self.assign_place(frame, &target, value, statement.span)
             }
             ir::StatementKind::Defer { value } => {
@@ -1758,7 +1820,8 @@ impl<'a> Interpreter<'a> {
                 Ok(())
             }
             ir::StatementKind::Eval { value } => {
-                let _ = self.eval_rvalue(&value, Some(frame), statement.span)?;
+                let value = self.eval_rvalue(&value, Some(frame), statement.span)?;
+                self.check_value_size(&value, statement.span)?;
                 Ok(())
             }
         }
@@ -3306,6 +3369,8 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         span: Option<Span>,
         structural: bool,
     ) -> Result<Value, Diagnostic> {
+        self.charge_work(1, span)?;
+        for argument in &args { self.check_value_size(argument, span)?; }
         match callee {
             ir::Callee::Direct(id) => self.call_function(*id, None, None, args, span),
             ir::Callee::Indirect(value) => {
@@ -3342,6 +3407,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         args: Vec<Value>,
         span: Option<Span>,
     ) -> Result<Value, Diagnostic> {
+        self.charge_work(1, span)?;
         match callee {
             Value::Closure(closure) => self.call_function(
                 closure.function,
@@ -3495,6 +3561,8 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         expect_runtime_arity(self, "Vector.fill", &args, 2, span)?;
         let len = args[0].as_int(self, span, "Vector.fill length")?;
         if len < 0 { return Err(self.runtime_error(span, "Vector.fill length must be non-negative")); }
+        self.check_collection_size(usize::try_from(len).unwrap_or(usize::MAX), span)?;
+        self.charge_work(len as u64, span)?;
         Ok(Value::list(vec![args[1].clone(); len as usize]))
     }
 
@@ -3503,6 +3571,8 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         expect_runtime_arity(self, "Vector.generate", &args, 2, span)?;
         let len = args[0].as_int(self, span, "Vector.generate length")?;
         if len < 0 { return Err(self.runtime_error(span, "Vector.generate length must be non-negative")); }
+        self.check_collection_size(usize::try_from(len).unwrap_or(usize::MAX), span)?;
+        self.charge_work(len as u64, span)?;
         let mut values = Vec::with_capacity(len as usize);
         for index in 0..len as usize { values.push(self.invoke_value(args[1].clone(), vec![Value::Int(index as i64)], span)?); }
         Ok(Value::list(values))
@@ -3513,6 +3583,8 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         expect_runtime_arity(self, "Array.fill", &args, 2, span)?;
         let len = args[0].as_int(self, span, "Array.fill length")?;
         if len < 0 { return Err(self.runtime_error(span, "Array.fill length must be non-negative")); }
+        self.check_collection_size(usize::try_from(len).unwrap_or(usize::MAX), span)?;
+        self.charge_work(len as u64, span)?;
         Ok(Value::list(vec![args[1].clone(); len as usize]))
     }
 
@@ -3521,6 +3593,8 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         expect_runtime_arity(self, "Array.generate", &args, 2, span)?;
         let len = args[0].as_int(self, span, "Array.generate length")?;
         if len < 0 { return Err(self.runtime_error(span, "Array.generate length must be non-negative")); }
+        self.check_collection_size(usize::try_from(len).unwrap_or(usize::MAX), span)?;
+        self.charge_work(len as u64, span)?;
         let mut values = Vec::with_capacity(len as usize);
         for index in 0..len as usize { values.push(self.invoke_value(args[1].clone(), vec![Value::Int(index as i64)], span)?); }
         Ok(Value::list(values))
@@ -4248,6 +4322,9 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
                 if !args.is_empty() {
                     return Err(self.runtime_error(span, "OS.env expects no arguments"));
                 }
+                if let Some(environment) = &self.options.environment {
+                    return Ok(Value::map(environment.iter().map(|(key, value)| (Value::String(key.clone()), Value::String(value.clone()))).collect()));
+                }
                 let entries = std::env::vars_os()
                     .filter_map(|(key, value)| {
                         Some((
@@ -4481,6 +4558,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
     }
 
     pub(crate) fn native_file_read_bytes(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        self.require_files(span)?;
         let _ = receiver;
         let method = "readBytes";
 
@@ -4502,6 +4580,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
     }
 
     pub(crate) fn native_file_read_text(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        self.require_files(span)?;
         let _ = receiver;
         let method = "readText";
 
@@ -4528,6 +4607,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
     }
 
     pub(crate) fn native_file_open(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        self.require_files(span)?;
         let _ = receiver;
         let method = "open";
 
@@ -4554,6 +4634,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
     }
 
     pub(crate) fn native_file_open_text(&mut self, receiver: Value, args: Vec<Value>, span: Option<Span>) -> Result<Value, Diagnostic> {
+        self.require_files(span)?;
         let _ = receiver;
         let method = "openText";
 
@@ -5898,10 +5979,8 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
             .map(|value| self.render_value(value, span, "print argument"))
             .collect::<Result<Vec<_>, _>>()?
             .join(" ");
-        self.output.push_str(&rendered);
-        if newline {
-            self.output.push('\n');
-        }
+        let rendered = if newline { format!("{rendered}\n") } else { rendered };
+        self.append_output(&rendered, span)?;
         Ok(Value::Unit)
     }
 
@@ -5918,7 +5997,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         }
         let text = format_printf(&format, &args[1..])
             .map_err(|message| self.runtime_error(span, message))?;
-        self.output.push_str(&text);
+        self.append_output(&text, span)?;
         Ok(Value::Unit)
     }
 
@@ -6029,6 +6108,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
     ) -> Result<Value, Diagnostic> {
         match &list {
             Value::List(items) => {
+                self.check_collection_size(items.borrow().len().saturating_add(1), span)?;
                 items.borrow_mut().push(value);
                 Ok(list)
             }
@@ -6045,6 +6125,7 @@ self.runtime_type_cast_value(runtime_type, "Object", method, args, span)
         let values = iterable_values(values, span, self)?;
         match &list {
             Value::List(items) => {
+                self.check_collection_size(items.borrow().len().saturating_add(values.len()), span)?;
                 items.borrow_mut().extend(values);
                 Ok(list)
             }
@@ -6704,6 +6785,7 @@ match receiver {
         needle: &Value,
         span: Option<Span>,
     ) -> Result<Option<usize>, Diagnostic> {
+        self.charge_work(values.len() as u64, span)?;
         for (index, value) in values.iter().enumerate() {
             if self.values_equal(value, needle, span)? {
                 return Ok(Some(index));
@@ -6718,6 +6800,7 @@ match receiver {
         needle: &Value,
         span: Option<Span>,
     ) -> Result<Option<usize>, Diagnostic> {
+        self.charge_work(entries.len() as u64, span)?;
         for (index, (key, _)) in entries.iter().enumerate() {
             if self.values_equal(key, needle, span)? {
                 return Ok(Some(index));
@@ -6733,6 +6816,7 @@ match receiver {
         span: Option<Span>,
     ) -> Result<(), Diagnostic> {
         if self.value_index(items, &value, span)?.is_none() {
+            self.check_collection_size(items.len().saturating_add(1), span)?;
             items.push(value);
         }
         Ok(())
@@ -6760,6 +6844,7 @@ match receiver {
         if let Some(position) = self.map_key_index(entries, &key, span)? {
             entries[position].1 = value;
         } else {
+            self.check_collection_size(entries.len().saturating_add(1), span)?;
             entries.push((key, value));
         }
         Ok(())
@@ -7330,6 +7415,7 @@ match receiver {
             if let Some(position) = existing {
                 entries[position].1 = value;
             } else {
+                self.check_collection_size(entries.len().saturating_add(1), span)?;
                 entries.push((index, value));
             }
             return Ok(());
@@ -8180,12 +8266,13 @@ fn map_entries_from_tuple_values(
 
 fn iterator_values(
     iterator: &Rc<RefCell<IteratorState>>,
-    _span: Option<Span>,
+    span: Option<Span>,
     in_: &Interpreter<'_>,
 ) -> Result<Vec<Value>, Diagnostic> {
     let mut state = iterator.borrow().clone();
     let mut out = Vec::new();
     loop {
+        in_.charge_work(1, span)?;
         match &mut state {
             IteratorState::List { items, index } => {
                 let items = items.borrow();
@@ -8193,6 +8280,7 @@ fn iterator_values(
                     break;
                 };
                 *index += 1;
+                in_.check_collection_size(out.len().saturating_add(1), span)?;
                 out.push(in_.clone_value(value));
             }
             IteratorState::Range { current, end, step } => {
@@ -8205,6 +8293,7 @@ fn iterator_values(
                     break;
                 }
                 let value = *current;
+                in_.check_collection_size(out.len().saturating_add(1), span)?;
                 *current = current.checked_add(*step).unwrap_or(*end);
                 out.push(Value::Int(value));
             }

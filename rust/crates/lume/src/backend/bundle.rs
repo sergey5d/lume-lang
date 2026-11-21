@@ -9,8 +9,8 @@ use crate::{
     interpreter::merged_runtime_program,
     ir,
     lower::lower_program,
-    resolver::{LocatedDiagnostic, ModuleLoadOptions, load_module_graph_with_options},
-    typecheck::check_path_with_load_options,
+    resolver::{LocatedDiagnostic, ModuleGraph, ModuleLoadOptions, load_module_graph_with_options},
+    typecheck::check_graph,
 };
 
 /// Checked, merged, and lowered program state shared by non-interpreter backends.
@@ -21,6 +21,7 @@ pub struct BackendBundle {
     pub core_bodies: HashMap<ir::FunctionId, core::CallableBody>,
     pub ir: ir::Program,
     pub descriptors: BackendDescriptors,
+    pub function_source_paths: HashMap<ir::FunctionId, String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -38,8 +39,15 @@ pub(crate) fn build_backend_bundle_with_load_options(
     path: impl AsRef<Path>,
     load_options: &ModuleLoadOptions,
 ) -> Result<BackendBundleResult, String> {
-    let path = path.as_ref();
-    let checked = check_path_with_load_options(path, load_options)?;
+    let (graph, root_path) = load_module_graph_with_options(path, load_options)?;
+    build_backend_bundle_from_graph(graph, root_path)
+}
+
+pub(crate) fn build_backend_bundle_from_graph(
+    graph: ModuleGraph,
+    root_path: PathBuf,
+) -> Result<BackendBundleResult, String> {
+    let checked = check_graph(graph.clone(), root_path.clone())?;
     if !checked.diagnostics.is_empty() {
         return Ok(BackendBundleResult {
             diagnostics: checked.diagnostics,
@@ -49,7 +57,6 @@ pub(crate) fn build_backend_bundle_with_load_options(
     }
     let warnings = checked.warnings;
 
-    let (graph, root_path) = load_module_graph_with_options(path, load_options)?;
     let root_module = graph
         .modules
         .get(&root_path)
@@ -78,6 +85,7 @@ pub(crate) fn build_backend_bundle_with_load_options(
         .program
         .expect("ir program after successful lowering");
     let descriptors = BackendDescriptors::from_ir(&ir);
+    let function_source_paths = crate::interpreter::function_source_paths(&graph, &root_path, &ir);
 
     Ok(BackendBundleResult {
         diagnostics: Vec::new(),
@@ -88,6 +96,7 @@ pub(crate) fn build_backend_bundle_with_load_options(
             core_bodies,
             ir,
             descriptors,
+            function_source_paths,
         }),
     })
 }

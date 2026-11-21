@@ -61,6 +61,7 @@ fn map_put(
     if let Some(position) = existing {
         entries[position].1 = args[1].clone();
     } else {
+        interpreter.check_collection_size(entries.len().saturating_add(1), span)?;
         entries.push((args[0].clone(), args[1].clone()));
     }
     Ok(receiver)

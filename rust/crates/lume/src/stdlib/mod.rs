@@ -65,6 +65,12 @@ pub struct TypeDescriptor {
     pub primitive: bool,
     pub representation: Option<NativeRepresentation>,
     pub operators: Vec<OperatorDescriptor>,
+    pub host_capabilities: Vec<HostCapability>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostCapability {
+    NativeFiles,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +106,14 @@ pub(crate) fn descriptors() -> &'static [TypeDescriptor] {
                         .flatten(),
                     declaration: declaration.clone(),
                     operators: operator_capabilities(&declaration.name, declaration.kind),
+                    host_capabilities: if matches!(
+                        declaration.name.as_str(),
+                        "File" | "FileStream" | "TextFileReader"
+                    ) {
+                        vec![HostCapability::NativeFiles]
+                    } else {
+                        Vec::new()
+                    },
                 })
             })
             .collect()

@@ -50,6 +50,7 @@ fn insert_unique(
 ) -> Result<(), Diagnostic> {
     let snapshot = items.borrow().clone();
     if interpreter.value_index(&snapshot, &value, span)?.is_none() {
+        interpreter.check_collection_size(snapshot.len().saturating_add(1), span)?;
         items.borrow_mut().push(value);
     }
     Ok(())

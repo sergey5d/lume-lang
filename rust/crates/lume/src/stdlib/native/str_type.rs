@@ -227,11 +227,18 @@ pub(super) fn repeat_text(
     if count == 0 || text.is_empty() {
         return Ok(Value::String(String::new()));
     }
-    let too_large = || interpreter.runtime_error(span, "repeated string is too large");
-    let count = usize::try_from(count).map_err(|_| too_large())?;
-    let size = text.len().checked_mul(count).ok_or_else(too_large)?;
+    let too_large = interpreter.runtime_error(span, "repeated string is too large");
+    let count = usize::try_from(count).map_err(|_| too_large.clone())?;
+    let size = text
+        .len()
+        .checked_mul(count)
+        .ok_or_else(|| too_large.clone())?;
+    interpreter.check_string_size(size, span)?;
+    interpreter.charge_work(count as u64, span)?;
     let mut result = String::new();
-    result.try_reserve_exact(size).map_err(|_| too_large())?;
+    result
+        .try_reserve_exact(size)
+        .map_err(|_| too_large.clone())?;
     for _ in 0..count {
         result.push_str(text);
     }
@@ -505,6 +512,17 @@ fn str_replace_literal(
     let Value::String(replacement) = replacement else {
         return Err(interpreter.runtime_error(span, "Str replacement value must be Str"));
     };
+    let count = if replace_all {
+        text.matches(target).count()
+    } else {
+        usize::from(text.contains(target))
+    };
+    let size = text
+        .len()
+        .saturating_sub(count.saturating_mul(target.len()))
+        .saturating_add(count.saturating_mul(replacement.len()));
+    interpreter.check_string_size(size, span)?;
+    interpreter.charge_work(text.len() as u64, span)?;
     let result = if replace_all {
         text.replace(target, replacement)
     } else {

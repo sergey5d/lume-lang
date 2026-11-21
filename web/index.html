@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Write and run Lume in your browser. Local WebAssembly execution, no compiler server required.">
+  <title>Lume / Playground</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <header class="masthead">
+      <a class="wordmark" href="https://sergey5d.github.io/lume-lang/" aria-label="Lume documentation">lume<span class="wordmark-dot">.</span></a>
+      <span class="edition">THE BROWSER EDITION <span class="live-dot"></span></span>
+      <a class="reference" href="https://github.com/sergey5d/lume-lang" target="_blank" rel="noreferrer">Source & reference &#8599;</a>
+    </header>
+    <section class="intro">
+      <div><p class="eyebrow">A LITTLE LESS CEREMONY.</p><h1>Make yourself<br><em>understood.</em></h1></div>
+      <div class="intro-copy"><p>Write Lume. Run it right here.</p><p>The compiler and interpreter run in a local WebAssembly worker. Your code stays in this tab.</p><span class="local-badge">NO JVM. NO COMPILATION SERVER.</span></div>
+    </section>
+    <section id="startup-error" class="startup-error" role="alert" hidden>
+      <h2>Open the playground through a local web server</h2>
+      <p>Browsers block modules and WebAssembly workers on <code>file://</code> pages.</p>
+      <p>From the repository root, run <code>npm --prefix web run serve</code>, then open <a href="http://127.0.0.1:8787/">http://127.0.0.1:8787/</a>.</p>
+    </section>
+    <section class="workspace" aria-label="Lume playground">
+      <div class="toolbar">
+        <label class="example-picker">EXAMPLE <select id="examples" aria-label="Choose an example" disabled></select></label>
+        <div class="actions">
+          <button id="check" class="quiet" disabled>Check</button>
+          <button id="format" class="quiet" disabled>Format</button>
+          <button id="stop" class="stop" disabled>Stop</button>
+          <button id="run" class="run" disabled>Run <span aria-hidden="true">&#9656;</span></button>
+        </div>
+      </div>
+      <div class="panes">
+        <section class="source-pane" aria-label="Project source">
+          <div class="file-bar"><div id="files" class="files" role="tablist" aria-label="Project files"></div><button id="add-file" class="add-file" aria-label="Add a project file" disabled>+</button></div>
+          <label class="sr-only" for="editor">Source editor</label>
+          <textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" wrap="off" aria-label="Source editor" readonly></textarea>
+          <div class="source-footer"><span id="entry-label"></span><span>CTRL / &#8984; + ENTER TO RUN</span></div>
+        </section>
+        <section class="result-pane" aria-label="Execution results">
+          <div class="result-heading"><span>OUTPUT</span><span id="status" role="status" data-state="idle">Loading playground...</span></div>
+          <div class="output-wrap"><pre id="output" tabindex="0" aria-label="Program output">Your program's output will appear here.</pre><p id="return-value" hidden></p></div>
+          <div id="diagnostics" aria-label="Diagnostics" aria-live="polite"></div>
+          <div class="result-footer"><span>LOCAL EXECUTION</span><span id="timing">WASM / RUST RUNTIME</span></div>
+        </section>
+      </div>
+    </section>
+    <footer class="page-footer"><span>Small syntax. Room to think.</span><p>Native files and Java interop are unavailable here. Runs have resource limits; Stop discards the worker.</p></footer>
+  </main>
+  <noscript>The playground requires JavaScript to run the compiler and interpreter.</noscript>
+  <script>
+    // A classic inline script can explain file:// restrictions even when modules cannot load.
+    const startupFailure = (status, message) => {
+      const element = document.getElementById('status');
+      element.textContent = status;
+      element.dataset.state = 'error';
+      document.getElementById('output').textContent = message;
+      for (const id of ['examples', 'add-file', 'check', 'format', 'run', 'stop']) document.getElementById(id).disabled = true;
+      document.getElementById('editor').readOnly = true;
+    };
+    if (location.protocol === 'file:') {
+      document.getElementById('startup-error').hidden = false;
+      startupFailure('HTTP server required', 'Run npm --prefix web run serve from the repository root, then open http://127.0.0.1:8787/ instead of this file.');
+    } else {
+      import('./playground.js').catch(error => {
+        startupFailure('Playground failed to load', `Could not load the playground modules. Check that the static assets are served correctly.\n${error.message}`);
+      });
+    }
+  </script>
+</body>
+</html>

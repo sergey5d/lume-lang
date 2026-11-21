@@ -13710,6 +13710,7 @@ mod tests {
             core_bodies: HashMap::new(),
             ir: ir::Program::default(),
             descriptors: Default::default(),
+            function_source_paths: HashMap::new(),
         };
         let function = ir::Function::new("test", FunctionKind::TopLevel, ir::Type::Unit);
         let names = JavaNames::from_external_classes(&HashMap::new());

@@ -211,19 +211,12 @@ pub(crate) fn resolve_path_with_options(
     path: impl AsRef<Path>,
     options: &ModuleLoadOptions,
 ) -> Result<ResolveResult, String> {
-    let root = path.as_ref();
-    let stdlib_dir = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?;
+    let (graph, root_path) = load_module_graph_with_options(path, options)?;
+    Ok(resolve_graph(&graph, &root_path))
+}
+
+pub(crate) fn resolve_graph(graph: &ModuleGraph, root_path: &Path) -> ResolveResult {
     let ambient = default_inline_ambient_registry();
-    let mut graph = ModuleGraph::default();
-    let source_root = source_root_for_path(root)?;
-    let root_path = load_module_with_options(
-        root,
-        &source_root,
-        &stdlib_dir,
-        &mut graph,
-        &mut HashSet::new(),
-        options,
-    )?;
 
     let mut visited = HashSet::new();
     let mut order = Vec::new();
@@ -249,7 +242,7 @@ pub(crate) fn resolve_path_with_options(
         }));
     }
 
-    Ok(ResolveResult { diagnostics })
+    ResolveResult { diagnostics }
 }
 
 pub(crate) fn load_module_graph(path: impl AsRef<Path>) -> Result<(ModuleGraph, PathBuf), String> {
@@ -262,8 +255,16 @@ pub(crate) fn load_module_graph_with_options(
 ) -> Result<(ModuleGraph, PathBuf), String> {
     let mut graph = ModuleGraph::default();
     let root = path.as_ref();
-    let source_root = source_root_for_path(root)?;
-    let stdlib_dir = find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?;
+    let source_root = if options.virtual_sources.is_some() {
+        PathBuf::from("/")
+    } else {
+        source_root_for_path(root)?
+    };
+    let stdlib_dir = if options.virtual_sources.is_some() {
+        PathBuf::from("/<stdlib>")
+    } else {
+        find_stdlib_dir(root.parent().unwrap_or_else(|| Path::new(".")))?
+    };
     let root = load_module_with_options(
         root,
         &source_root,
@@ -280,6 +281,8 @@ pub(crate) struct ModuleLoadOptions {
     pub(crate) library_modules: HashMap<String, LibraryModule>,
     pub(crate) source_overrides: HashMap<PathBuf, String>,
     pub(crate) allow_missing_modules: bool,
+    /// An isolated virtual filesystem. When present, no source lookup uses OS I/O.
+    pub(crate) virtual_sources: Option<HashMap<PathBuf, Program>>,
 }
 
 impl Default for ModuleLoadOptions {
@@ -288,6 +291,7 @@ impl Default for ModuleLoadOptions {
             library_modules: native_library_modules(),
             source_overrides: HashMap::new(),
             allow_missing_modules: false,
+            virtual_sources: None,
         }
     }
 }
@@ -611,7 +615,11 @@ fn load_module_with_options(
     loading: &mut HashSet<PathBuf>,
     options: &ModuleLoadOptions,
 ) -> Result<PathBuf, String> {
-    let abs = fs::canonicalize(path).map_err(|err| format!("resolve {}: {err}", path.display()))?;
+    let abs = if options.virtual_sources.is_some() {
+        path.to_path_buf()
+    } else {
+        fs::canonicalize(path).map_err(|err| format!("resolve {}: {err}", path.display()))?
+    };
     if graph.modules.contains_key(&abs) {
         return Ok(abs);
     }
@@ -619,7 +627,12 @@ fn load_module_with_options(
         return Err(format!("use cycle detected at {}", abs.display()));
     }
 
-    let program = if let Some(source) = options.source_overrides.get(&abs) {
+    let program = if let Some(sources) = &options.virtual_sources {
+        sources
+            .get(&abs)
+            .ok_or_else(|| format!("module not supplied: {}", abs.display()))?
+            .clone()
+    } else if let Some(source) = options.source_overrides.get(&abs) {
         parse_program_from_source(&abs, source.clone())?
     } else {
         parse_program_from_path(&abs)?
@@ -649,10 +662,25 @@ fn load_module_with_options(
         .map(|module| module.name.as_str());
     let imports = module.program.imports.clone();
     for import in imports {
-        let child_path = local_module_path(source_root, base_dir, stdlib_dir, &import.path);
-        let library_import =
-            !child_path.exists() && options.library_modules.contains_key(&import.path);
-        if !child_path.exists() && !library_import && options.allow_missing_modules {
+        let child_path = if let Some(sources) = &options.virtual_sources {
+            let rooted = source_root.join(format!("{}.lum", import.path));
+            let relative = base_dir.join(format!("{}.lum", import.path));
+            if sources.contains_key(&rooted) {
+                rooted
+            } else if sources.contains_key(&relative) {
+                relative
+            } else {
+                rooted
+            }
+        } else {
+            local_module_path(source_root, base_dir, stdlib_dir, &import.path)
+        };
+        let child_exists = options.virtual_sources.as_ref().map_or_else(
+            || child_path.exists(),
+            |sources| sources.contains_key(&child_path),
+        );
+        let library_import = !child_exists && options.library_modules.contains_key(&import.path);
+        if !child_exists && !library_import && options.allow_missing_modules {
             continue;
         }
         let child_abs = if library_import {

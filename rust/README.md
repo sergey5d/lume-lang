@@ -14,6 +14,10 @@ source
    or lowered IR -> interpreter
 ```
 
+`crates/lume-web` builds that same frontend/interpreter for browser WebAssembly.
+The JavaScript SDK and static playground live in [`../web`](../web/README.md).
+There is no separate browser parser, checker, or direct Wasm code generator.
+
 ## Current Scope
 
 The Rust implementation now has these real building blocks:
@@ -100,7 +104,7 @@ file. Right now it covers:
 - calls, member access, indexing, vectors, arrays, tuples, lambdas, and `if` expressions
 
 The `check` command resolves and type-checks the requested file and its `use` dependencies,
-installs ambient stdlib names from `stdlib/*.lum`, and reports diagnostics such
+installs ambient stdlib names from Rust-authored contracts, and reports diagnostics such
 as:
 
 - duplicate top-level declarations

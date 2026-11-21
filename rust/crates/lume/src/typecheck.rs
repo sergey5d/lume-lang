@@ -16,7 +16,7 @@ use crate::{
     numeric::{parse_float_literal, parse_integer_literal},
     resolver::{
         ImportedKind, ImportedSymbol, LoadedModule, ModuleGraph, ModuleLoadOptions,
-        collect_module_order, load_module_graph_with_options, resolve_path_with_options,
+        collect_module_order, load_module_graph_with_options,
     },
     typecheck_diagnostics,
 };
@@ -57,7 +57,15 @@ pub(crate) fn check_path_with_load_options(
     path: impl AsRef<Path>,
     options: &ModuleLoadOptions,
 ) -> Result<PathCheckResult, String> {
-    let resolved = resolve_path_with_options(path.as_ref(), options)?;
+    let (graph, root_path) = load_module_graph_with_options(path.as_ref(), options)?;
+    check_graph(graph, root_path)
+}
+
+pub(crate) fn check_graph(
+    graph: ModuleGraph,
+    root_path: PathBuf,
+) -> Result<PathCheckResult, String> {
+    let resolved = crate::resolver::resolve_graph(&graph, &root_path);
     let (resolve_errors, mut warnings): (Vec<_>, Vec<_>) = resolved
         .diagnostics
         .into_iter()
@@ -69,7 +77,6 @@ pub(crate) fn check_path_with_load_options(
         });
     }
 
-    let (graph, root_path) = load_module_graph_with_options(path.as_ref(), options)?;
     let mut world = World::from_graph(graph, root_path)?;
 
     let mut diagnostics = Vec::new();

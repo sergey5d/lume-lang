@@ -32,9 +32,11 @@ a-lang/
         stdlib/               native contracts, capabilities, and implementations
         runtime/              dense per-program runtime type metadata
         interpreter.rs        IR interpreter
+    crates/lume-web/          WebAssembly bindings for the compiler/interpreter
   stdlib/                     source counterparts and Java runtime generation
   examples/                   runnable and failing language fixtures
   vscode-extension/           editor syntax/config support
+  web/                        browser SDK, worker, static playground, and tests
   SYNTAX.md                   language reference
   features.md                 feature notes and status
 ```
@@ -216,6 +218,28 @@ The CLI in `main.rs` exposes seven user-facing entry points:
 
 There is currently no bytecode VM or native machine-code backend. `run` uses the
 IR interpreter, while `gen` emits Java for JVM compilation.
+
+The browser package compiles the same Rust frontend and interpreter to Wasm;
+it does not compile individual Lume programs into Wasm. `project.rs` supplies
+bounded virtual projects through the ordinary resolver/checker/module merge
+pipeline. The CLI's filesystem loader and the virtual loader share import
+resolution semantics without allowing virtual projects to fall back to OS I/O.
+
+`lume-web` exposes check/run/format through a versioned JSON protocol. `web/`
+wraps it in a TypeScript-described SDK, using a fresh worker and Wasm instance
+for each request. The compiled module is cached, but globals and runtime values
+are not shared between requests. UTF-8 diagnostic spans are converted to UTF-16
+only at the JavaScript editor boundary. Backend bundles retain callable source
+ownership so imported functions and closures report the correct source file.
+
+Browser run options explicitly supply arguments/environment, disable native
+file access, and apply cooperative execution/output/size limits. Native stdlib
+descriptors declare host capabilities; browser checking diagnoses unavailable
+file operations before execution, with runtime guards as defense in depth.
+The SDK's main-thread watchdog handles non-yielding work by terminating the
+worker. Such hard stops and fatal traps cannot promise language cleanup.
+
+See [web/README.md](web/README.md) for build, deployment, API, and safety details.
 
 ## Standard Library and Builtins
 

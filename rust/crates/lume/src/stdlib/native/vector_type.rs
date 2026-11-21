@@ -101,7 +101,9 @@ fn list_add(
     if args.len() != 1 {
         return Err(interpreter.runtime_error(span, "Vector.add expects 1 argument"));
     }
-    list_items(&receiver).borrow_mut().push(args[0].clone());
+    let items = list_items(&receiver);
+    interpreter.check_collection_size(items.borrow().len().saturating_add(1), span)?;
+    items.borrow_mut().push(args[0].clone());
     Ok(receiver)
 }
 
@@ -115,6 +117,14 @@ fn list_add_all(
         return Err(interpreter.runtime_error(span, "Vector.addAll expects 1 argument"));
     };
     let rhs = iterable_values(other.clone(), span, interpreter)?;
+    interpreter.check_collection_size(
+        list_items(&receiver)
+            .borrow()
+            .len()
+            .saturating_add(rhs.len()),
+        span,
+    )?;
+    interpreter.charge_work(rhs.len() as u64, span)?;
     list_items(&receiver).borrow_mut().extend(rhs);
     Ok(receiver)
 }
@@ -149,7 +159,10 @@ fn list_flat_map(
     let mut out = Vec::new();
     for value in values {
         let mapped = interpreter.invoke_value(callback.clone(), vec![value], span)?;
-        out.extend(iterable_values(mapped, span, interpreter)?);
+        let next = iterable_values(mapped, span, interpreter)?;
+        interpreter.check_collection_size(out.len().saturating_add(next.len()), span)?;
+        interpreter.charge_work(next.len() as u64, span)?;
+        out.extend(next);
     }
     Ok(Value::list(out))
 }
@@ -166,7 +179,10 @@ fn list_flatten(
     let values = list_values(interpreter, &receiver, span, "Vector.flatten")?;
     let mut out = Vec::new();
     for value in values {
-        out.extend(iterable_values(value, span, interpreter)?);
+        let next = iterable_values(value, span, interpreter)?;
+        interpreter.check_collection_size(out.len().saturating_add(next.len()), span)?;
+        interpreter.charge_work(next.len() as u64, span)?;
+        out.extend(next);
     }
     Ok(Value::list(out))
 }

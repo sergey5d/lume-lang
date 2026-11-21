@@ -98,6 +98,23 @@ cargo test --manifest-path rust/Cargo.toml -p lume
 ./run_samples.sh
 ```
 
+### Browser Playground
+
+The compiler and interpreter can also run locally in a browser through
+WebAssembly, with no JVM or compilation server. The playground supports virtual
+multi-file projects, checking, formatting, diagnostics, and bounded execution.
+See [browser setup and SDK usage](web/README.md) for build instructions.
+
+After building the browser package:
+
+```sh
+cd web
+npm run serve
+```
+
+Open `http://127.0.0.1:8787`. Native files and Java interop are unavailable in
+the browser; `OS.args` and `OS.env` come from the embedding application.
+
 ## A Complete Example
 
 This small reporting pipeline loads typed JSON, validates and normalizes each
