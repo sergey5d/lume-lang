@@ -1,0 +1,13 @@
+# EXPECT:
+# fold 6
+# same 2
+# widened 3
+
+fn same[L, R when L = R](left L, right R) L = right
+
+fn main() {
+    println("fold", [1, 2, 3].fold(0, (sum, value) => sum + value))
+    println("same", same(1, 2))
+    widened Any = [1, 2].fold(0, (sum, value) => sum + value)
+    println("widened", widened)
+}

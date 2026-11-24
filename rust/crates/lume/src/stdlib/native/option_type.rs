@@ -16,7 +16,6 @@ pub(super) fn define() -> RuntimeType {
         builtin_method("Option", "toResult", 1, option_to_result),
         builtin_method("Option", "toEither", 1, option_to_either),
         builtin_method("Option", "iterator", 0, option_iterator),
-        builtin_method("Option", "isSuccess", 0, option_is_set),
         builtin_method("Option", "flatMap", 1, option_flat_map),
     ]
     .into_iter()

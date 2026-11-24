@@ -15,7 +15,6 @@ pub(super) fn define() -> RuntimeType {
         builtin_method("Either", "expectLeft", 0, either_expect_left),
         builtin_method("Either", "expectRight", 0, either_expect_right),
         builtin_method("Either", "orElse", 1, either_or_else),
-        builtin_method("Either", "isSuccess", 0, either_is_right),
         builtin_method("Either", "flatMap", 1, either_flat_map),
         builtin_method("Either", "mapLeft", 1, either_map_left),
         builtin_method("Either", "toOption", 0, either_to_option),

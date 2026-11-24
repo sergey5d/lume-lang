@@ -14,7 +14,6 @@ pub(super) fn define() -> RuntimeType {
         builtin_method("Result", "map", 1, result_map),
         builtin_method("Result", "expectErr", 0, result_expect_err),
         builtin_method("Result", "orElse", 1, result_or_else),
-        builtin_method("Result", "isSuccess", 0, result_is_ok),
         builtin_method("Result", "flatMap", 1, result_flat_map),
         builtin_method("Result", "mapError", 1, result_map_error),
         builtin_method("Result", "toOption", 0, result_to_option),

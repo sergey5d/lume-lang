@@ -8984,7 +8984,9 @@ impl<'a> SourceBodyEmitter<'a> {
             style,
             &rewritten_bindings,
         )?;
-        let result_ty = self.source_expr_type(span)?;
+        let result_ty = self
+            .source_expr_type(span)
+            .or_else(|| self.source_call_return_type(span))?;
         let tail = if is_java_void_type(&result_ty) {
             format!("{invocation}; return lume.core.LumeUnit.INSTANCE;")
         } else {
@@ -9502,7 +9504,11 @@ impl<'a> SourceBodyEmitter<'a> {
                 let core::Expr::Identifier { name: owner, .. } = receiver.as_ref() else {
                     unreachable!()
                 };
-                let [arg] = args else {
+                let ordered_args = self
+                    .source_call(span)
+                    .and_then(|call| self.ordered_source_args(args, call))
+                    .unwrap_or_else(|| args.iter().collect());
+                let [arg] = ordered_args.as_slice() else {
                     return None;
                 };
                 let value = self.emit_call_arg(arg, bindings)?;

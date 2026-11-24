@@ -1,5 +1,6 @@
 # EXPECT:
 # for 6
+# yield 5,7,7
 
 fn main() Unit {
     var total Int = 0
@@ -8,11 +9,12 @@ fn main() Unit {
         total := total + value
     }
 
-    for value <- [1, 2, 3] do 
-        crap(value)
+    for value <- [1, 2, 3] do
+        assert(value > 0)
 
-    for value <- [1, 2, 3] do 
-        yield if value == 1 then 5 else 7
+    selected = for value <- [1, 2, 3] yield
+        if value == 1 { 5 } else { 7 }
 
     println("for", total)
+    println("yield", selected.makeStr(","))
 }

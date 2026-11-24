@@ -7698,7 +7698,8 @@ impl<'a> Checker<'a> {
             &selection.sig.generic_conditions,
             &mut subst,
         );
-        if !matches!(expected, Ty::Unknown) {
+        // Any accepts the result but provides no concrete type for inference.
+        if !matches!(expected, Ty::Unknown) && !expected.is_any() {
             self.infer_type_subst(&selection.sig.ret, expected, &mut subst);
         }
         let callee_name = callable_name_for_diagnostic(callee);
@@ -19446,6 +19447,24 @@ fn main() Unit {
     values = Vector(1, 2, 3)
     removed Option[Int] = values.removeFirst()
     total Int = values.fold(0, (acc, value) => acc + value)
+}
+"#,
+        );
+        let result = check_program(&program);
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    }
+
+    #[test]
+    fn any_call_context_preserves_generic_argument_inference() {
+        let program = parse_inline(
+            r#"
+fn same[L, R when L = R](left L, right R) L = right
+fn consume(value Any) {}
+fn main() {
+    println([1, 2, 3].fold(0, (sum, value) => sum + value))
+    println(same(1, 2))
+    consume([1, 2].fold(0, (sum, value) => sum + value))
+    total Any = [1, 2].fold(0, (sum, value) => sum + value)
 }
 "#,
         );

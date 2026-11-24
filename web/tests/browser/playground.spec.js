@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
-test.beforeEach(async ({ page }) => { await page.goto('/'); });
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeEnabled();
+});
 
 test('opening the HTML file directly explains how to serve it', async ({ page }) => {
   const moduleRequests = [];
@@ -23,21 +27,42 @@ test('a startup module failure is visible instead of leaving inert controls', as
   await expect(page.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
 });
 
-test('all bundled examples execute in a real Wasm worker', async ({ page }) => {
-  for (const [example, expected] of [
-    ['hello', 'Total: 10'],
-    ['records', 'Total: 20.75'],
-    ['modules', 'Price: 20.000'],
-    ['json', 'Total: 12'],
-    ['limits', 'Cleanup still runs'],
-  ]) {
+for (const [example, expected] of [
+  ['hello', 'Total: 10'],
+  ['records', 'Total: 20.75'],
+  ['modules', 'Price: 20.000'],
+  ['json', 'Total: 12'],
+  ['extraction', 'Option: 5\nMissing: true\nResult: 12\nInvalid JSON: true\nEither: 9\nLeft: true'],
+  ['limits', 'Cleanup still runs'],
+]) {
+  test(`${example} checks, formats, and runs in a real Wasm worker`, async ({ page }) => {
     await page.getByLabel('Choose an example').selectOption(example);
+    await page.getByRole('button', { name: 'Check', exact: true }).click();
+    await expect(page.locator('#status')).toHaveText('No errors', { timeout: 30_000 });
+    for (const path of await page.getByRole('tab').allTextContents()) {
+      await page.getByRole('tab', { name: path, exact: true }).click();
+      await page.getByRole('button', { name: 'Format', exact: true }).click();
+      await expect(page.locator('#status')).toHaveText('Formatted', { timeout: 30_000 });
+    }
+    await page.getByRole('button', { name: 'Check', exact: true }).click();
+    await expect(page.locator('#status')).toHaveText('No errors', { timeout: 30_000 });
     await page.getByRole('button', { name: 'Run', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeDisabled({ timeout: 30_000 });
     await expect(page.getByLabel('Program output')).toContainText(expected);
     if (example === 'limits') await expect(page.locator('#diagnostics')).toContainText('execution_limit');
     else await expect(page.locator('#status')).toHaveText('Finished');
-  }
+  });
+}
+
+test('the README order report runs with JSON decoding and error propagation', async ({ page }) => {
+  const source = await readFile(new URL('../../../examples/readme_order_report.lum', import.meta.url), 'utf8');
+  const result = await page.evaluate(async source => {
+    const { LumeClient } = await import('/sdk.js');
+    const sdk = new LumeClient({ timeoutMs: 30_000 });
+    return sdk.run({ entry: 'examples/readme_order_report.lum', files: { 'examples/readme_order_report.lum': source } });
+  }, source);
+  expect(result.diagnostics).toEqual([]);
+  expect(result.output).toBe('Daily orders\nMira: orders=2, total=30.00\nNoah: orders=1, total=8.75\nInvalid orders: order 1: quantity must be positive\n');
 });
 
 test('SDK preserves numeric precision, host inputs, and collection allocation behavior', async ({ page }) => {

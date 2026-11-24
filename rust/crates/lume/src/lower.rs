@@ -2560,11 +2560,8 @@ impl<'a> FunctionLowerer<'a> {
 
         let present = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Method {
-                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "isSuccess".to_string(),
-                },
-                args: Vec::new(),
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
                 structural: false,
             },
             ir::Type::Bool,
@@ -2673,11 +2670,8 @@ impl<'a> FunctionLowerer<'a> {
             });
             let present = self.emit_temp_from_rvalue(
                 ir::RValue::Call {
-                    callee: ir::Callee::Method {
-                        receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                        method: "isSuccess".to_string(),
-                    },
-                    args: Vec::new(),
+                    callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet),
+                    args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
                     structural: false,
                 },
                 ir::Type::Bool,
@@ -5077,11 +5071,8 @@ impl<'a> FunctionLowerer<'a> {
 
         let present = self.emit_temp_from_rvalue(
             ir::RValue::Call {
-                callee: ir::Callee::Method {
-                    receiver: ir::Operand::Copy(Box::new(ir::Place::Local(source_local))),
-                    method: "isSuccess".to_string(),
-                },
-                args: Vec::new(),
+                callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet),
+                args: vec![ir::Operand::Copy(Box::new(ir::Place::Local(source_local)))],
                 structural: false,
             },
             ir::Type::Bool,
@@ -6672,7 +6663,9 @@ impl<'a> FunctionLowerer<'a> {
         expected: Option<&ir::Type>,
     ) -> crate::stdlib::NativeSignature {
         let mut subst = HashMap::new();
-        if let Some(expected) = expected {
+        if let Some(expected) = expected
+            && !matches!(expected, ir::Type::Named { name, args } if name == "Any" && args.is_empty())
+        {
             infer_ir_type_subst(&signature.return_ty, expected, &mut subst, self.program);
         }
         self.infer_stdlib_conditions(&signature.generic_conditions, &mut subst);
@@ -6702,7 +6695,8 @@ impl<'a> FunctionLowerer<'a> {
                 } else {
                     parameter
                 };
-                let expected = erase_ir_type_params(&substitute_ir_type(raw_expected, &subst));
+                let resolved_expected = substitute_ir_type(raw_expected, &subst);
+                let expected = erase_ir_type_params(&resolved_expected);
                 let actual = if signature.variadic
                     && arg.name.is_none()
                     && let Expr::Spread { value, .. } = &arg.value
@@ -6713,7 +6707,7 @@ impl<'a> FunctionLowerer<'a> {
                     self.infer_expr_type_against_with_overrides(&arg.value, &expected, overrides)
                 };
                 let actual = normalize_contract_type(actual);
-                infer_ir_type_subst(raw_expected, &actual, &mut subst, self.program);
+                infer_ir_type_subst(&resolved_expected, &actual, &mut subst, self.program);
                 self.infer_stdlib_conditions(&signature.generic_conditions, &mut subst);
             }
         }
@@ -12575,11 +12569,11 @@ fn main(values Vector[Int], pairs Map[Str, Int], optional Option[Int]) Unit {
                 ir::StatementKind::Assign {
                     value:
                         ir::RValue::Call {
-                            callee: ir::Callee::Method { method, .. },
+                            callee: ir::Callee::Intrinsic(ir::Intrinsic::ExtractSuccessIsSet),
                             ..
                         },
                     ..
-                } => method == "isSuccess",
+                } => true,
                 _ => false,
             })
         }));

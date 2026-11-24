@@ -61,12 +61,42 @@ use lume/regex/{Regex}
 fn main() {
     values [Int] = Json.decode[[Int]]("[2, 4, 6]")!
     println("Items:", values.size)
-    var total Int = 0
-    for value <- values { total += value }
-    println("Total:", total)
+    println("Total:", values.fold(0, (sum, value) => sum + value))
 
     word = Regex.compile("[a-z]+")!
     println("Matches:", word.matches("hello"))
+}
+`,
+    },
+  },
+  extraction: {
+    label: 'Options, results & try',
+    entry: 'main.lum',
+    files: {
+      'main.lum': `use lume/json/{Json}
+
+fn increment(value Int?) Int? {
+    number = try value
+    ^(number + 1)
+}
+
+fn parseTotal(text Str) Result[Int, Str] {
+    numbers [Int] = try Json.decode[[Int]](text)
+    Ok(numbers.fold(0, (sum, value) => sum + value))
+}
+
+fn increase(value Either[Str, Int]) Either[Str, Int] {
+    number = try value
+    Right(number + 1)
+}
+
+fn main() {
+    println("Option:", increment(^4)!)
+    println("Missing:", increment(None).isEmpty)
+    println("Result:", parseTotal("[2, 4, 6]")!)
+    println("Invalid JSON:", parseTotal("invalid").isErr)
+    println("Either:", increase(Right(8))!)
+    println("Left:", increase(Left("missing")).isLeft)
 }
 `,
     },

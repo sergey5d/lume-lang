@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*map key type '\(MutableReference, Int\)' does not satisfy 'Hashed\[\(MutableReference, Int\)\]'.*
+# .*type '\(MutableReference, Int\)' does not satisfy generic bound 'Hashed\[\(MutableReference, Int\)\]'.*
 
 class MutableReference {
     id Int
