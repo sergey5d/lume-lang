@@ -869,33 +869,22 @@ impl<'a> Parser<'a> {
             let end = self.consume(TokenKind::RParen, "expected ')' after constructor inputs")?;
             return Some(Expr::ContextualNew {
                 args,
-                uses_brace_syntax: false,
                 span: start.cover(end),
             });
         }
         if self.match_token(TokenKind::LBrace) {
-            let record = self.with_trailing_block_calls_allowed(|parser| {
+            self.diagnostics.push(Diagnostic::error(
+                "removed_new_braces",
+                "'new { ... }' was removed; use 'Type { ... }' or bare field braces in a directly typed declaration",
+                start,
+            ));
+            return self.with_trailing_block_calls_allowed(|parser| {
                 parser.finish_brace_record_literal_expr(start)
-            })?;
-            let Expr::RecordLiteral { span, .. } = &record else {
-                unreachable!("brace construction parses as a record literal")
-            };
-            let span = *span;
-            return Some(Expr::ContextualNew {
-                args: vec![CallArg {
-                    from_shape_spread: false,
-                    name: None,
-                    ty: None,
-                    value: record,
-                    span,
-                }],
-                uses_brace_syntax: true,
-                span,
             });
         }
         self.error_at_current(
             "expected_expression",
-            "contextual construction uses 'new(...)' or 'new { ... }'",
+            "positional contextual construction uses 'new(...)'",
         );
         None
     }
@@ -2135,11 +2124,11 @@ impl<'a> Parser<'a> {
                     self.diagnostics.push(
                         Diagnostic::error(
                             "removed_shape_expression",
-                            "expression-level 'shape { ... }' has been removed; use field braces or 'new { ... }'",
+                            "expression-level 'shape { ... }' has been removed; use field braces or a named shape constructor",
                             start,
                         )
                         .with_help(
-                            "write '{ field: value }' for labeled fields, or 'new { field }' for punning and empty construction",
+                            "write '{ field: value }' for labeled fields, 'Type { field }' for punning, or specify an empty shape target",
                         ),
                     );
                     return self.with_trailing_block_calls_allowed(|parser| {
@@ -2148,7 +2137,7 @@ impl<'a> Parser<'a> {
                 }
                 self.error_at_current(
                     "unexpected_token",
-                    "'shape' is a declaration/type keyword, not an expression; use '{ field: value }', 'new { ... }', or 'object with Interface { ... }'",
+                    "'shape' is a declaration/type keyword, not an expression; use '{ field: value }', 'Type { field }', or 'object with Interface { ... }'",
                 );
                 None
             }

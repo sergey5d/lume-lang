@@ -21,13 +21,13 @@ fn bareFields() Rollup? = source().map(r => { ...r })
 
 fn inferredShape() Rollup? = source().map(r => { ...r })
 
-fn contextualNew() Rollup? = source().map(r => new { ...r })
+fn contextualNew() Rollup? = source().map(r => { ...r })
 
 fn namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
 
 fn bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
 
-fn contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
+fn contextualNewMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
 
 fn main() Unit {
     println(named()!.total)

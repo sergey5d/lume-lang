@@ -7,5 +7,5 @@ shape Point {
 }
 
 fn main() Unit {
-    point Point = new { x: 4, y: 5 }
+    point Point = { x: 4, y: 5 }
 }

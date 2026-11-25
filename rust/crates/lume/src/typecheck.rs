@@ -2168,7 +2168,7 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .map(|ty| self.ty_from_type_ref(ty))
                         {
-                            return self.check_expr_against(expr, &expected);
+                            return self.check_declaration_initializer(expr, &expected);
                         }
                     }
                     if let Some(expected) = binding_stmt
@@ -2177,7 +2177,7 @@ impl<'a> Checker<'a> {
                         .and_then(|binding| binding.ty.as_ref())
                         .map(|ty| self.ty_from_type_ref(ty))
                     {
-                        self.check_expr_against(expr, &expected)
+                        self.check_declaration_initializer(expr, &expected)
                     } else {
                         self.check_expr(expr)
                     }
@@ -2933,7 +2933,7 @@ impl<'a> Checker<'a> {
                 self.check_field_initializer_expr(initializer, owner, &initialized_fields);
                 let expected = field.ty.as_ref().map(|ty| self.ty_from_type_ref(ty));
                 let actual = match &expected {
-                    Some(expected) => self.check_expr_against(initializer, expected),
+                    Some(expected) => self.check_declaration_initializer(initializer, expected),
                     None => self.check_expr(initializer),
                 };
                 let expected = expected.unwrap_or_else(|| actual.clone());
@@ -4280,7 +4280,7 @@ impl<'a> Checker<'a> {
                                 .as_ref()
                                 .map(|ty| self.ty_from_type_ref(ty))
                             {
-                                return self.check_expr_against(expr, &expected);
+                                return self.check_declaration_initializer(expr, &expected);
                             }
                         }
                         if let Some(expected) = binding_stmt
@@ -4289,7 +4289,7 @@ impl<'a> Checker<'a> {
                             .and_then(|binding| binding.ty.as_ref())
                             .map(|ty| self.ty_from_type_ref(ty))
                         {
-                            self.check_expr_against(expr, &expected)
+                            self.check_declaration_initializer(expr, &expected)
                         } else {
                             self.check_expr(expr)
                         }
@@ -4590,11 +4590,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let expected = match tail {
-            Some(Expr::RecordLiteral { .. })
-            | Some(Expr::ContextualNew {
-                uses_brace_syntax: true,
-                ..
-            }) => Some(&record_expected),
+            Some(Expr::RecordLiteral { .. }) => Some(&record_expected),
             _ => None,
         };
         let actual = match expected {
@@ -5727,6 +5723,35 @@ impl<'a> Checker<'a> {
         self.check_expr_against(expr, &Ty::Unknown)
     }
 
+    fn check_declaration_initializer(&mut self, expr: &Expr, expected: &Ty) -> Ty {
+        if let Expr::Group { inner, .. } = expr {
+            return self.check_declaration_initializer(inner, expected);
+        }
+        if self.is_class_construction_target(expected) {
+            match expr {
+                Expr::RecordLiteral { .. } => {
+                    let args = [crate::ast::CallArg {
+                        from_shape_spread: false,
+                        name: None,
+                        ty: None,
+                        value: expr.clone(),
+                        span: expr.span(),
+                    }];
+                    return self.check_contextual_new_expr(&args, true, expr.span(), expected);
+                }
+                Expr::ContextualNew { args, span } => {
+                    return self.check_contextual_new_expr(args, false, *span, expected);
+                }
+                _ => {}
+            }
+        }
+        self.check_expr_against(expr, expected)
+    }
+
+    fn is_class_construction_target(&self, expected: &Ty) -> bool {
+        matches!(expected, Ty::Named(name, _) if self.lookup_any_type(name).is_some_and(|sig| sig.kind == TypeKind::Class))
+    }
+
     fn reject_tuple_literal_against_shape_like(
         &mut self,
         items: &[Expr],
@@ -5963,11 +5988,16 @@ impl<'a> Checker<'a> {
                 uses_brace_syntax,
                 span,
             } => self.check_call(callee, args, *uses_brace_syntax, *span, expected),
-            Expr::ContextualNew {
-                args,
-                uses_brace_syntax,
-                span,
-            } => self.check_contextual_new_expr(args, *uses_brace_syntax, *span, expected),
+            Expr::ContextualNew { args, span } => {
+                if self.is_class_construction_target(expected) {
+                    self.add_error(
+                        "class_construction_requires_explicit_target",
+                        format!("class construction outside a directly typed declaration must name its target; use '{}(...)'", expected.describe()),
+                        *span,
+                    );
+                }
+                self.check_contextual_new_expr(args, false, *span, expected)
+            }
             Expr::Member {
                 receiver,
                 name,
@@ -6141,9 +6171,9 @@ impl<'a> Checker<'a> {
                     }];
                     if sig.kind == TypeKind::Class {
                         self.add_error(
-                            "class_construction_requires_new",
+                            "class_construction_requires_explicit_target",
                             format!(
-                                "bare field braces cannot construct class '{}'; use 'new {{ ... }}' or '{} {{ ... }}'",
+                                "bare field braces cannot construct class '{}' outside a directly typed declaration; use '{} {{ ... }}'",
                                 sig.name, sig.name
                             ),
                             span,
@@ -6988,14 +7018,6 @@ impl<'a> Checker<'a> {
     fn probe_shape_argument_source(&self, source: &Expr) -> Ty {
         match source {
             Expr::Group { inner, .. } => self.probe_shape_argument_source(inner),
-            Expr::ContextualNew {
-                args,
-                uses_brace_syntax: true,
-                ..
-            } => args
-                .first()
-                .map(|arg| self.probe_expr_type(&arg.value))
-                .unwrap_or(Ty::Unknown),
             _ => self.probe_expr_type(source),
         }
     }
@@ -7097,7 +7119,7 @@ impl<'a> Checker<'a> {
                 .map(|initializer| {
                     declared
                         .as_ref()
-                        .map(|expected| self.check_expr_against(initializer, expected))
+                        .map(|expected| self.check_declaration_initializer(initializer, expected))
                         .unwrap_or_else(|| self.check_expr(initializer))
                 })
                 .unwrap_or(Ty::Unknown);
@@ -7189,67 +7211,7 @@ impl<'a> Checker<'a> {
             );
         }
 
-        if uses_brace_syntax {
-            let concrete_target = match expected {
-                Ty::Named(name, _) => self
-                    .lookup_any_type(name)
-                    .is_some_and(|sig| matches!(sig.kind, TypeKind::Class | TypeKind::Record)),
-                _ => false,
-            };
-            if !concrete_target {
-                let [
-                    crate::ast::CallArg {
-                        from_shape_spread: false,
-                        value: record @ Expr::RecordLiteral { .. },
-                        ..
-                    },
-                ] = args
-                else {
-                    return reject(
-                        self,
-                        "'new { ... }' requires construction fields".to_string(),
-                    );
-                };
-                if matches!(
-                    record,
-                    Expr::RecordLiteral { fields, values, .. }
-                        if fields.is_empty() && values.is_empty()
-                ) {
-                    return match expected {
-                        Ty::Record(fields) if fields.is_empty() => Ty::Record(Vec::new()),
-                        Ty::Record(fields) => {
-                            for (name, _) in fields {
-                                self.add_error(
-                                    "invalid_contextual_construction",
-                                    format!("missing required field '{name}'"),
-                                    span,
-                                );
-                            }
-                            materialize_type(expected)
-                        }
-                        _ => {
-                            self.diagnostics.push(
-                                Diagnostic::error(
-                                    "missing_empty_construction_target",
-                                    "empty construction 'new {}' requires an expected concrete type",
-                                    span,
-                                )
-                                .with_help(
-                                    "use '()' for Unit or specify the intended construction type, such as 'value {} = new {}'",
-                                ),
-                            );
-                            Ty::Unknown
-                        }
-                    };
-                }
-                let record_expected = if matches!(expected, Ty::Record(_)) {
-                    expected
-                } else {
-                    &Ty::Unknown
-                };
-                return self.check_expr_against(record, record_expected);
-            }
-        } else if expected.is_any() {
+        if !uses_brace_syntax && expected.is_any() {
             return reject(
                 self,
                 "contextual 'new(...)' cannot target Any; use an explicit concrete constructor"
@@ -20131,7 +20093,7 @@ fn main() Unit {
     y = 5
     named Point = Point { x, y }
     instance ClassPoint = ClassPoint { x, y }
-    anonymous { x Int, y Int } = new { x, y }
+    anonymous { x Int, y Int } = { x: x, y: y }
     explicit Point = Point { x, y }
     OS.println(named.x + instance.y + anonymous.x + explicit.y)
 }
@@ -20148,7 +20110,7 @@ fn main() Unit {
 fn main() Unit {
     x = 4
     y = 5
-    point { x Int, z Int } = new { x, y }
+    point { x Int, z Int } = { x: x, y: y }
 }
 "#,
         );
@@ -20182,7 +20144,7 @@ fn main() Unit {
     source = StoredRollup { count: 2, total: 7, internalId: 99 }
     named Rollup = Rollup { count: source.count, total: source.total }
     explicit Rollup = { count: source.count, total: source.total }
-    contextual Rollup = new { count: source.count, total: source.total }
+    contextual Rollup = { count: source.count, total: source.total }
 }
 "#,
         );
@@ -20707,7 +20669,7 @@ type Position = Point
 
 fn main() Unit {
     worker Worker = new("Ada", 42)
-    point Position = new { x: 4, y: 5 }
+    point Position = { x: 4, y: 5 }
 }
 "#,
         );
@@ -20822,27 +20784,27 @@ shape EmptyShape {}
 fn noop() Unit {}
 fn noop2() = ()
 
-fn makeEmpty() EmptyClass = new {}
+fn makeEmpty() EmptyClass = EmptyClass {}
 
 fn accept(value EmptyClass) Unit = ()
 
 fn main() Unit {
-    instance EmptyClass = new {}
-    defaulted DefaultedClass = new {}
+    instance EmptyClass = {}
+    defaulted DefaultedClass = {}
     explicit = ExplicitEmpty()
     marker EmptyShape = {}
-    values Vector[Str] = new {}
-    lookup Map[Str, Int] = new {}
-    set Set[Str] = new {}
+    values Vector[Str] = {}
+    lookup Map[Str, Int] = {}
+    set Set[Str] = {}
     nothing Unit = ()
-    anonymous {} = new {}
+    anonymous {} = {}
     structural {} = {}
     widened Any = anonymous
-    accept(new {})
+    accept(EmptyClass {})
     result Unit = noop2()
     methodResult Unit = defaulted.noop()
     callback fn() Unit = () => ()
-    shapeCallback fn() {} = () => new {}
+    shapeCallback fn() {} = () => {}
     callbackResult = { ...shapeCallback(), value: 1 }
 }
 "#,
@@ -20893,11 +20855,11 @@ interface Marker {}
 
 fn main() Unit {
     untyped = {}
-    forced = new {}
+    forced = {}
     widened Any = {}
-    forcedWidened Any = new {}
+    forcedWidened Any = {}
     abstract Marker = {}
-    forcedAbstract Marker = new {}
+    forcedAbstract Marker = {}
 }
 "#,
         );
@@ -20927,7 +20889,7 @@ class Required {
     value Int
 }
 
-fn constructed() Required = new {}
+fn constructed() Required = {}
 
 fn body() Required {}
 "#,
@@ -20954,7 +20916,7 @@ fn body() Required {}
     }
 
     #[test]
-    fn allows_field_braces_and_forced_braces_across_contexts() {
+    fn allows_declaration_braces_and_contextual_shape_fields() {
         let program = parse_inline(
             r#"
 shape Point {
@@ -20991,17 +20953,17 @@ fn main() Unit {
     age = 42
 
     point Point = { x: 1, y: 2 }
-    punned Point = new { x, y }
+    punned Point = { x: x, y: y }
     user User = User { name: "Ada", age: 42 }
-    other User = new { name, age }
+    other User = { name: name, age: age }
     _ Point = makePoint(6, 7)
-    save(new { name: "Ben", age: 30 })
+    save(User { name: "Ben", age: 30 })
 
     rollups [Str: Rollup] = []
-    rollups["main"] := new { count: 0, total: 0 }
+    rollups["main"] := { count: 0, total: 0 }
 
-    anonymous = new { x, y }
-    widened Any = new { x, y }
+    anonymous = { x: x, y: y }
+    widened Any = { x: x, y: y }
 }
 "#,
         );
@@ -21022,7 +20984,7 @@ shape UserData {
 }
 
 fn main() Unit {
-    fresh User = new { name: "Ada" }
+    fresh User = { name: "Ada" }
     data = UserData { name: "Grace" }
     explicit User = User { ...data }
     existing User = data
@@ -21058,10 +21020,10 @@ shape Point {
 fn main() Unit {
     larger = { x: 1, y: 2, yy: 3 }
     projected Point = { ...larger }
-    forcedProjection Point = new { ...larger }
+    forcedProjection Point = { ...larger }
 
     typo Point = { x: 1, y: 2, yy: 3 }
-    forcedTypo Point = new { x: 1, y: 2, yy: 3 }
+    forcedTypo Point = { x: 1, y: 2, yy: 3 }
 }
 "#,
         );
@@ -21090,7 +21052,7 @@ fn main() Unit {
     spread { x Int, y Int } = { ...wider }
 
     typo { x Int, y Int } = { x: 1, y: 2, yy: 3 }
-    forcedTypo { x Int, y Int } = new { x: 1, y: 2, yy: 3 }
+    forcedTypo { x Int, y Int } = { x: 1, y: 2, yy: 3 }
 }
 "#,
         );
@@ -21170,7 +21132,7 @@ fn main() {{
     original = Point3D(1, 2, 3)
     named = Point {{ ...original }}
     typed Point = {{ ...original }}
-    forced Point = new {{ ...original }}
+    forced Point = {{ ...original }}
     anonymous {{ x Int, y Int }} = {{ ...original }}
     empty {{}} = {{ ...original }}
     identical Point = Position(2, 1)
@@ -21233,7 +21195,7 @@ fn main() Unit {
     }
 
     #[test]
-    fn allows_optional_new_for_shapes_and_requires_it_for_contextual_classes() {
+    fn allows_directly_typed_class_and_shape_initializers() {
         let program = parse_inline(
             r#"
 shape Point {
@@ -21247,9 +21209,9 @@ class User {
 
 fn main() Unit {
     point Point = { x: 1, y: 2 }
-    explicitPoint Point = new { x: 3, y: 4 }
+    explicitPoint Point = { x: 3, y: 4 }
     user User = User { name: "Ada" }
-    explicitUser User = new { name: "Grace" }
+    explicitUser User = { name: "Grace" }
 }
 "#,
         );
@@ -21258,7 +21220,46 @@ fn main() Unit {
     }
 
     #[test]
-    fn rejects_bare_field_braces_for_class_construction() {
+    fn class_targets_are_local_to_direct_declaration_initializers() {
+        let accepted =
+            check_path(workspace_root().join("examples/features/declaration_construction.lum"))
+                .unwrap();
+        assert!(
+            accepted.diagnostics.is_empty(),
+            "{:#?}",
+            accepted.diagnostics
+        );
+        for body in [
+            "fn build() User = new(\"Ada\")",
+            "fn build() User = { name: \"Ada\" }",
+            "fn main() { accept(new(\"Ada\")) }",
+            "fn main() { accept(({ name: \"Ada\" })) }",
+            "fn main() { team Team = { leader: new(\"Ada\") } }",
+            "fn main() { team Team = { leader: { name: \"Ada\" } } }",
+            "fn main() { users [User] = [{ name: \"Ada\" }] }",
+            "fn main() { pair (User, User) = (new(\"Ada\"), new(\"Lin\")) }",
+            "fn main() { user User = if true { { name: \"Ada\" } } else { User(\"Lin\") } }",
+            "fn main() { values [Str: User] = []\nvalues[\"key\"] := new(\"Ada\") }",
+            "fn other(user User = { name: \"Ada\" }) {}",
+        ] {
+            let source = format!(
+                "class User {{ name Str }}\nclass Team {{ leader User }}\nfn accept(user User) {{}}\n{body}"
+            );
+            let result = check_program(&parse_inline(&source));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code
+                        == "class_construction_requires_explicit_target"),
+                "{body}: {:#?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_class_construction_outside_directly_typed_initializers() {
         let program = parse_inline(
             r#"
 class User {
@@ -21279,25 +21280,25 @@ fn accept(user User) Unit = ()
 
 fn main() Unit {
     profile Profile = { name: "Ada" }
-    contextual User = new { name: "Ada" }
+    contextual User = { name: "Ada" }
     explicit User = User { name: "Ada" }
     invalid User = { name: "Ada" }
     accept({ name: "Argument" })
-    team Team = new { leader: { name: "Nested" } }
+    team Team = { leader: { name: "Nested" } }
     users [Str: User] = []
     users["indexed"] := { name: "Indexed" }
 }
 "#,
         );
         let result = check_program(&program);
-        assert_eq!(result.diagnostics.len(), 5, "{:#?}", result.diagnostics);
+        assert_eq!(result.diagnostics.len(), 4, "{:#?}", result.diagnostics);
         assert!(
             result.diagnostics.iter().all(|diagnostic| {
-                diagnostic.code == "class_construction_requires_new"
+                diagnostic.code == "class_construction_requires_explicit_target"
                     && diagnostic
                         .message
                         .contains("bare field braces cannot construct class 'User'")
-                    && diagnostic.message.contains("new { ... }")
+                    && diagnostic.message.contains("{ ... }")
                     && diagnostic.message.contains("User { ... }")
             }),
             "{:#?}",
@@ -21353,8 +21354,8 @@ class Success { message Str }
 class Failure { message Str }
 
 fn main() Unit {
-    value Named = new { name: "Ada" }
-    result Success | Failure = new { message: "no target" }
+    value Named = { name: "Ada" }
+    result Success | Failure = { message: "no target" }
 }
 "#,
         );
@@ -21375,8 +21376,8 @@ fn main() Unit {
     fn rejects_contextual_construction_that_would_choose_an_overload_target() {
         let program = parse_inline(
             r#"
-class User { name Str }
-class Admin { name Str }
+shape User { name Str }
+shape Admin { name Str }
 
 class Saver {
     fn save(user User) Unit = ()
@@ -21385,17 +21386,17 @@ class Saver {
 
 fn main(ready Bool) Unit {
     saver = Saver()
-    saver.save(new { name: "Ada" })
-    saver.save((new { name: "Grace" }))
+    saver.save({ name: "Ada" })
+    saver.save(({ name: "Grace" }))
     saver.save(new("Linus"))
     saver.save((new("Margaret")))
     saver.save(if ready {
-        new { name: "Barbara" }
+        { name: "Barbara" }
     } else {
-        new { name: "Evelyn" }
+        { name: "Evelyn" }
     })
     saver.save({
-        new { name: "Annie" }
+        { name: "Annie" }
     })
 }
 "#,
@@ -21432,7 +21433,7 @@ fn main(ready Bool) Unit {
     saver.save(if ready {
         User { name: "Barbara" }
     } else {
-        new { name: "Evelyn" }
+        User { name: "Evelyn" }
     })
 }
 "#,
@@ -21634,7 +21635,7 @@ shape Point {
 }
 
 fn main() Unit {
-    point Point = new { x: 4, y: 5 }
+    point Point = { x: 4, y: 5 }
 }
 "#,
         );
@@ -21775,7 +21776,7 @@ fn main() Unit {
     let User { name, value } = candidate else {
         name = "fallback"
         value = 22
-        new { name, value }
+        { name: name, value: value }
     }
 
     OS.println(pair, name, value)
@@ -23597,7 +23598,7 @@ fn main() Unit {
     explicitSet Set[Str] = Set[Str]()
     contextualSet Set[Str] = Set()
     contextualNewSet Set[Str] = new()
-    contextualBraceSet Set[Str] = new {}
+    contextualBraceSet Set[Str] = {}
     inferredSet = Set[Str]()
     anySet Set[Any] = Set[Any]()
 
@@ -23637,7 +23638,7 @@ fn main() Unit {
         let program = parse_inline(
             r#"
 fn main() Unit {
-    values Set[Str] = new { item: "Ada" }
+    values Set[Str] = { item: "Ada" }
 }
 "#,
         );
@@ -24495,11 +24496,11 @@ fn main(formatter Formatter) Unit {
     fn filters_contextual_construction_targets_using_other_arguments() {
         let program = parse_inline(
             r#"
-class User {
+shape User {
     name Str
 }
 
-class Admin {
+shape Admin {
     name Str
 }
 
@@ -24515,8 +24516,8 @@ class Wrapper {
 
 fn main() Unit {
     saver = Saver()
-    result Str = saver.save(1, new { name: "Ada" })
-    wrapped = Wrapper(1, new { name: "Grace" })
+    result Str = saver.save(1, { name: "Ada" })
+    wrapped = Wrapper(1, { name: "Grace" })
     println(result)
 }
 "#,

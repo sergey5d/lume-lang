@@ -1,11 +1,11 @@
 # FAIL_REGEX:
 # .*contextual construction matches multiple concrete overload targets.*
 
-class User {
+shape User {
     name Str
 }
 
-class Admin {
+shape Admin {
     name Str
 }
 
@@ -16,5 +16,5 @@ class Saver {
 
 fn main() Unit {
     saver = Saver()
-    saver.save(new { name: "Ada" })
+    saver.save(new("Ada"))
 }

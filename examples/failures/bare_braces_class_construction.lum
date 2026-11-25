@@ -1,10 +1,9 @@
 # FAIL_REGEX:
-# .*bare field braces cannot construct class 'User'; use 'new \{ \.\.\. \}' or 'User \{ \.\.\. \}'.*
+# .*bare field braces cannot construct class 'User' outside a directly typed declaration.*
 
 class User {
     name Str
 }
 
-fn main() Unit {
-    user User = { name: "Ada" }
-}
+fn accept(user User) {}
+fn main() { accept({ name: "Ada" }) }

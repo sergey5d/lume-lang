@@ -43,7 +43,7 @@ fn contextualNewFallback(value Any) Str {
     let SomeClass { field1, field2 as length } = value else {
         field1 = "new1"
         length = "new2"
-        new { field1, length }
+        { field1: field1, length: length }
     }
     field1 + " " + length
 }

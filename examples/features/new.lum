@@ -16,7 +16,7 @@ class Worker {
     age Int
 }
 
-fn origin() Point = new {
+fn origin() Point = {
     x: 0
     y: 0
 }
@@ -27,28 +27,28 @@ fn describe(worker Worker) Str =
 fn main() Unit {
     x = 1
     y = 2
-    point Point = new { x, y }
+    point Point = { x: x, y: y }
     positional Point = new(3, 4)
     zero = origin()
 
     workers [Str: Point] = []
-    workers["home"] := new {
+    workers["home"] := {
         x: 11
         y: 12
     }
     stored = workers["home"]!
 
-    anonymous = new {
+    anonymous = {
         name: "sample"
         count: 2
     }
-    empty {} = new {}
-    widened Any = new { x, y }
+    empty {} = {}
+    widened Any = { x: x, y: y }
 
     println("point", point.x + point.y)
     println("positional", positional.x + positional.y)
     println("origin", zero.x, zero.y)
-    println("worker", describe(new { name: "Ada", age: 42 }))
+    println("worker", describe(Worker { name: "Ada", age: 42 }))
     println("stored", stored.x, stored.y)
     println("anonymous", anonymous.name, anonymous.count)
 }

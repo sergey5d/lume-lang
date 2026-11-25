@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*empty construction 'new \{\}' requires an expected concrete type.*
+# .*'new \{ \.\.\. \}' was removed.*
 
 fn main() Unit {
     value = new {}

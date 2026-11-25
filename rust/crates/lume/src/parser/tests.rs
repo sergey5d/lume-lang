@@ -2913,38 +2913,22 @@ fn parses_contextual_new_forms() {
     assert!(matches!(
         parse_expr_only("new(\"Ada\", 42)"),
         Expr::ContextualNew {
-            uses_brace_syntax: false,
             ref args,
             ..
         } if args.len() == 2
     ));
 
-    assert!(matches!(
-        parse_expr_only("new { x: 10, y: 20 }"),
-        Expr::ContextualNew {
-            uses_brace_syntax: true,
-            ref args,
-            ..
-        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 2)
-    ));
-
-    assert!(matches!(
-        parse_expr_only("new { x, y }"),
-        Expr::ContextualNew {
-            uses_brace_syntax: true,
-            ref args,
-            ..
-        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, .. }, .. }] if fields.len() == 2)
-    ));
-
-    assert!(matches!(
-        parse_expr_only("new {}"),
-        Expr::ContextualNew {
-            uses_brace_syntax: true,
-            ref args,
-            ..
-        } if matches!(args.as_slice(), [CallArg { value: Expr::RecordLiteral { fields, values, .. }, .. }] if fields.is_empty() && values.is_empty())
-    ));
+    for source in ["new { x: 10, y: 20 }", "new { x, y }", "new {}"] {
+        let result = parse(&format!("value = {source}"));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "removed_new_braces"),
+            "{source}: {:?}",
+            result.diagnostics
+        );
+    }
 }
 
 #[test]
@@ -2979,7 +2963,7 @@ fn blockBody() Unit {}
 
 fn lambdas() Unit {
     emptyCallback = () => {}
-    shapeCallback = () => new {}
+    shapeCallback = () => {}
 }
 "#,
     );
@@ -3033,7 +3017,7 @@ fn lambdas() Unit {
         [Expr::Lambda {
             body: LambdaBody::Expr(expr),
             ..
-        }] if matches!(expr.as_ref(), Expr::ContextualNew { .. })
+        }] if matches!(expr.as_ref(), Expr::RecordLiteral { .. })
     ));
 }
 
@@ -4329,7 +4313,7 @@ fn run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
         field1: "fallback"
         length: "fallback"
     }
-    let SomeClass { field1 as first, field2 as second } = value else new {
+    let SomeClass { field1 as first, field2 as second } = value else {
         first: "left"
         second: "right"
     }
@@ -4338,7 +4322,7 @@ fn run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
     let {
         a <- left
         c <- right
-    } else new {
+    } else {
         a: "left"
         c: "right"
     }
@@ -4370,7 +4354,7 @@ fn run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
     assert!(matches!(
         named.else_block.statements.as_slice(),
         [Stmt::Expr(ExprStmt {
-            expr: Expr::ContextualNew { .. },
+            expr: Expr::RecordLiteral { .. },
             ..
         })]
     ));
@@ -4391,7 +4375,7 @@ fn run(value Any, left Str?, right Str?, maybePair (Str, Str)?) Unit {
     assert!(matches!(
         grouped.else_block.statements.as_slice(),
         [Stmt::Expr(ExprStmt {
-            expr: Expr::ContextualNew { .. },
+            expr: Expr::RecordLiteral { .. },
             ..
         })]
     ));

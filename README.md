@@ -54,15 +54,16 @@ Construction is its own idea:
   class constructor.
 - `Type { field: value }` fills constructor inputs by field name.
 - `Type(value)` fills explicit constructors, implicit visible-field constructors, or named shape fields by declaration order.
-- `new { field }` forces ambiguous braces to be construction; it uses an
-  expected concrete class or shape target when available and otherwise infers
-  an anonymous shape from nonempty fields. Contextual class construction always
-  requires `new`.
+- `value Class = { field: input }` uses the explicit declaration type as its
+  class construction target. At calls, returns, and nested inputs, name the
+  class explicitly as `Class { field: input }`.
 - `{ field: value }` constructs the expected shape when one exists and otherwise
-  synthesizes an anonymous shape. It does not construct a class.
+  synthesizes an anonymous shape, except for the directly typed declaration
+  shorthand above. `{ field }` remains a block; use `Type { field }` for punning.
 - `new(value)` requires an expected constructible target with a known positional
   input order. That target may be a class, a named shape, or an explicitly
-  written anonymous shape schema.
+  written anonymous shape schema. A class target must come from the direct
+  declaration's explicit type, not a call parameter or return context.
 - If a class has no explicit `new`, the compiler synthesizes field construction
   from visible fields.
 

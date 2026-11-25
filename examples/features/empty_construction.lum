@@ -12,15 +12,15 @@ fn noop() {}
 
 fn noop2() = ()
 
-fn createCache() Cache = new {}
+fn createCache() Cache = Cache {}
 
 fn accept(cache Cache) Int = cache.value
 
 fn main() Unit {
-    cache Cache = new {}
+    cache Cache = {}
     marker Marker = {}
     structural {} = {}
-    forced {} = new {}
+    forced {} = {}
     nothing Unit = ()
     explicitUnit = ()
     widened Any = forced
@@ -28,5 +28,5 @@ fn main() Unit {
     noop()
     noop2()
     println(cache.value)
-    println(accept(new {}))
+    println(accept(Cache {}))
 }

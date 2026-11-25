@@ -9398,21 +9398,21 @@ mod tests {
             fn noop2() = ()
 
             fn main() Unit {
-                counter Counter = new {}
-                defaulted Defaulted = new {}
+                counter Counter = {}
+                defaulted Defaulted = {}
                 marker Marker = {}
-                values Vector[Str] = new {}
-                lookup Map[Str, Int] = new {}
-                set Set[Str] = new {}
+                values Vector[Str] = {}
+                lookup Map[Str, Int] = {}
+                set Set[Str] = {}
                 nothing Unit = ()
-                anonymous {} = new {}
+                anonymous {} = {}
                 structural {} = {}
                 widened Any = anonymous
                 extended = { ...anonymous, value: 2 }
                 positional { x Int, y Int } = new(1, 2)
                 reversed { y Int, x Int } = new(3, 4)
                 callback fn() Unit = () => ()
-                shapeCallback fn() {} = () => new {}
+                shapeCallback fn() {} = () => {}
                 callbackResult = { ...shapeCallback(), value: 3 }
                 callback()
                 noop()
@@ -9468,7 +9468,7 @@ mod tests {
             }
 
             fn main() Unit {
-                config Config = new {
+                config Config = {
                     enabled: false
                     retries: RetrySettings()
                     explicit: ExplicitSettings()
@@ -9477,7 +9477,7 @@ mod tests {
                     files: []
                     counts: []
                 }
-                changed Config = new { ...config, label: "changed" }
+                changed Config = { ...config, label: "changed" }
                 anonymous { enabled Bool, files [Str] } = { enabled: false, files: [] }
 
                 println(
@@ -10176,7 +10176,7 @@ mod tests {
                     explicitRecorder.values[0], explicitRecorder.values[1])
 
                 contextualRecorder = Recorder {}
-                contextual Pair = new {
+                contextual Pair = {
                     second: contextualRecorder.mark(2)
                     first: contextualRecorder.mark(1)
                 }
@@ -10353,7 +10353,7 @@ mod tests {
             }
 
             fn main() Unit {
-                set Set[Str] = new {}
+                set Set[Str] = {}
                 map Map[Str, Int] = Map[Str, Int]()
                 inferred = Box("hello")
                 contextual Box[Str] = new("world")
@@ -10420,10 +10420,10 @@ mod tests {
             fn named() Rollup? = source().map(r => Rollup { ...r })
             fn bareFields() Rollup? = source().map(r => { ...r })
             fn implicitShape() Rollup? = source().map(r => { ...r })
-            fn contextualNew() Rollup? = source().map(r => new { ...r })
+            fn contextualNew() Rollup? = source().map(r => { ...r })
             fn namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
             fn bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
-            fn contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
+            fn contextualNewMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
 
             fn main() Unit {
                 println(named()!.total)
@@ -10512,7 +10512,7 @@ mod tests {
 
                 projected Point = Point { ...first }
                 contextual Point = { ...first }
-                forced Point = new { ...first }
+                forced Point = { ...first }
                 updated Point = { ...first, x: 4 }
                 println(projected == concrete)
                 println(contextual == concrete)
@@ -12575,6 +12575,23 @@ fn main() Unit {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "original local\n");
+    }
+
+    #[test]
+    fn runs_directly_typed_global_class_construction() {
+        let program = lower_inline(
+            r#"
+            class User {
+                name Str
+                new(rawName Str) { this.name = rawName.toUpper() }
+            }
+            user User = { rawName: "global" }
+            fn main() { println(user.name) }
+            "#,
+        );
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "GLOBAL\n");
     }
 
     #[test]

@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*class construction outside a directly typed declaration must name its target.*
+
+class User { name Str }
+fn accept(user User) {}
+fn main() { accept(new("Ada")) }

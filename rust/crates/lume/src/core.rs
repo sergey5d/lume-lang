@@ -325,7 +325,6 @@ pub enum Expr {
     },
     ContextualNew {
         args: Vec<CallArg>,
-        style: CallStyle,
         span: Span,
     },
     Member {

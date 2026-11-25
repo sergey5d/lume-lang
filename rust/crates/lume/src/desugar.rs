@@ -197,22 +197,10 @@ pub fn desugar_expr(expr: &ast::Expr) -> core::Expr {
                 span: *span,
             }
         }
-        ast::Expr::ContextualNew {
-            args,
-            uses_brace_syntax,
-            span,
-        } => {
-            let style = if *uses_brace_syntax {
-                core::CallStyle::Brace
-            } else {
-                core::CallStyle::Paren
-            };
-            core::Expr::ContextualNew {
-                args: args.iter().map(desugar_call_arg).collect(),
-                style,
-                span: *span,
-            }
-        }
+        ast::Expr::ContextualNew { args, span } => core::Expr::ContextualNew {
+            args: args.iter().map(desugar_call_arg).collect(),
+            span: *span,
+        },
         ast::Expr::Member {
             receiver,
             name,

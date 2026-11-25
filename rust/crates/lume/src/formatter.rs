@@ -1770,6 +1770,23 @@ fn main() {
     }
 
     #[test]
+    fn formats_direct_declaration_construction_and_rejects_removed_new_braces() {
+        assert_formatted(
+            "class User {name Str}\nfn main(){\nuser User={name:\"Ada\"}\n}\n",
+            "class User { name Str }\nfn main() {\n    user User = { name: \"Ada\" }\n}\n",
+        );
+        let source = "fn main() { user User = new { name: \"Ada\" } }\n";
+        let result = format(source);
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "removed_new_braces")
+        );
+        assert_eq!(result.text, source);
+    }
+
+    #[test]
     fn formats_mixin_constructor_arguments() {
         assert_formatted(
             "class Owner {\nmix Parts(1,2)\nmix Named {value:calculate( 3 )}\nmix Generic[Option[Int]](None)\n}\n",

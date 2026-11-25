@@ -39,5 +39,5 @@ fn main() Unit {
     }))
 
     saver = Saver()
-    println(saver.save(1, new { name: "Ada" }))
+    println(saver.save(1, User { name: "Ada" }))
 }

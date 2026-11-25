@@ -2378,11 +2378,7 @@ impl<'a> FunctionLowerer<'a> {
                     _ => None,
                 });
             match tail {
-                Some(Expr::RecordLiteral { .. })
-                | Some(Expr::ContextualNew {
-                    style: core::CallStyle::Brace,
-                    ..
-                }) => Some(ir::Type::Record(
+                Some(Expr::RecordLiteral { .. }) => Some(ir::Type::Record(
                     bindings
                         .iter()
                         .map(|binding| ir::NamedType {
@@ -5314,10 +5310,6 @@ impl<'a> FunctionLowerer<'a> {
                     .map(|item| self.infer_expr_type_with_overrides(item, overrides))
                     .collect(),
             ),
-            Expr::ContextualNew { args, style, .. } if *style == core::CallStyle::Brace => args
-                .first()
-                .map(|arg| self.infer_expr_type_with_overrides(&arg.value, overrides))
-                .unwrap_or(ir::Type::Unknown),
             Expr::ContextualNew { .. } => ir::Type::Unknown,
             Expr::RecordLiteral { fields, values, .. } => {
                 if fields.is_empty() && !values.is_empty() {
@@ -7497,37 +7489,8 @@ impl<'a> FunctionLowerer<'a> {
                     structural,
                 })
             }
-            Expr::ContextualNew { args, style, span } => {
-                if *style == core::CallStyle::Brace
-                    && expected.is_none_or(|ty| {
-                        self.named_construct_fields(ty).is_none()
-                            && !matches!(
-                                ty,
-                                ir::Type::Named { name, .. }
-                                    if runtime_collection_constructor_name(name)
-                                        || self.named_type_has_explicit_constructors(name)
-                            )
-                    })
-                {
-                    let [
-                        core::CallArg {
-                            from_shape_spread: false,
-                            value: record @ Expr::RecordLiteral { .. },
-                            ..
-                        },
-                    ] = args.as_slice()
-                    else {
-                        self.invariant(
-                            "'new { ... }' should contain one record literal before lowering",
-                            *span,
-                        );
-                        return Some(ir::RValue::Use(ir::Operand::Const(ir::Constant::Unit)));
-                    };
-                    return self.lower_rvalue_with_expected(record, expected);
-                }
-                if *style == core::CallStyle::Paren
-                    && let Some(ir::Type::Record(fields)) = expected
-                {
+            Expr::ContextualNew { args, span } => {
+                if let Some(ir::Type::Record(fields)) = expected {
                     return Some(ir::RValue::Record(
                         fields
                             .iter()
@@ -7552,7 +7515,7 @@ impl<'a> FunctionLowerer<'a> {
                         span: *span,
                     }),
                     args: args.clone(),
-                    style: *style,
+                    style: core::CallStyle::Paren,
                     span: *span,
                 };
                 self.lower_rvalue_with_expected(&call, expected)
@@ -8537,17 +8500,6 @@ impl<'a> FunctionLowerer<'a> {
         Some(ir::RValue::Construct {
             ty: expected.clone(),
             fields: lowered_fields,
-        })
-    }
-
-    fn named_type_has_explicit_constructors(&self, name: &str) -> bool {
-        self.program.types.iter().any(|ty| {
-            ty.name == name
-                && ty.methods.iter().copied().any(|id| {
-                    self.program
-                        .function(id)
-                        .is_some_and(|function| function.name == "new")
-                })
         })
     }
 

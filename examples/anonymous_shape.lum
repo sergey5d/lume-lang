@@ -21,7 +21,7 @@ fn makeCounter(base Int) { count Int, next Int } {
 }
 
 fn makeUser(name Str, age Int) { name Str, age Int } =
-    new { name, age }
+    { name: name, age: age }
 
 fn main() Unit {
     full = {
@@ -33,7 +33,7 @@ fn main() Unit {
         name: "Ben"
         age: 12
     }
-    empty {} = new {}
+    empty {} = {}
     a = 1
     inferred = {
         count: a
@@ -48,7 +48,7 @@ fn main() Unit {
     positional { name Str, age Int } = { name: "Ben", age: 12 }
     name = "Cara"
     age = 14
-    contextual { name Str, age Int } = new { name, age }
+    contextual { name Str, age Int } = { name: name, age: age }
 
     println(describe({ ...full }))
     println(describe(smaller))

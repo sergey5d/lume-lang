@@ -3976,11 +3976,7 @@ impl<'a> SourceBodyEmitter<'a> {
             let _ = name;
         } else {
             let expected = match &tail.expr {
-                core::Expr::RecordLiteral { .. }
-                | core::Expr::ContextualNew {
-                    style: core::CallStyle::Brace,
-                    ..
-                } => ir::Type::Record(
+                core::Expr::RecordLiteral { .. } => ir::Type::Record(
                     materialized
                         .iter()
                         .map(|(name, _, ty)| ir::NamedType {
@@ -8055,67 +8051,8 @@ impl<'a> SourceBodyEmitter<'a> {
                 }];
                 self.emit_call(&callee, &args, *span, core::CallStyle::Brace, bindings)
             }
-            core::Expr::ContextualNew { args, style, span } => {
-                if let [
-                    core::CallArg {
-                        from_shape_spread: false,
-                        value: core::Expr::RecordLiteral { fields, values, .. },
-                        ..
-                    },
-                ] = args.as_slice()
-                {
-                    if let Some(emitted) =
-                        self.emit_record_literal_against(fields, values, bindings, expected)
-                    {
-                        return Some(emitted);
-                    }
-                    if let ir::Type::Named { name, .. } = expected
-                        && matches!(
-                            name.as_str(),
-                            "Array" | "LinkedList" | "Map" | "Set" | "Vector"
-                        )
-                    {
-                        let callee = core::Expr::Identifier {
-                            name: name.clone(),
-                            span: *span,
-                        };
-                        return self.emit_call(&callee, args, *span, *style, bindings);
-                    }
-                    if let ir::Type::Named { name, .. } = expected
-                        && self.type_has_explicit_constructor(name)
-                    {
-                        let callee = core::Expr::Identifier {
-                            name: name.clone(),
-                            span: *span,
-                        };
-                        return self.emit_call(
-                            &callee,
-                            fields,
-                            *span,
-                            core::CallStyle::Paren,
-                            bindings,
-                        );
-                    }
-                    let inferred = self
-                        .source_expr_type(*span)
-                        .or_else(|| self.expr_type(&args[0].value, bindings))?;
-                    if let Some(emitted) =
-                        self.emit_record_literal_against(fields, values, bindings, &inferred)
-                    {
-                        return Some(emitted);
-                    }
-                    let ir::Type::Named { name, .. } = expected else {
-                        return None;
-                    };
-                    let callee = core::Expr::Identifier {
-                        name: name.clone(),
-                        span: *span,
-                    };
-                    return self.emit_call(&callee, args, *span, *style, bindings);
-                }
-                if *style == core::CallStyle::Paren
-                    && let ir::Type::Record(fields) = expected
-                {
+            core::Expr::ContextualNew { args, span } => {
+                if let ir::Type::Record(fields) = expected {
                     if fields.len() != args.len() || args.iter().any(|arg| arg.name.is_some()) {
                         return None;
                     }
@@ -8135,7 +8072,7 @@ impl<'a> SourceBodyEmitter<'a> {
                         span: *span,
                     }),
                     args: args.clone(),
-                    style: *style,
+                    style: core::CallStyle::Paren,
                     span: *span,
                 };
                 self.emit_expr(&call, bindings)
@@ -8491,18 +8428,6 @@ impl<'a> SourceBodyEmitter<'a> {
                     .or_else(|| field.has_initializer.then(|| java_default_value(&field.ty)))
             })
             .collect()
-    }
-
-    fn type_has_explicit_constructor(&self, name: &str) -> bool {
-        self.bundle.ir.types.iter().any(|ty| {
-            ty.name == name
-                && ty.methods.iter().copied().any(|id| {
-                    self.bundle
-                        .ir
-                        .function(id)
-                        .is_some_and(|function| function.name == "new")
-                })
-        })
     }
 
     fn emit_reordered_record_literal(

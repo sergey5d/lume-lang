@@ -1406,23 +1406,23 @@ Braces carry several meanings. Classification is syntactic and uses the tokens
 before the braces and the first entry inside them:
 
 ```txt
-{ field: value }                 # contextual or anonymous shape construction
-{ ...source }                    # contextual or anonymous shape construction
+{ field: value }                 # shape construction, or directly typed class initializer
+{ ...source }                    # same target rules; spread supplies named inputs
 { expression }                   # block expression
-{}                               # empty shape construction; target required
+{}                               # empty construction; target required
 Type { field: value }            # named field construction or union payload
 Type { field }                   # named construction with field punning
 call { x => ... }                # trailing lambda
 object { field Type = value; fn method() Type = value }
 object with Interface { field Type = value; fn method() Type = value }
-new(value, other)                # contextual positional construction
-new { field: value }             # forced named-field construction
-new { field }                    # forced construction with field punning
-new {}                           # forced empty construction; target required
+new(value, other)                # positional construction; class target comes from declaration type
 ```
 
+`new` accepts parentheses, not braces. Named-field construction uses bare
+braces in a directly typed declaration or an explicit `Type { ... }` target.
+
 A single-expression brace such as `{ value }` is a block, not an anonymous
-shape. Use `new { value }` when `value` is a punned field. Unit values use `()`.
+shape. Write `{ value: value }` or `Type { value }` for construction. Unit values use `()`.
 Braces required by declarations and control-flow constructs remain body
 delimiters:
 
@@ -1431,7 +1431,7 @@ class Marker {}
 fn noop() Unit {}
 fn noop2() = ()
 fn invalid() Unit = {}       # error: construction, not Unit
-fn make() EmptyUser = new {} # contextual class construction
+fn make() EmptyUser = EmptyUser {} # explicit class construction
 ```
 
 A leading labeled field or spread selects construction; otherwise bare braces
@@ -1470,9 +1470,15 @@ points = for value <- values yield {
 
 ### Target selection
 
-The type checker applies bare construction fields to a named or anonymous shape
-target supplied by context. Without a shape target, nonempty labeled fields or
-spreads infer an anonymous shape. Bare braces never select a class constructor:
+An explicitly typed binding or stored-field declaration may supply a class
+construction target to its direct initializer. This is declaration shorthand:
+`user User = { name: "Ada" }` invokes the same constructor as
+`user User = User { name: "Ada" }`. Constructor inputs, visibility, defaults,
+and execution are unchanged. Transparent parentheses do not change this rule.
+
+At other sites, a class construction must name the class. Bare fields can still
+use an expected named or anonymous shape schema, or infer an anonymous shape
+when their fields supply the schema:
 
 ```txt
 point Point = {
@@ -1480,7 +1486,7 @@ point Point = {
     y: 20
 }
 
-user User = new {
+user User = {
     name: "Ada"
     age: 42
 }
@@ -1493,25 +1499,22 @@ anonymous = {
 copy = { ...source }
 
 nothing Unit = ()          # Unit value
-user EmptyUser = new {}    # zero-argument contextual class construction
+user EmptyUser = {}        # direct declaration; ordinary zero-input constructor
 names [Str] = []           # empty Vector literal
 
 empty = {}                 # error: no construction target
-empty = new {}             # error: no construction target
 ```
 
-Bare empty braces use an expected named or anonymous shape schema. They do not
-produce `Unit`; write `()` for a Unit value. A class or concrete collection
-requires `new {}` or an explicit constructor, and must satisfy its normal
-zero-argument construction rules. `Any`, an interface, a union, `Unit`, or no
-expected type does not identify a construction target. An empty shape must
-therefore state its schema explicitly:
+Empty braces require a concrete target. A directly typed declaration may supply
+a class or concrete collection; other expression sites may supply a shape.
+The target's normal zero-input construction rules apply. Braces never produce
+`Unit`; write `()` for Unit. `Any`, an interface, a union, or no expected type
+does not identify an empty construction target:
 
 ```txt
 unknown Any = {}       # error: Any is not a concrete target
 nothing Unit = {}      # error: write () for Unit
 empty {} = {}          # explicit empty structural target
-forced {} = new {}     # same target, explicit construction spelling
 point { x Int } = {}   # error: required field x is missing
 ```
 
@@ -1525,16 +1528,17 @@ fn noop2() = ()
 fn invalid() = {} # error: empty construction has no target
 ```
 
-An explicit return type remains an expected construction target, so these are
-different:
+An explicit return type supplies shape context, but does not select a class
+constructor. Name the class in a return expression:
 
 ```txt
-fn createCache() Cache = new {} # construct Cache
+fn createCache() Cache = Cache {} # construct Cache explicitly
+fn invalidCache() Cache = {}      # error: not a directly typed declaration
 fn createCache() Cache {}   # error: empty Unit body does not return Cache
 ```
 
-Context can flow from a typed binding, return type, indexed assignment, or a
-single known function parameter:
+Shape context flows from typed bindings, return types, indexed assignments, and
+known function parameters. Class targets do not flow through those expressions:
 
 ```txt
 fn makePoint(x Int, y Int) Point = {
@@ -1547,12 +1551,12 @@ rollups[key] := {
     total: 0
 }
 
-save(new { name: "Ada", age: 42 })
+save(User { name: "Ada", age: 42 })
+save({ name: "Ada", age: 42 }) # invalid when save expects a class
 ```
 
-Expected constructor-input types also flow into nested construction. The inner
-target therefore does not need to be written when its enclosing input
-determines exactly one concrete class or named shape:
+Expected input types still flow into nested shape construction. A nested class
+construction must name its own target, even inside a directly typed initializer:
 
 ```txt
 class Person {
@@ -1564,38 +1568,33 @@ class Team {
     leader Person
 }
 
-team Team = Team {
-    leader: new {
+team Team = {
+    leader: Person {
         name: "Ada"
         age: 10
     }
 }
 ```
 
-Write the inner target explicitly only when context does not determine it or
-when overload resolution would otherwise have to choose a target.
-
 Field punning is ambiguous inside bare braces because `{ x }` is a block.
-Use `new { ... }` to force construction syntax. A punned field `x` means
-`x: x` and is matched by name, never by position:
+Write a named target to use punning. A punned field `x` means `x: x` and is
+matched by name, never by position:
 
 ```txt
-point Point = new { x, y }
-user User = new { name, age }
-anonymous = new { x, y }
-empty {} = new {}
+point = Point { x, y }
+user = User { name, age }
+anonymous = { x: x, y: y }
+empty {} = {}
 ```
 
-`new { ... }` uses a concrete class or shape target when context supplies
-exactly one. A nonempty construction without a target infers an anonymous
-shape from its fields. Empty construction still requires a target. An inferred
-anonymous shape may then widen to `Any`, but it does not implicitly implement
-an interface or pick one alternative of a union:
+A nonempty construction without a target infers an anonymous shape from its
+fields. An inferred shape may widen to `Any`, but does not implicitly implement
+an interface or choose a nominal union alternative:
 
 ```txt
-value Any = new { x, y }                 # anonymous shape widened to Any
-value Printable = new { x, y }           # invalid
-value Success | Failure = new { message } # invalid: no alternative is chosen
+value Any = { x: x, y: y }                 # anonymous shape widened to Any
+value Printable = { x: x, y: y }           # invalid
+value Success | Failure = { message: text } # invalid: no nominal alternative is chosen
 ```
 
 Expected types continue through parentheses and into corresponding tuple
@@ -1608,15 +1607,6 @@ grouped [Str] = ([])
 pair (Point, Point) = (new(1, 2), new(3, 4))
 points [Point] = for value <- [1, 2] yield new(value, 0)
 rows [[Int]] = for value <- [1, 2] yield []
-```
-
-`new` may remain explicit when constructing a shape even if labeled fields
-already make construction unambiguous. Both forms below construct the same
-shape; a formatter may prefer the shorter first form:
-
-```txt
-point Point = { x: 1, y: 2 }
-point Point = new { x: 1, y: 2 }
 ```
 
 Omitted construction inputs use their declared field or parameter defaults.
@@ -1635,7 +1625,7 @@ missing Person = {} # invalid: family and nickname must be supplied
 ```
 
 Overload resolution first uses argument count, argument names, and the ordinary
-types of independently typed argument expressions. Contextual construction may
+types of independently typed argument expressions. Contextual shape construction may
 then use a parameter type only when one best overload remains. It never breaks a
 remaining tie between concrete targets:
 
@@ -1645,11 +1635,12 @@ class Saver {
     fn save(admin Admin) Unit = ()
 }
 
-saver.save(new { name: "Ada" }) # invalid: ambiguous target
+saver.save({ name: "Ada" }) # invalid: class target must be named
 saver.save(User { name: "Ada" }) # explicit and valid
 ```
 
-Other arguments can make the target unique before construction is checked:
+Other arguments select an overload, but do not make implicit class construction
+available:
 
 ```txt
 class Saver {
@@ -1657,11 +1648,11 @@ class Saver {
     fn save(tag Str, admin Admin) Unit = ()
 }
 
-saver.save(1, new { name: "Ada" }) # valid: the Int argument selects User
+saver.save(1, User { name: "Ada" }) # valid: explicit class construction
 ```
 
 The target can always be named explicitly. `Type { ... }` is named-field
-construction and supports punning without `new`:
+construction and supports punning:
 
 ```txt
 point = Point { x, y }
@@ -1713,12 +1704,12 @@ fn procedure() {
 }
 ```
 
-Class construction must be requested explicitly with `new` or a named class
-constructor. Assigning an already-created structural value remains ordinary
+Class construction uses a named constructor or the direct-declaration shorthand
+defined above. Assigning an already-created structural value remains ordinary
 assignment and never invokes a class constructor:
 
 ```txt
-user User = new { name: "Ada" } # valid: context selects User
+user User = { name: "Ada" }     # valid: directly typed declaration
 other = User { name: "Grace" }  # valid: target is named explicitly
 
 data = { name: "Ada" }
@@ -1732,25 +1723,21 @@ user User = User("Ada", 10)
 maybe = Some(5)
 ```
 
-`new(...)` may omit the type name only when context supplies exactly one class
-or shape schema with a known positional input order:
+`new(...)` uses a known positional input order. A class target must come from
+the direct declaration's explicit type; a shape target may come from ordinary
+expected-type propagation:
 
 ```txt
 worker Worker = new("Ada", 42)
 point { x Int, y Int } = new(10, 20)
+save(new("Ada", 42)) # invalid when save expects a class; use User("Ada", 42)
 ```
 
-Unlike `new { ... }`, positional `new(...)` cannot invent field names and does
-not infer an anonymous shape. A named shape uses declaration order; an explicit
+Positional `new(...)` cannot invent field names and does not infer an anonymous
+shape. A named shape uses declaration order; an explicit
 anonymous shape uses the schema's written field order. Positional `new(...)` is
 rejected without such a target and cannot target an interface, `Any`, union, or
 unconstrained type parameter.
-
-A class constructor target must therefore be uniquely determined, but it does
-not have to be written at the construction site. `User { ... }` names it
-explicitly; `user User = new { ... }` obtains it from the expected type. Bare
-`{ ... }` remains structural shape construction even when the expected type is
-a class, so that spelling is rejected rather than invoking the constructor.
 
 Single-payload declared-union alternatives conventionally use parenthesized
 construction:
@@ -1768,8 +1755,8 @@ none = None
 `shape` is not an expression keyword. It remains available for named shape
 declarations and shape alternatives inside declared unions. Expression-level
 `shape { ... }`, `shape {}`, and
-`shape with Interface { ... }` are invalid. Use field braces, `new { ... }`,
-and `object with Interface { ... }` respectively.
+`shape with Interface { ... }` are invalid. Use field braces with an appropriate
+target, and `object with Interface { ... }` for interface implementations.
 
 ### Shape conversion
 
@@ -1781,11 +1768,10 @@ construct the same narrower `Rollup` value:
 ```txt
 fn named() Rollup? = source().map(r => Rollup { ...r })
 fn fieldBraces() Rollup? = source().map(r => { ...r })
-fn contextualNew() Rollup? = source().map(r => new { ...r })
 ```
 
-`Rollup { ...r }` names the target directly. Bare field braces and contextual
-`new` obtain `Rollup` from the callback's expected return type. In each case,
+`Rollup { ...r }` names the target directly. Bare field braces obtain `Rollup`
+from the callback's expected return type. In each case,
 required target fields must exist with assignable types; extra source fields
 are discarded rather than copied into the narrower result.
 
@@ -1883,7 +1869,7 @@ fn selected() Rollup? = source().map(r => Rollup {
 ```
 
 Only bare identifiers support field punning. Forms such as
-`Rollup { r.total }` and `new { r.total }` are invalid;
+`Rollup { r.total }` is invalid;
 write `total: r.total`. This keeps the constructed field name explicit when the
 value comes from member access. Other unlabeled expressions also remain invalid
 inside construction braces.
@@ -1990,23 +1976,23 @@ A declared union requires at least two alternatives. Each alternative supplies
 its own name; the union name does not stand in for an omitted alternative name.
 
 `shape` is not a construction expression. Anonymous structural values use
-labeled/spread field braces or forced `new { ... }`. Positional construction
+labeled/spread field braces. Positional construction
 requires an existing concrete target, written as `Point(...)` or supplied by a
 unique expected type to `new(...)`.
 
 Tuples do not construct shapes or classes. Class construction follows the
-target-selection rules in [Construction](#construction): use `new { ... }` when
-context supplies the unique target, or name the target explicitly.
+target-selection rules in [Construction](#construction): a directly typed
+declaration supplies the target, or construction names the class explicitly.
 
 ```txt
-user User = new { name: "Ada", age: 10 }
+user User = { name: "Ada", age: 10 }
 person Person = Person("Ben", 12, "NYC")
 profile MixedProfile = {
     name: "Liam"
     age: 8
 }
 tail HiddenTail = new("Ada", 4)
-settings Settings = new {}
+settings Settings = {}
 ```
 
 Named shapes are data-only structural field views:
@@ -2233,11 +2219,9 @@ point Point = (1, 2)                   # invalid: tuple -> named shape
 anon { x Int, y Int } = new(1, 2)      # x = 1, y = 2 from schema order
 reversed { y Int, x Int } = new(1, 2)  # y = 1, x = 2
 unknown = new(1, 2)                    # invalid: no concrete expected target
-user User = new { name: "Ada", age: 10 } # contextual class construction
+user User = { name: "Ada", age: 10 }     # directly typed class construction
 empty = {}                             # invalid: no construction target
-explicitEmpty = new {}                 # invalid: no construction target
 emptyShape {} = {}                     # explicit empty anonymous shape
-forcedEmpty {} = new {}                # same explicit target
 nothing Unit = ()                      # explicit Unit value
 ```
 
@@ -2741,7 +2725,7 @@ For calls containing shape spreads:
 - Two spreads supplying the same input conflict unless an explicit input chooses its value. Spread order never chooses a winner.
 - Every expanded field must name an accepted parameter. Ordinary defaults fill omitted parameters; missing required inputs remain errors.
 - Only named and anonymous shapes expand into named inputs, not classes, maps, `Any`, or unions. A function value without parameter names cannot accept named expansion.
-- Known parameter types supply context to fresh inline shape fields, including empty collections and contextual constructors.
+- Known parameter types supply context to fresh inline shape fields, including empty collections and shape constructors. Class construction still requires an explicit class name at the call site.
 
 An explicit input resolves overlapping spreads regardless of where it appears:
 
@@ -4407,13 +4391,13 @@ let User { name, label as title } = value else {
 let User { name, value } = candidate else {
     name = defaultName
     value = defaultValue
-    new { name, value }
+    { name: name, value: value }
 }
 
 let {
     user <- maybeUser
     account <- maybeAccount
-} else new {
+} else {
     user: fallbackUser
     account: fallbackAccount
 }

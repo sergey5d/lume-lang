@@ -752,7 +752,6 @@ pub enum Expr {
     },
     ContextualNew {
         args: Vec<CallArg>,
-        uses_brace_syntax: bool,
         span: Span,
     },
     Member {

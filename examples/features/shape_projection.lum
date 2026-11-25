@@ -68,7 +68,7 @@ fn main() Unit {
 
     projected Point = Point { ...first }
     contextual Point = { ...first }
-    forced Point = new { ...first }
+    forced Point = { ...first }
     updated Point = { ...first, x: 4 }
     println(projected == concrete)
     println(contextual == concrete)

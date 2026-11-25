@@ -166,7 +166,7 @@ class Counter with Counted { mix CounterParts }
 fn main() {
     owner = ImplicitOwner(5)
     assert(owner.base == 5 && owner.amount == 5 && owner.adjusted == 6)
-    named ImplicitOwner = new { base: 8 }
+    named ImplicitOwner = { base: 8 }
     assert(named.amount == 8)
 
     Trace.text := ""

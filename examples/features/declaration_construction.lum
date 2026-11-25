@@ -1,0 +1,68 @@
+# EXPECT:
+# declaration construction ok
+
+module examples/declaration_construction
+
+class User {
+    name Str
+
+    new(rawName Str = "default") {
+        this.name = rawName.toUpper()
+    }
+}
+
+type Person = User
+
+shape Point {
+    x Int
+    y Int
+}
+
+class Team {
+    leader User
+    point Point
+}
+
+class Holder {
+    user User = { rawName: "field" }
+}
+
+class Payload {
+    point { x Int }
+}
+
+fn describe(user User) Str = user.name
+fn createUser() User = User { rawName: "return" }
+fn createPoint() Point = { x: 4, y: 5 }
+
+fn main() {
+    user User = { rawName: "Ada" }
+    named = User { rawName: "Lin" }
+    empty User = {}
+    alias Person = { rawName: "alias" }
+    positional User = new("positional")
+    payload Payload = new({ x: 7 })
+    grouped User = ({ rawName: "grouped" })
+    team Team = {
+        leader: User { rawName: "nested" }
+        point: { x: 1, y: 2 }
+    }
+    name = "punned"
+    punned = User { rawName: name }
+    anonymous = { name: name }
+    explicitEmpty {} = {}
+
+    assert(user.name == "ADA")
+    assert(named.name == "LIN")
+    assert(empty.name == "DEFAULT")
+    assert(alias.name == "ALIAS")
+    assert(positional.name == "POSITIONAL")
+    assert(payload.point.x == 7)
+    assert(grouped.name == "GROUPED")
+    assert(team.leader.name == "NESTED" && team.point.x == 1)
+    assert(punned.name == "PUNNED" && anonymous.name == "punned")
+    assert(Holder().user.name == "FIELD")
+    assert(describe(User { rawName: "call" }) == "CALL")
+    assert(createUser().name == "RETURN" && createPoint().x == 4)
+    println("declaration construction ok")
+}

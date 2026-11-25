@@ -2295,6 +2295,11 @@ mod tests {
             .unwrap();
         for (path, entrypoint, expected) in [
             (
+                "examples/features/declaration_construction.lum",
+                "examples.declaration_construction.Declaration_constructionMain",
+                "declaration construction ok\n",
+            ),
+            (
                 "examples/features/mixin_aliases.lum",
                 "examples.mixin_aliases.Mixin_aliasesMain",
                 "mixin aliases ok\n",
@@ -4726,24 +4731,24 @@ fn main() Unit {
     point Point = { x: 10, y: 20 }
     x = 3
     y = 4
-    punned Point = new { x, y }
-    worker Worker = new { name: "Ada", age: 42 }
-    labeled LabeledWorker = new { label: "Ben" }
+    punned Point = { x: x, y: y }
+    worker Worker = { name: "Ada", age: 42 }
+    labeled LabeledWorker = { label: "Ben" }
     position Position = new(3, 4)
-    anonymous = new { x, y }
-    empty {} = new {}
+    anonymous = { x: x, y: y }
+    empty {} = {}
     structural {} = {}
     positional { x Int, y Int } = new(1, 2)
     reversed { y Int, x Int } = new(3, 4)
-    emptyWorker EmptyWorker = new {}
-    emptySet Set[Str] = new {}
+    emptyWorker EmptyWorker = {}
+    emptySet Set[Str] = {}
     nothing Unit = ()
     callback fn() Unit = () => ()
-    shapeCallback fn() {} = () => new {}
+    shapeCallback fn() {} = () => {}
     callbackResult = { ...shapeCallback(), value: 4 }
     callback()
-    widened Any = new { x, y }
-    defaults DefaultConfig = new {
+    widened Any = { x: x, y: y }
+    defaults DefaultConfig = {
         enabled: false
         retries: RetrySettings()
         explicit: ExplicitSettings()
@@ -4751,7 +4756,7 @@ fn main() Unit {
         note: None
         files: []
     }
-    changed DefaultConfig = new { ...defaults, label: "changed" }
+    changed DefaultConfig = { ...defaults, label: "changed" }
     person DefaultShape = { family: "" }
     flags { enabled Bool, files [Str] } = { enabled: false, files: [] }
     base = 10
@@ -8586,7 +8591,7 @@ class Box[T] {
 }
 
 fn main() Unit {
-    set Set[Str] = new {}
+    set Set[Str] = {}
     map Map[Str, Int] = Map[Str, Int]()
     inferred = Box("hello")
     contextual Box[Str] = new("world")
@@ -8749,10 +8754,10 @@ fn source() StoredRollup? = Some(StoredRollup {
 fn named() Rollup? = source().map(r => Rollup { ...r })
 fn bareFields() Rollup? = source().map(r => { ...r })
 fn implicitShape() Rollup? = source().map(r => { ...r })
-fn contextualNew() Rollup? = source().map(r => new { ...r })
+fn contextualNew() Rollup? = source().map(r => { ...r })
 fn namedMembers() Rollup? = source().map(r => Rollup { total: r.total, label: r.label })
 fn bareFieldMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
-fn contextualNewMembers() Rollup? = source().map(r => new { total: r.total, label: r.label })
+fn contextualNewMembers() Rollup? = source().map(r => { total: r.total, label: r.label })
 
 fn main() Unit {
     println(named()!.total)
@@ -8902,7 +8907,7 @@ fn main() Unit {
 
     projected Point = Point { ...first }
     contextual Point = { ...first }
-    forced Point = new { ...first }
+    forced Point = { ...first }
     updated Point = { ...first, x: 4 }
     println(projected == concrete)
     println(contextual == concrete)
@@ -9833,7 +9838,7 @@ fn main() Int {
         explicitRecorder.values[0], explicitRecorder.values[1])
 
     contextualRecorder = Recorder {}
-    contextual Pair = new {
+    contextual Pair = {
         second: contextualRecorder.mark(2)
         first: contextualRecorder.mark(1)
     }

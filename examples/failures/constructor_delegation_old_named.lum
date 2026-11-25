@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# .*discarded expression has no effect.*
+# .*'new \{ \.\.\. \}' was removed.*
 
 class User {
     name Str

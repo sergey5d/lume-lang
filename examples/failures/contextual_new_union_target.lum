@@ -10,5 +10,5 @@ class Failure {
 }
 
 fn main() Unit {
-    value Success | Failure = new { message: "unknown" }
+    value Success | Failure = { message: "unknown" }
 }

@@ -6,5 +6,5 @@ interface Named {
 }
 
 fn main() Unit {
-    value Named = new { name: "Ada" }
+    value Named = { name: "Ada" }
 }

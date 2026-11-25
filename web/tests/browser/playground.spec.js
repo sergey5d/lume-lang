@@ -79,6 +79,16 @@ test('mixin aliases select original implementations on the consuming receiver', 
   expect(result.output).toBe('mixin aliases ok\n');
 });
 
+test('typed declarations construct classes without propagating class targets', async ({ page }) => {
+  const source = await readFile(new URL('../../../examples/features/declaration_construction.lum', import.meta.url), 'utf8');
+  const result = await page.evaluate(async source => {
+    const { LumeClient } = await import('/sdk.js');
+    return new LumeClient({ timeoutMs: 30_000 }).run({ entry: 'main.lum', files: { 'main.lum': source } });
+  }, source);
+  expect(result.diagnostics).toEqual([]);
+  expect(result.output).toBe('declaration construction ok\n');
+});
+
 test('SDK preserves numeric precision, host inputs, and collection allocation behavior', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const { LumeClient } = await import('/sdk.js');

@@ -34,8 +34,8 @@ fn main() Unit {
     }
     x = 4
     y = 5
-    punned Point = new { x, y }
-    worker Worker = new { name: "Ada", age: 42 }
+    punned Point = { x: x, y: y }
+    worker Worker = { name: "Ada", age: 42 }
     position Position = new(3, 4)
     printable Printable = object with Printable {
         x Int = 10
@@ -45,11 +45,11 @@ fn main() Unit {
     reader Reader = object with Reader {
         fn read() Str = "hello"
     }
-    anonymous = new { x, y }
-    empty {} = new {}
+    anonymous = { x: x, y: y }
+    empty {} = {}
     positional { x Int, y Int } = new(1, 2)
     reversed { y Int, x Int } = new(3, 4)
-    widened Any = new { x, y }
+    widened Any = { x: x, y: y }
 
     println(point.x + point.y)
     println(worker.name, worker.age)

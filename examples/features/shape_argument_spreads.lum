@@ -58,7 +58,7 @@ class Trace {
 
     fn empty() {} {
         text := text + "E"
-        new {}
+        {}
     }
 }
 
@@ -77,7 +77,7 @@ fn main() {
     options = { error: 6, whoAteMyCookie: 11d }
     error = 6
     whoAteMyCookie = 11d
-    verify(methodA("heh", ...new { error, whoAteMyCookie }), 6, 11d)
+    verify(methodA("heh", ...{ error: error, whoAteMyCookie: whoAteMyCookie }), 6, 11d)
     verify(methodA("heh", ...options), 6, 11d)
     verify(methodA("heh", 5, ...options), 5, 11d)
     verify(methodA("heh", error = 4, ...options), 4, 11d)

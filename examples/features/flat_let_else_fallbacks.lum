@@ -69,7 +69,7 @@ fn main() {
     let {
         left <- other
         right <- other
-    } else new { left: 5, right: 6 }
+    } else { left: 5, right: 6 }
     assert(left == 5 && right == 6)
 
     calls = Counter()
