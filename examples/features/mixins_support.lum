@@ -19,8 +19,8 @@ internal mixin InternalParts with Counted {
 }
 
 public class HiddenCounter with Counted {
-    use PrivateParts
-    use InternalParts
+    mix PrivateParts
+    mix InternalParts
 
     count Int
 }

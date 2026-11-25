@@ -509,6 +509,7 @@ struct Symbol {
 
 #[derive(Debug, Clone, Copy)]
 enum SymbolKind {
+    MixinAlias,
     Binding,
     GlobalBinding,
     Parameter(ParameterKind),
@@ -527,6 +528,7 @@ enum ParameterKind {
 impl SymbolKind {
     fn shadow_label(self) -> &'static str {
         match self {
+            SymbolKind::MixinAlias => "mixin alias",
             SymbolKind::Binding => "local binding",
             SymbolKind::GlobalBinding => "global binding",
             SymbolKind::Parameter(ParameterKind::Function) => "function parameter",
@@ -2035,6 +2037,20 @@ impl<'a> Resolver<'a> {
                 "duplicate binding 'this'".to_string(),
                 true,
             );
+            for adoption in &decl.mixins {
+                if let Some(alias) = &adoption.alias {
+                    self.define_value(
+                        &alias.name,
+                        alias.span,
+                        false,
+                        SymbolKind::MixinAlias,
+                        "duplicate_mixin_alias",
+                        format!("duplicate mixin alias '{}'", alias.name),
+                        true,
+                    );
+                    self.remember_declared_type(alias.span, Some(&adoption.target));
+                }
+            }
             for member in &decl.members {
                 if let TypeMember::Field(field) = member {
                     if let Some(initializer) = &field.initializer {
@@ -3204,7 +3220,7 @@ impl<'a> Resolver<'a> {
                 if let Some(info) = self.lookup_type(name) {
                     let arity = info.arity;
                     if info.kind == TypeKind::Mixin && !allow_mixin {
-                        self.add_error("mixin_not_a_type", format!("mixin '{name}' is not a value type; adopt it inside a class with 'use {name}'"), *span);
+                        self.add_error("mixin_not_a_type", format!("mixin '{name}' is not a value type; adopt it inside a class with 'mix {name}'"), *span);
                     }
                     self.record_definition(*span, self.type_definition(name));
                     if args.len() != arity {
@@ -3454,7 +3470,9 @@ impl<'a> Resolver<'a> {
             return;
         }
         if !allow_outer_shadow {
-            if let Some(previous) = self.lookup_outer(name) {
+            if let Some(previous) = self.lookup_outer(name)
+                && !matches!(previous.kind, SymbolKind::MixinAlias)
+            {
                 self.add_duplicate(
                     "shadowing_binding",
                     shadowing_binding_message(name, previous.kind.shadow_label()),
@@ -5226,7 +5244,7 @@ private mixin Hidden { fn answer() Int = 1 }
 internal mixin Shared { fn answer() Int = 2 }
 public mixin Exported { fn answer() Int = 3 }
 private class Container { public mixin Nested {} }
-public class Box { use Hidden }
+public class Box { mix Hidden }
 "#,
         )
         .expect("write support");
@@ -5243,7 +5261,7 @@ public class Box { use Hidden }
             fs::write(
                 &source,
                 format!(
-                    "module {module}\nuse support/{{{name}}}\nclass Consumer {{ use {} }}",
+                    "module {module}\nuse support/{{{name}}}\nclass Consumer {{ mix {} }}",
                     name.rsplit('.').next().unwrap(),
                 ),
             )
@@ -5265,7 +5283,7 @@ public class Box { use Hidden }
 
             fs::write(
                 &source,
-                format!("module {module}\nuse support\nclass Consumer {{ use support.{name} }}",),
+                format!("module {module}\nuse support\nclass Consumer {{ mix support.{name} }}",),
             )
             .expect("write qualified consumer");
             let result = resolve_path(&source).expect("resolve qualified consumer");
@@ -5277,6 +5295,34 @@ public class Box { use Hidden }
             );
         }
         let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn mixin_alias_definitions_follow_the_alias_and_original_member() {
+        let path = workspace_root().join("examples/features/mixin_aliases.lum");
+        let source = fs::read_to_string(&path).unwrap();
+        let offset = source.find("first.process(value)").unwrap();
+        let alias = definition_at_path(&path, None, offset).unwrap().unwrap();
+        assert_eq!(Path::new(&alias.path), path);
+        assert_eq!(&source[alias.span.start..alias.span.end], "first");
+        assert_eq!(alias.span.start, source.find("as first").unwrap() + 3);
+
+        let method = definition_at_path(&path, None, offset + "first.".len())
+            .unwrap()
+            .unwrap();
+        assert_eq!(Path::new(&method.path), path);
+        assert_eq!(
+            method.span.start,
+            source.find("fn process(value Str)").unwrap()
+        );
+
+        let offset = source.find("imported.summary()").unwrap() + "imported.".len();
+        let imported = definition_at_path(&path, None, offset).unwrap().unwrap();
+        assert!(
+            imported
+                .path
+                .ends_with("examples/features/mixins_support.lum")
+        );
     }
 
     #[test]

@@ -53,7 +53,7 @@ private mixin SetParts[T] with SetApi[T] {
 }
 
 public class Set[T] with SetApi[T] {
-    use SetParts[T]
+    mix SetParts[T]
 
     new(values [T] vararg) =
         panic("Set construction is provided by the active runtime")

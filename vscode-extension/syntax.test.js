@@ -18,6 +18,9 @@ for (const source of ['fn(Int) Str', 'fn (Int) Str', 'fn() Int']) {
     assert.equal(keywordScope(source), 'storage.type.function.lume');
 }
 assert.equal(keywordScope('def normalize(value Str)'), undefined);
+for (const source of ['mix FirstParts as first', 'mixin FirstParts', 'as first']) {
+    assert.equal(keywordScope(source), 'keyword.declaration.lume');
+}
 const builtinType = new RegExp(grammar.repository.types.patterns[0].match);
 assert.ok(builtinType.test('Char'));
 assert.ok(!builtinType.test('Rune'));

@@ -64,7 +64,7 @@ private mixin LinkedListParts[T] with LinkedListApi[T] {
 }
 
 public class LinkedList[T] with LinkedListApi[T] {
-    use LinkedListParts[T]
+    mix LinkedListParts[T]
 
     new(values [T] vararg) =
         panic("LinkedList construction is provided by the active runtime")

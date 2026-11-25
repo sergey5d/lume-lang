@@ -39,7 +39,7 @@ mixin Applying {
 }
 
 class Executor {
-    use Applying
+    mix Applying
     fn apply(transform fn(Int) Int) Int = transform(2)
 }
 

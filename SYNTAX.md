@@ -10,10 +10,10 @@ The lexer reserves these words for language grammar:
 annotation  as        break     case       class      continue
 defer       do        else      ext        false      fn
 for         get       if        interface  internal   is
-let         match     mixin     module     object     private
-public      reified   return    shape      true       try
-type        use       var       vararg     when       while
-with        yield
+let         match     mix       mixin      module     object
+private     public    reified   return     shape      true
+try         type      use       var        vararg     when
+while       with      yield
 ```
 
 They are not ordinary identifiers. A grammar rule may explicitly reuse a
@@ -2879,7 +2879,7 @@ mixin CollectionParts with Sized {
 }
 
 class Bag with Sized {
-    use CollectionParts
+    mix CollectionParts
 
     items [Int]
     get size Int = items.size
@@ -2889,16 +2889,16 @@ class Bag with Sized {
 
 - `with Sized` on a mixin requires the consuming class to implement `Sized`.
   It does not automatically add that interface to the class's declared bounds.
-- A class adopts a mixin inside its body. `use MixinName` supplies zero arguments;
-  `use MixinName(arguments)` supplies positional constructor inputs;
-  `use MixinName { field: value }` supplies named inputs. Imports of mixin
+- A class adopts a mixin inside its body. `mix MixinName` supplies zero arguments;
+  `mix MixinName(arguments)` supplies positional constructor inputs;
+  `mix MixinName { field: value }` supplies named inputs. Imports of mixin
   declarations use the ordinary module visibility and `use` rules.
 - Top-level mixins are private by default. `private mixin` is file-local;
   `internal mixin` may be imported only within the same declared module;
   `public mixin` may be imported externally. A public class may adopt a private
   or internal mixin without exposing the mixin itself. Its supplied members
   retain their declared member visibility.
-- Mixins may have type parameters, for example `use ValueParts[Int]`. Their
+- Mixins may have type parameters, for example `mix ValueParts[Int]`. Their
   methods may have their own type parameters; getters follow normal getter rules.
 - Mixin bodies may contain stored fields and `new` constructors, as well as
   implemented methods and getters. They cannot contain nested declarations.
@@ -2906,7 +2906,7 @@ class Bag with Sized {
   non-public fields require initializers, as for classes. With an explicit
   constructor, its parameters define the inputs.
 - Adoption uses ordinary constructor visibility, overload selection, parameter
-  defaults, and positional-prefix rules. Bare `use MixinName` is valid whenever
+  defaults, and positional-prefix rules. Bare `mix MixinName` is valid whenever
   an accessible constructor accepts zero supplied arguments, including when
   all its parameters have defaults. Adoption arguments currently support
   individual positional or named inputs, not spreads.
@@ -2914,7 +2914,7 @@ class Bag with Sized {
   to the class's implicit constructor. Stored field names must not collide
   with class members or storage supplied by another mixin.
 - Initialization runs in this order: class field initialization (including
-  implicit constructor inputs), mixin initialization in written `use` order,
+  implicit constructor inputs), mixin initialization in written `mix` order,
   then the class constructor body. Each adoption evaluates its supplied
   expressions once in source order. Constructor delegation does not initialize
   mixins again. Adoption arguments may read initialized class fields or earlier
@@ -2935,6 +2935,15 @@ class Bag with Sized {
   written adoption order. Distinct method overloads may coexist.
 - Internal calls use the class's final members. In the example,
   `bag.describe()` calls `Bag.nonEmpty`, not a separate mixin receiver.
+- An adoption may end with `as alias`, including after constructor arguments.
+  Inside the consuming class, `alias.method(...)` or `alias.getter` selects that
+  mixin's original implementation, even when the class replaces it. Method
+  references and generic methods work through the alias too. Calls through
+  `this` inside the selected implementation still use the class's final members.
+  Aliases are class-local selectors for methods and getters, not stored fields,
+  values, or separate objects. They must be unique and cannot share a member name.
+  Parameters and local bindings may shadow them normally. Aliases do not resolve
+  conflicts by themselves: the class must still declare a compatible replacement.
 - Only classes adopt mixins. There is no mixin-to-mixin adoption or `super`
   chain. A mixin has no instance identity or runtime type metadata, and mixin
   declarations cannot be annotated.
@@ -2955,13 +2964,27 @@ mixin CounterParts {
     fn increment() { count := count + 1 }
 }
 
-class Counter { use CounterParts }
-class OffsetCounter { use CounterParts(10) }
-class NamedCounter { use CounterParts { start: 20 } }
+class Counter { mix CounterParts }
+class OffsetCounter { mix CounterParts(10) }
+class NamedCounter { mix CounterParts { start: 20 } }
 ```
 
-See `examples/features/mixins.lum` and
-`examples/features/mixin_constructors.lum` for executable examples.
+To combine competing implementations explicitly:
+
+```txt
+class Pipeline {
+    mix FirstParts as first
+    mix SecondParts as second
+
+    fn process(value Str) Str {
+        intermediate = first.process(value)
+        second.process(intermediate)
+    }
+}
+```
+
+See `examples/features/mixins.lum`, `examples/features/mixin_constructors.lum`,
+and `examples/features/mixin_aliases.lum` for executable examples.
 
 ### Constructors
 
@@ -3574,7 +3597,7 @@ mixin Greetings with Named {
 }
 
 class Box with Named {
-    use Greetings
+    mix Greetings
 
     fn label() Str = "box"
 }

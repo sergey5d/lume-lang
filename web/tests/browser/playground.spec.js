@@ -65,6 +65,20 @@ test('the README order report runs with JSON decoding and error propagation', as
   expect(result.output).toBe('Daily orders\nMira: orders=2, total=30.00\nNoah: orders=1, total=8.75\nInvalid orders: order 1: quantity must be positive\n');
 });
 
+test('mixin aliases select original implementations on the consuming receiver', async ({ page }) => {
+  const files = {};
+  for (const name of ['mixin_aliases', 'mixins_support']) {
+    files[`examples/${name}.lum`] = await readFile(new URL(`../../../examples/features/${name}.lum`, import.meta.url), 'utf8');
+  }
+  const result = await page.evaluate(async files => {
+    const { LumeClient } = await import('/sdk.js');
+    const sdk = new LumeClient({ timeoutMs: 30_000 });
+    return sdk.run({ entry: 'examples/mixin_aliases.lum', files });
+  }, files);
+  expect(result.diagnostics).toEqual([]);
+  expect(result.output).toBe('mixin aliases ok\n');
+});
+
 test('SDK preserves numeric precision, host inputs, and collection allocation behavior', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const { LumeClient } = await import('/sdk.js');

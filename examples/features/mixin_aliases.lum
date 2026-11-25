@@ -1,0 +1,113 @@
+# EXPECT:
+# mixin aliases ok
+
+module examples/mixin_aliases
+
+use mixins_support/{Counted, CountParts as ImportedParts}
+
+mixin FirstParts {
+    fn process(value Str) Str = "first(" + value + ")"
+    get label Str = "first"
+    fn finalLabel() Str = this.label
+    fn identity[T](value T) T = value
+}
+
+mixin SecondParts {
+    fn process(value Str) Str = "second(" + value + ")"
+    get label Str = "second"
+}
+
+shape ShadowValue {
+    first Str
+}
+
+class Pipeline {
+    mix FirstParts as first
+    mix SecondParts as second
+
+    fn process(value Str) Str {
+        intermediate = first.process(value)
+        second.process(intermediate)
+    }
+
+    get label Str = first.label + "+" + second.label
+    fn original() fn(Str) Str = first.process
+    fn later() fn() Str = { => second.process("later") }
+    fn generic() Int = first.identity[Int](42)
+
+    fn shadowed(first Pipeline) Str = first.process("parameter")
+
+    fn localShadow() Str {
+        first = { process: (value Str) => "local(" + value + ")" }
+        first.process("value")
+    }
+
+    fn patternShadow() Str {
+        let ShadowValue { first } = ShadowValue("pattern")
+        first.toUpper()
+    }
+
+    fn lambdaShadow() Str =
+        ["lambda"].map(first => first.toUpper()).first!
+
+}
+
+mixin CounterParts {
+    private var count Int
+    new(start Int = 0) { this.count = start }
+    fn increment() Int {
+        count += 1
+        count
+    }
+    get current Int = count
+}
+
+class Counter {
+    mix CounterParts { start: 10 } as counter
+    fn increment() Int = counter.increment() + 100
+    get current Int = counter.current
+    fn originalIncrement() Int = counter.increment()
+}
+
+class PositionalCounter {
+    mix CounterParts(5) as counter
+    get current Int = counter.current
+}
+
+class GenericCounter[T] {
+    mix FirstParts as parts
+    value T
+    fn copy() T = parts.identity[T](this.value)
+}
+
+class ImportedCounter with Counted {
+    mix ImportedParts as imported
+    count Int
+    fn summary() Str = imported.summary() + " alias"
+}
+
+fn main() {
+    pipeline = Pipeline()
+    assert(pipeline.process("value") == "second(first(value))")
+    assert(pipeline.label == "first+second")
+    assert(pipeline.finalLabel() == "first+second")
+    original = pipeline.original()
+    assert(original("reference") == "first(reference)")
+    later = pipeline.later()
+    assert(later() == "second(later)")
+    assert(pipeline.generic() == 42)
+    assert(pipeline.shadowed(pipeline) == "second(first(parameter))")
+    assert(pipeline.localShadow() == "local(value)")
+    assert(pipeline.patternShadow() == "PATTERN")
+    assert(pipeline.lambdaShadow() == "LAMBDA")
+    counter = Counter()
+    assert(counter.increment() == 111)
+    assert(counter.current == 11)
+    assert(counter.originalIncrement() == 12)
+    assert(Counter().current == 10)
+    assert(PositionalCounter().current == 5)
+    generic = GenericCounter("generic")
+    assert(generic.copy() == "generic")
+    assert(ImportedCounter(3).summary() == "3 imported alias")
+    println("mixin aliases ok")
+}

@@ -18,14 +18,14 @@ fn parse(src: &str) -> ParseResult {
 
 #[test]
 fn parses_mixins_and_rejects_nonclass_adoption() {
-    let parsed = parse("mixin Parts { get count Int = 0 }\nclass Bag { use Parts }");
+    let parsed = parse("mixin Parts { get count Int = 0 }\nclass Bag { mix Parts }");
     assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
     let program = parsed.program.unwrap();
     assert!(matches!(&program.items[0], Item::Type(decl) if decl.kind == TypeKind::Mixin));
     assert!(matches!(&program.items[1], Item::Type(decl) if decl.mixins.len() == 1));
     for (source, code) in [
-        ("shape S { use Parts }", "invalid_mixin_use"),
-        ("interface I { use Parts }", "invalid_mixin_use"),
+        ("shape S { mix Parts }", "invalid_mixin_use"),
+        ("interface I { mix Parts }", "invalid_mixin_use"),
         (
             "fn f() { mixin Parts {} }",
             "nested_declaration_in_callable",
@@ -46,7 +46,7 @@ fn parses_mixins_and_rejects_nonclass_adoption() {
 #[test]
 fn parses_mixin_constructor_adoption_forms() {
     let parsed = parse(
-        "mixin Parts { value Int\nnew(value Int) { this.value = value } }\nclass C {\nuse Parts\nuse Parts()\nuse Parts(1)\nuse Parts { value: 2 }\n}",
+        "mixin Parts { value Int\nnew(value Int) { this.value = value } }\nclass C {\nmix Parts\nmix Parts()\nmix Parts(1)\nmix Parts { value: 2 }\n}",
     );
     assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
     let Item::Type(class) = &parsed.program.unwrap().items[1] else {
@@ -57,6 +57,32 @@ fn parses_mixin_constructor_adoption_forms() {
     assert!(class.mixins[1].args.is_empty());
     assert_eq!(class.mixins[2].args.len(), 1);
     assert!(class.mixins[3].uses_brace_syntax);
+}
+
+#[test]
+fn parses_mixin_aliases_and_rejects_old_use_adoption() {
+    let parsed = parse(
+        "class C {\nmix First as first\nmix Second(1) as second\nmix Third { value: 2 } as third\n}",
+    );
+    assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+    let Item::Type(class) = &parsed.program.unwrap().items[0] else {
+        panic!("class")
+    };
+    assert_eq!(
+        class
+            .mixins
+            .iter()
+            .map(|adoption| adoption.alias.as_ref().unwrap().name.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "second", "third"],
+    );
+    let parsed = parse("class C { use Parts }");
+    assert!(
+        parsed
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "mixin_use_renamed")
+    );
 }
 
 #[test]

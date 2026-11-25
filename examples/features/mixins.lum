@@ -24,7 +24,7 @@ mixin CollectionParts with Sized {
 }
 
 class Bag with Sized, Described {
-    use CollectionParts
+    mix CollectionParts
 
     items [Int]
     get size Int = items.size
@@ -33,7 +33,7 @@ class Bag with Sized, Described {
 }
 
 class AlwaysNonEmpty with Sized, Described {
-    use CollectionParts
+    mix CollectionParts
 
     get size Int = 0
     get nonEmpty Bool = true
@@ -48,21 +48,21 @@ mixin SecondLabel {
 }
 
 class ResolvedLabel {
-    use FirstLabel
-    use SecondLabel
+    mix FirstLabel
+    mix SecondLabel
 
     get label Str = "resolved"
 }
 
 class ReverseResolvedLabel {
-    use SecondLabel
-    use FirstLabel
+    mix SecondLabel
+    mix FirstLabel
 
     get label Str = "resolved"
 }
 
 class ImportedCounter with Counted {
-    use ImportedParts
+    mix ImportedParts
     count Int
 
     fn report() Str = summary()
@@ -77,8 +77,8 @@ mixin StrRendering {
 }
 
 class Renderer {
-    use IntRendering
-    use StrRendering
+    mix IntRendering
+    mix StrRendering
 }
 
 interface Values[T] {
@@ -95,12 +95,12 @@ mixin ValueParts[T] with Values[T] {
 }
 
 class IntValue with Values[Int] {
-    use ValueParts[Int]
+    mix ValueParts[Int]
     first Int
 }
 
 class GenericValue[T] with Values[T] {
-    use ValueParts[T]
+    mix ValueParts[T]
     first T
 }
 

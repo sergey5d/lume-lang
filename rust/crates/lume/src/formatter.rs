@@ -1741,20 +1741,39 @@ fn main() {
 
     #[test]
     fn formats_mixin_adoption_and_generic_type_arguments() {
-        let source = "private mixin Parts[T] {\nfn keep(value Option[T]) Option[T] = value\n}\nclass Box {\nuse Parts[Option[Int]]\n}\n";
+        let source = "private mixin Parts[T] {\nfn keep(value Option[T]) Option[T] = value\n}\nclass Box {\nmix Parts[Option[Int]]\n}\n";
         let result = format(source);
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         assert!(result.text.contains("mixin Parts[T]"));
         assert!(!result.text.contains("private mixin"));
-        assert!(result.text.contains("    use Parts[Int?]"));
+        assert!(result.text.contains("    mix Parts[Int?]"));
         assert_eq!(format(&result.text).text, result.text);
+    }
+
+    #[test]
+    fn formats_mixin_aliases_without_import_spacing() {
+        let source = "class Owner {\nmix First[Option[Int]]( 1 ) as first\nmix Second {value:2} as second\nfn process(value Str) Str = second.process(first.process(value))\n}\n";
+        let result = format(source);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert!(
+            result.text.contains("    mix First[Int?](1) as first"),
+            "{}",
+            result.text
+        );
+        assert!(
+            result
+                .text
+                .contains("    mix Second { value: 2 } as second"),
+            "{}",
+            result.text
+        );
     }
 
     #[test]
     fn formats_mixin_constructor_arguments() {
         assert_formatted(
-            "class Owner {\nuse Parts(1,2)\nuse Named {value:calculate( 3 )}\nuse Generic[Option[Int]](None)\n}\n",
-            "class Owner {\n    use Parts(1, 2)\n    use Named { value: calculate(3) }\n    use Generic[Int?](None)\n}\n",
+            "class Owner {\nmix Parts(1,2)\nmix Named {value:calculate( 3 )}\nmix Generic[Option[Int]](None)\n}\n",
+            "class Owner {\n    mix Parts(1, 2)\n    mix Named { value: calculate(3) }\n    mix Generic[Int?](None)\n}\n",
         );
     }
 

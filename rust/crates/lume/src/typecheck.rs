@@ -9,8 +9,8 @@ use crate::{
         AssignOp, AssignmentStmt, BinaryOp, BindingStmt, Block, CallableBody, DestructureKind,
         ElseBranch, ElseExprBranch, Expr, ExtensionBlock, FieldDecl, ForBinding, FunctionDecl,
         GenericCondition, IfConditionClause, IfStmt, Item, LambdaBody, MatchCase, MatchCaseBody,
-        MatchStmt, MethodDecl, Param, Pattern, PatternBindingStmt, Program, Stmt, TypeAliasDecl,
-        TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
+        MatchStmt, MethodDecl, MixinUse, Param, Pattern, PatternBindingStmt, Program, Stmt,
+        TypeAliasDecl, TypeDecl, TypeKind, TypeMember, TypeParam, TypeRef, Visibility,
     },
     decimal::Decimal,
     numeric::{parse_float_literal, parse_integer_literal},
@@ -1403,7 +1403,7 @@ impl World {
                 checker.push_ast_type_params(&decl.type_params, &decl.type_conditions);
                 let mut methods = module.types[&decl.name].methods.clone();
                 let mut fields = module.types[&decl.name].fields.clone();
-                for (_, mixin, subst) in checker.mixin_uses(decl) {
+                for (adoption, mixin, subst) in checker.mixin_uses(decl) {
                     for mut field in mixin.fields {
                         field.ty = substitute_type(&field.ty, &subst);
                         field.from_mixin = true;
@@ -1416,6 +1416,14 @@ impl World {
                         }
                         for method in overloads {
                             let method = instantiate_function_sig(method, &subst);
+                            if let Some(alias) = &adoption.alias {
+                                let mut original = method.clone();
+                                original.visibility = Visibility::Private;
+                                methods
+                                    .entry(crate::mixins::aliases::member_name(&alias.name, &name))
+                                    .or_default()
+                                    .push(original);
+                            }
                             let target = methods.entry(name.clone()).or_default();
                             if !target.iter().any(|existing| {
                                 mixin_signature_key(&name, existing)
@@ -2265,10 +2273,33 @@ impl<'a> Checker<'a> {
     }
 
     fn check_type_decl(&mut self, decl: &TypeDecl) {
+        let mut rewritten;
+        let decl = if decl.mixins.iter().any(|adoption| adoption.alias.is_some()) {
+            rewritten = decl.clone();
+            self.diagnostics
+                .extend(crate::mixins::aliases::rewrite(&mut rewritten));
+            &rewritten
+        } else {
+            decl
+        };
         let Some(type_sig) = self.lookup_type_local(&decl.name) else {
             return;
         };
         self.check_declared_member_name_collisions(decl);
+        for member in &decl.members {
+            let (name, span) = match member {
+                TypeMember::Method(method) => (&method.name, method.span),
+                TypeMember::Field(field) => (&field.name, field.span),
+                TypeMember::Case(_) => continue,
+            };
+            if name.starts_with("__lume_mixin_alias_") {
+                self.add_error(
+                    "reserved_synthetic_member",
+                    "member names beginning with '__lume_mixin_alias_' are reserved for mixin dispatch",
+                    span,
+                );
+            }
+        }
         self.current_type_paths.push(decl.name.clone());
         for param in &decl.type_params {
             if param.reified {
@@ -2298,7 +2329,7 @@ impl<'a> Checker<'a> {
             {
                 self.add_error(
                     "mixin_not_a_type",
-                    "mixins are adopted inside classes with 'use', not listed as interface bounds",
+                    "mixins are adopted inside classes with 'mix', not listed as interface bounds",
                     bound.span(),
                 );
             }
@@ -2586,7 +2617,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn mixin_uses(&self, decl: &TypeDecl) -> Vec<(TypeRef, TypeSig, HashMap<String, Ty>)> {
+    fn mixin_uses<'d>(
+        &self,
+        decl: &'d TypeDecl,
+    ) -> Vec<(&'d MixinUse, TypeSig, HashMap<String, Ty>)> {
         decl.mixins
             .iter()
             .filter_map(|target| {
@@ -2598,7 +2632,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let subst = sig.type_params.iter().cloned().zip(args).collect();
-                Some((target.target.clone(), sig, subst))
+                Some((target, sig, subst))
             })
             .collect()
     }
@@ -2641,7 +2675,24 @@ impl<'a> Checker<'a> {
             .mixin_initialized_fields
             .replace((owner.name.clone(), initialized));
         let mut seen = HashSet::new();
+        let mut aliases = HashSet::new();
         for target in &decl.mixins {
+            if let Some(alias) = &target.alias {
+                if !aliases.insert(alias.name.clone()) {
+                    self.add_error(
+                        "duplicate_mixin_alias",
+                        format!("duplicate mixin alias '{}'", alias.name),
+                        alias.span,
+                    );
+                }
+                if alias.name == "this"
+                    || alias.name == "_"
+                    || owner.fields.iter().any(|field| field.name == alias.name)
+                    || owner.methods.contains_key(&alias.name)
+                {
+                    self.add_error("mixin_alias_conflict", format!("mixin alias '{}' conflicts with a class or mixin member, or a reserved receiver name", alias.name), alias.span);
+                }
+            }
             let ty = self.ty_from_type_ref(&target.target);
             let sig = match &ty {
                 Ty::Named(name, _) => self.lookup_any_type(name),
@@ -2650,7 +2701,7 @@ impl<'a> Checker<'a> {
             if !sig.as_ref().is_some_and(|sig| sig.kind == TypeKind::Mixin) {
                 self.add_error(
                     "invalid_mixin_use",
-                    "'use' in a class must name a mixin declaration",
+                    "'mix' in a class must name a mixin declaration",
                     target.span,
                 );
             } else if let Ty::Named(_, args) = &ty {
@@ -2714,7 +2765,7 @@ impl<'a> Checker<'a> {
         for (target, mixin, subst) in self.mixin_uses(decl) {
             for field in &mixin.fields {
                 if !storage_names.insert(field.name.clone()) {
-                    self.add_error("mixin_member_conflict", format!("stored field '{}' supplied by mixin '{}' conflicts with another class or mixin member", field.name, mixin.name), target.span());
+                    self.add_error("mixin_member_conflict", format!("stored field '{}' supplied by mixin '{}' conflicts with another class or mixin member", field.name, mixin.name), target.span);
                 }
             }
             for requirement in &mixin.with_bounds {
@@ -2728,13 +2779,13 @@ impl<'a> Checker<'a> {
                             required.describe(),
                             mixin.name
                         ),
-                        target.span(),
+                        target.span,
                     );
                 } else if !self.mixin_requirement_members_are_compatible(owner, &required) {
-                    self.add_error("incompatible_mixin_requirement", format!("class '{}' does not provide compatible public members for mixin '{}' requirement '{}'", decl.name, mixin.name, required.describe()), target.span());
+                    self.add_error("incompatible_mixin_requirement", format!("class '{}' does not provide compatible public members for mixin '{}' requirement '{}'", decl.name, mixin.name, required.describe()), target.span);
                 }
             }
-            self.check_call_generic_conditions(&mixin.generic_conditions, &subst, target.span());
+            self.check_call_generic_conditions(&mixin.generic_conditions, &subst, target.span);
             for (name, overloads) in mixin.methods {
                 if name == "new" {
                     continue;
@@ -2746,7 +2797,7 @@ impl<'a> Checker<'a> {
                         mixin.name.clone(),
                         name.clone(),
                         method,
-                        target.span(),
+                        target.span,
                     ));
                 }
             }
@@ -8668,7 +8719,7 @@ impl<'a> Checker<'a> {
             self.add_error(
                 "invalid_mixin_construction",
                 format!(
-                    "mixin '{}' cannot be constructed; adopt it inside a class with 'use {}'",
+                    "mixin '{}' cannot be constructed; adopt it inside a class with 'mix {}'",
                     sig.name, sig.name
                 ),
                 span,
@@ -11914,6 +11965,9 @@ impl<'a> Checker<'a> {
     }
 
     fn unknown_member_message(&self, receiver: &Expr, receiver_ty: &Ty, name: &str) -> String {
+        if let Some((alias, member)) = crate::mixins::aliases::member_selector(name) {
+            return format!("mixin alias '{alias}' has no method or getter '{member}'");
+        }
         if name == "getOr"
             && !matches!(receiver_ty, Ty::Unknown)
             && self.unwrap_known_lifted_type(receiver_ty).is_some()
@@ -16500,28 +16554,28 @@ fn main() Int {
         let cases = [
             (
                 "mixin_member_conflict",
-                "mixin A { get value Int = 1 }\nmixin B { get value Int = 2 }\nclass C { use A\nuse B }",
+                "mixin A { get value Int = 1 }\nmixin B { get value Int = 2 }\nclass C { mix A\nmix B }",
             ),
             (
                 "incompatible_mixin_override",
-                "mixin A { get value Bool = true }\nclass C { use A\nget value Int = 1 }",
+                "mixin A { get value Bool = true }\nclass C { mix A\nget value Int = 1 }",
             ),
             (
                 "mixin_member_kind_mismatch",
-                "mixin A { get value Int = 1 }\nclass C { use A\nfn value() Int = 2 }",
+                "mixin A { get value Int = 1 }\nclass C { mix A\nfn value() Int = 2 }",
             ),
             (
                 "mixin_member_kind_mismatch",
-                "mixin A { get value Int = 1 }\nclass C { use A\nvalue Int }",
+                "mixin A { get value Int = 1 }\nclass C { mix A\nvalue Int }",
             ),
             (
                 "missing_mixin_requirement",
-                "interface Sized { get size Int }\nmixin A with Sized { get nonEmpty Bool = this.size > 0 }\nclass C { use A }",
+                "interface Sized { get size Int }\nmixin A with Sized { get nonEmpty Bool = this.size > 0 }\nclass C { mix A }",
             ),
-            ("invalid_mixin_use", "class A {}\nclass C { use A }"),
+            ("invalid_mixin_use", "class A {}\nclass C { mix A }"),
             (
                 "duplicate_mixin_use",
-                "mixin A {}\nclass C { use A\nuse A }",
+                "mixin A {}\nclass C { mix A\nmix A }",
             ),
             ("mixin_not_a_type", "mixin A {}\nfn f(value A) {}"),
             ("mixin_not_a_type", "mixin A {}\ntype Alias = A"),
@@ -16535,11 +16589,11 @@ fn main() Int {
             ),
             (
                 "invalid_type_argument_count",
-                "mixin A[T] {}\nclass C { use A }",
+                "mixin A[T] {}\nclass C { mix A }",
             ),
             (
                 "incompatible_mixin_requirement",
-                "interface Readable { fn read() Str }\nmixin A with Readable { fn text() Str = this.read() }\nclass C with Readable { use A\nfn read() Int = 1 }",
+                "interface Readable { fn read() Str }\nmixin A with Readable { fn text() Str = this.read() }\nclass C with Readable { mix A\nfn read() Int = 1 }",
             ),
             (
                 "assign_immutable",
@@ -16568,6 +16622,61 @@ fn main() Int {
     }
 
     #[test]
+    fn checks_mixin_aliases_and_keeps_conflict_resolution_explicit() {
+        let accepted =
+            check_path(workspace_root().join("examples/features/mixin_aliases.lum")).unwrap();
+        assert!(
+            accepted.diagnostics.is_empty(),
+            "{:#?}",
+            accepted.diagnostics
+        );
+        for (code, source) in [
+            (
+                "duplicate_mixin_alias",
+                "mixin A {}\nmixin B {}\nclass C { mix A as parts\nmix B as parts }",
+            ),
+            (
+                "mixin_alias_conflict",
+                "mixin A {}\nclass C { mix A as parts\nparts Int = 1 }",
+            ),
+            (
+                "mixin_alias_conflict",
+                "mixin A { fn parts() {} }\nclass C { mix A as parts }",
+            ),
+            (
+                "mixin_alias_conflict",
+                "mixin A {}\nclass C { mix A as this }",
+            ),
+            (
+                "unknown_member",
+                "mixin A {}\nclass C { mix A as parts\nfn f() Int = parts.missing() }",
+            ),
+            (
+                "invalid_mixin_alias_value",
+                "mixin A {}\nclass C { mix A as parts\nfn f() Any = parts }",
+            ),
+            (
+                "unknown_member",
+                "mixin A {}\nclass C { mix A as parts }\nfn f(value C) Any = value.parts",
+            ),
+            (
+                "mixin_member_conflict",
+                "mixin A { fn f() Int = 1 }\nmixin B { fn f() Int = 2 }\nclass C { mix A as a\nmix B as b }",
+            ),
+        ] {
+            let result = check_program(&parse_inline(source));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
+                "expected {code} for {source}: {:#?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
     fn checks_mixin_constructor_contracts_and_initialization_boundaries() {
         let accepted =
             check_path(workspace_root().join("examples/features/mixin_constructors.lum")).unwrap();
@@ -16579,47 +16688,47 @@ fn main() Int {
         for (code, source) in [
             (
                 "invalid_argument_count",
-                "mixin Parts { value Int }\nclass Owner { use Parts }",
+                "mixin Parts { value Int }\nclass Owner { mix Parts }",
             ),
             (
                 "invalid_argument_type",
-                "mixin Parts { value Int }\nclass Owner { use Parts(\"wrong\") }",
+                "mixin Parts { value Int }\nclass Owner { mix Parts(\"wrong\") }",
             ),
             (
                 "invalid_argument_count",
-                "mixin Parts { first Int = 1\nlast Int }\nclass Owner { use Parts(2) }",
+                "mixin Parts { first Int = 1\nlast Int }\nclass Owner { mix Parts(2) }",
             ),
             (
                 "no_matching_overload",
-                "mixin Parts { value Int }\nclass Owner { use Parts { typo: 1 } }",
+                "mixin Parts { value Int }\nclass Owner { mix Parts { typo: 1 } }",
             ),
             (
                 "missing_non_public_field_initializer",
-                "mixin Parts { private value Int }\nclass Owner { use Parts }",
+                "mixin Parts { private value Int }\nclass Owner { mix Parts }",
             ),
             (
                 "uninitialized_field",
-                "mixin Parts { private value Int\nnew() {} }\nclass Owner { use Parts }",
+                "mixin Parts { private value Int\nnew() {} }\nclass Owner { mix Parts }",
             ),
             (
                 "mixin_member_conflict",
-                "mixin Parts { value Int = 1 }\nclass Owner { value Int = 2\nuse Parts }",
+                "mixin Parts { value Int = 1 }\nclass Owner { value Int = 2\nmix Parts }",
             ),
             (
                 "mixin_member_conflict",
-                "mixin First { value Int = 1 }\nmixin Second { value Int = 2 }\nclass Owner { use First\nuse Second }",
+                "mixin First { value Int = 1 }\nmixin Second { value Int = 2 }\nclass Owner { mix First\nmix Second }",
             ),
             (
                 "uninitialized_mixin_argument",
-                "mixin Parts { value Int }\nclass Owner { base Int\nuse Parts(this.base)\nnew() { this.base = 1 } }",
+                "mixin Parts { value Int }\nclass Owner { base Int\nmix Parts(this.base)\nnew() { this.base = 1 } }",
             ),
             (
                 "uninitialized_mixin_argument",
-                "mixin First { value Int }\nmixin Second { later Int = 2 }\nclass Owner { use First(this.later)\nuse Second }",
+                "mixin First { value Int }\nmixin Second { later Int = 2 }\nclass Owner { mix First(this.later)\nmix Second }",
             ),
             (
                 "constructor_delegation_cycle",
-                "mixin Parts { new() = this() }\nclass Owner { use Parts }",
+                "mixin Parts { new() = this() }\nclass Owner { mix Parts }",
             ),
             (
                 "invalid_mixin_construction",
@@ -16627,7 +16736,7 @@ fn main() Int {
             ),
             (
                 "invalid_argument_count",
-                "mixin Parts { value Int = 1 }\nclass Owner { use Parts }\nfn main() { owner = Owner(2) }",
+                "mixin Parts { value Int = 1 }\nclass Owner { mix Parts }\nfn main() { owner = Owner(2) }",
             ),
         ] {
             let result = check_program(&parse_inline(source));

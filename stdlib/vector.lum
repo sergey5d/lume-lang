@@ -71,7 +71,7 @@ private mixin VectorParts[T] with VectorApi[T] {
 }
 
 public class Vector[T] with VectorApi[T] {
-    use VectorParts[T]
+    mix VectorParts[T]
 
     new(values [T] vararg) =
         panic("Vector construction is provided by the active runtime")

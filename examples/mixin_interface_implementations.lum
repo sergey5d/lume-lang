@@ -11,7 +11,7 @@ mixin Greeting with Greeter {
 }
 
 class OverrideBox with Greeter {
-    use Greeting
+    mix Greeting
 
     fn greet() Str = "class"
 }
@@ -33,8 +33,8 @@ mixin SecondImplementation with SecondChoice {
 }
 
 class PreferFirst with FirstChoice, SecondChoice {
-    use FirstImplementation
-    use SecondImplementation
+    mix FirstImplementation
+    mix SecondImplementation
 
     fn choose() Str = "first"
 }

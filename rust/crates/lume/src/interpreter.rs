@@ -12535,11 +12535,11 @@ fn main() Unit {
                 fn choose() Str = "second"
             }
 
-            class Rabbit with Hopper { use Hopping }
+            class Rabbit with Hopper { mix Hopping }
 
             class PreferFirst with FirstChoice, SecondChoice {
-                use FirstImplementation
-                use SecondImplementation
+                mix FirstImplementation
+                mix SecondImplementation
                 fn choose() Str = "first"
             }
 
@@ -12555,6 +12555,26 @@ fn main() Unit {
         let run = run_program(&program);
         assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
         assert_eq!(run.output, "hop\nfirst\n");
+    }
+
+    #[test]
+    fn runs_mixin_aliases_inside_local_functions() {
+        let program = lower_inline(
+            r#"
+            mixin Parts { fn process(value Str) Str = "original " + value }
+            class Pipeline {
+                mix Parts as parts
+                fn process(value Str) Str {
+                    fn invoke(input Str) Str = parts.process(input)
+                    invoke(value)
+                }
+            }
+            fn main() { println(Pipeline().process("local")) }
+            "#,
+        );
+        let run = run_program(&program);
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "original local\n");
     }
 
     #[test]

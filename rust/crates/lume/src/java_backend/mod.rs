@@ -2295,6 +2295,11 @@ mod tests {
             .unwrap();
         for (path, entrypoint, expected) in [
             (
+                "examples/features/mixin_aliases.lum",
+                "examples.mixin_aliases.Mixin_aliasesMain",
+                "mixin aliases ok\n",
+            ),
+            (
                 "examples/features/mixin_constructors.lum",
                 "examples.mixin_constructors.Mixin_constructorsMain",
                 "mixin constructors ok\n",

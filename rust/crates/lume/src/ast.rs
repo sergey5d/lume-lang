@@ -113,6 +113,14 @@ pub struct MixinUse {
     pub target: TypeRef,
     pub args: Vec<CallArg>,
     pub uses_brace_syntax: bool,
+    pub alias: Option<MixinAlias>,
+    pub span: Span,
+}
+
+/// A class-local selector for an adopted mixin's original implementations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MixinAlias {
+    pub name: String,
     pub span: Span,
 }
 

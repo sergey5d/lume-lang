@@ -20,7 +20,7 @@ mixin Offset {
 
 class ImplicitOwner {
     base Int
-    use Offset(this.base)
+    mix Offset(this.base)
 }
 
 mixin Defaults {
@@ -29,8 +29,8 @@ mixin Defaults {
     fn add(value Int) { items.add(value) }
 }
 
-class DefaultOwner { use Defaults }
-class ReplacedOwner { use Defaults { value: marked("V", 9) } }
+class DefaultOwner { mix Defaults }
+class ReplacedOwner { mix Defaults { value: marked("V", 9) } }
 
 mixin Interleaved {
     first Int = 7
@@ -39,8 +39,8 @@ mixin Interleaved {
     get total Int = first + required + last
 }
 
-class NamedOwner { use Interleaved { required: 2 } }
-class PositionalOwner { use Interleaved(1, 2) }
+class NamedOwner { mix Interleaved { required: 2 } }
+class PositionalOwner { mix Interleaved(1, 2) }
 
 interface Labeled { get label Str }
 
@@ -64,7 +64,7 @@ fn initialLabel() Str {
 
 class ExplicitOwner with Labeled {
     label Str = initialLabel()
-    use Configured(marked("A", 5))
+    mix Configured(marked("A", 5))
     fn describe() Str = "O"
 
     new() {
@@ -75,7 +75,7 @@ class ExplicitOwner with Labeled {
 
 class BareExplicitOwner with Labeled {
     label Str = "label"
-    use Configured
+    mix Configured
 }
 
 mixin First {
@@ -88,13 +88,13 @@ mixin Second {
 
 class ConstructionOrder {
     field Int = marked("F", 1)
-    use First
-    use Second()
+    mix First
+    mix Second()
     new() { Trace.add("C") }
 }
 
 class DelegatingOwner {
-    use First
+    mix First
     new() = this(9)
     new(_unused Int) { Trace.add("C") }
 }
@@ -109,7 +109,7 @@ mixin DelegatingParts {
     get result Int = storedValue
 }
 
-class DelegatingMixinOwner { use DelegatingParts }
+class DelegatingMixinOwner { mix DelegatingParts }
 
 mixin NamedDelegatingParts {
     private stored Int
@@ -119,7 +119,7 @@ mixin NamedDelegatingParts {
 }
 
 class NamedDelegatingOwner {
-    use NamedDelegatingParts
+    mix NamedDelegatingParts
     new() = this { unused: 9 }
     new(unused Int) { assert(unused == 9) }
 }
@@ -128,7 +128,7 @@ mixin Cached[T] { cached T }
 
 class GenericOwner[T] {
     value T
-    use Cached[T](this.value)
+    mix Cached[T](this.value)
 }
 
 mixin PairParts {
@@ -137,12 +137,12 @@ mixin PairParts {
 }
 
 class WrittenOrder {
-    use PairParts { right: marked("R", 2), left: marked("L", 1) }
+    mix PairParts { right: marked("R", 2), left: marked("L", 1) }
 }
 
 class EarlierMixin {
-    use Offset(4)
-    use Cached[Int](this.adjusted)
+    mix Offset(4)
+    mix Cached[Int](this.adjusted)
 }
 
 mixin ShadowedInitializer {
@@ -151,7 +151,7 @@ mixin ShadowedInitializer {
     new(first Int) { assert(first == 99) }
 }
 
-class ShadowedOwner { use ShadowedInitializer(99) }
+class ShadowedOwner { mix ShadowedInitializer(99) }
 
 interface Counted { get count Int }
 
@@ -161,7 +161,7 @@ mixin CounterParts {
     fn increment() { count := count + 1 }
 }
 
-class Counter with Counted { use CounterParts }
+class Counter with Counted { mix CounterParts }
 
 fn main() {
     owner = ImplicitOwner(5)

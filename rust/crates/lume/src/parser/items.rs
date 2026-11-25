@@ -717,18 +717,25 @@ impl<'a> Parser<'a> {
                 ));
             }
             match self.current_kind() {
-                TokenKind::Keyword(Keyword::Use) => {
+                TokenKind::Keyword(Keyword::Mix | Keyword::Use) => {
                     let start = self.current_span();
+                    if self.at_keyword(Keyword::Use) {
+                        self.error_at_current(
+                            "mixin_use_renamed",
+                            "mixin adoption uses 'mix', not 'use'; write 'mix MixinName'",
+                        );
+                    }
                     self.advance();
                     if kind != TypeKind::Class {
                         self.diagnostics.push(Diagnostic::error(
                             "invalid_mixin_use",
-                            "only classes may adopt mixins with 'use'",
+                            "only classes may adopt mixins with 'mix'",
                             start,
                         ));
                     }
                     let target = self.parse_type_ref()?;
-                    let (args, uses_brace_syntax, end) = if self.match_token(TokenKind::LParen) {
+                    let (args, uses_brace_syntax, mut end) = if self.match_token(TokenKind::LParen)
+                    {
                         let args = self.parse_call_args()?;
                         let end =
                             self.consume(TokenKind::RParen, "expected ')' after mixin arguments")?;
@@ -750,10 +757,25 @@ impl<'a> Parser<'a> {
                     } else {
                         (Vec::new(), false, target.span())
                     };
+                    let alias = if self.match_keyword(Keyword::As) {
+                        let (name, span) = self.expect_identifier("expected alias after 'as'")?;
+                        end = span;
+                        Some(MixinAlias { name, span })
+                    } else {
+                        None
+                    };
+                    if member_visibility != Visibility::Default || !member_annotations.is_empty() {
+                        self.diagnostics.push(Diagnostic::error(
+                            "invalid_mixin_modifier",
+                            "mixin adoption cannot have visibility modifiers or annotations",
+                            start,
+                        ));
+                    }
                     mixins.push(MixinUse {
                         target,
                         args,
                         uses_brace_syntax,
+                        alias,
                         span: start.cover(end),
                     });
                 }

@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{ast::*, diagnostic::Diagnostic};
 
+pub(crate) mod aliases;
+
 pub(crate) fn method_key(method: &MethodDecl) -> String {
     let generics = method
         .type_params
@@ -168,6 +170,7 @@ pub(crate) fn compose(program: &Program) -> Result<Program, Vec<Diagnostic>> {
         if class.kind != TypeKind::Class {
             continue;
         }
+        diagnostics.extend(self::aliases::rewrite(class));
         let mut aliases = aliases.clone();
         for param in &class.type_params {
             aliases.remove(&param.name);
@@ -373,6 +376,12 @@ pub(crate) fn compose(program: &Program) -> Result<Program, Vec<Diagnostic>> {
                     continue;
                 }
                 let method = instantiate_method(method, &subst);
+                if let Some(alias) = &adoption.alias {
+                    let mut original = method.clone();
+                    original.name = self::aliases::member_name(&alias.name, &method.name);
+                    original.visibility = Visibility::Private;
+                    class.members.push(TypeMember::Method(original));
+                }
                 if selected.insert(composition_key(&method, &aliases)) {
                     class.members.push(TypeMember::Method(method));
                 }

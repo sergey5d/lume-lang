@@ -35,7 +35,7 @@ pub(crate) fn interface_member_body(span: Span) -> Diagnostic {
         span,
     )
     .with_help(
-        "move this implementation into a mixin and adopt it with 'use MixinName' in the class",
+        "move this implementation into a mixin and adopt it with 'mix MixinName' in the class",
     )
 }
 
