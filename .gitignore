@@ -6,3 +6,7 @@ rust/target/
 **/build/
 .gradle/
 *.vsix
+/web/pkg/
+/web/node_modules/
+/web/test-results/
+/web/playwright-report/
