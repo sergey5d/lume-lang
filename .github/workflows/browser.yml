@@ -1,0 +1,40 @@
+name: Browser Wasm
+
+on:
+  push:
+    paths: ["rust/**", "web/**", ".github/workflows/browser.yml"]
+  pull_request:
+    paths: ["rust/**", "web/**", ".github/workflows/browser.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Rust target and bindings tool
+        run: |
+          rustup target add wasm32-unknown-unknown --toolchain stable
+          cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - name: Native embedding tests
+        run: |
+          cargo test --manifest-path rust/Cargo.toml -p lume --lib project::tests
+          cargo test --manifest-path rust/Cargo.toml -p lume-web
+      - name: Build browser package
+        working-directory: web
+        run: npm run build
+      - name: SDK and browser tests
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npx playwright install --with-deps chromium firefox webkit
+          npm run test:browser
