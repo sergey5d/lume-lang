@@ -18,6 +18,9 @@ for (const source of ['fn(Int) Str', 'fn (Int) Str', 'fn() Int']) {
     assert.equal(keywordScope(source), 'storage.type.function.lume');
 }
 assert.equal(keywordScope('def normalize(value Str)'), undefined);
+for (const source of ['if ready', 'then run()', 'else stop()', 'while ready', 'for item', 'do run()']) {
+    assert.equal(keywordScope(source), 'keyword.control.lume');
+}
 for (const source of ['mix FirstParts as first', 'mixin FirstParts', 'as first']) {
     assert.equal(keywordScope(source), 'keyword.declaration.lume');
 }

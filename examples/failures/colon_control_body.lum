@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*expected 'then' or '\{' after if condition.*
+
+fn main() {
+    if true: println("no")
+}

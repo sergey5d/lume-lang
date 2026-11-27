@@ -543,6 +543,110 @@ fn run(values [Int]) Unit {
 }
 
 #[test]
+fn parses_then_and_do_short_bodies() {
+    for source in [
+        "fn run(flag Bool) { if flag then println(1) else if !flag then println(2) else println(3) }",
+        "fn run(flag Bool) { if flag then return else println(1) }",
+        "fn run(flag Bool) { if flag then\n println(1)\nelse println(2)\nprintln(3) }",
+        "fn run(flag Bool) Int = if flag then 1 else 2",
+        "fn run(flag Bool) Int = if flag then { 40 } + 2 else { x: 0 }.x",
+        "fn run(flag Bool) { rows = [if flag then 1 else 2]\nvalues = [\"key\": if flag then 1 else 2] }",
+        "fn run(flag Bool) { if flag then if flag then println(1) else println(2) }",
+        "fn run(flag Bool) { while flag do break\nprintln(1) }",
+        "fn run(flag Bool) { while flag do\n if flag then break }",
+        "fn run(value Int?) { if let item <- value then println(item) }",
+        "fn run(value Int?) { while let item <- value do println(item) }",
+        "fn run(values [(Int, Int)]) { for let (x, y) <- values do println(x + y) }",
+        "fn run(values [{ x Int }]) { for let { x } <- values do println(x) }",
+        "fn run(flag Bool) { result = { if flag then 1 else 2 } }",
+    ] {
+        let result = parse(source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{source}\n{:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
+fn short_bodies_do_not_consume_following_statements() {
+    let result = parse(
+        "fn run() {\nif true then println(1)\nprintln(2)\nwhile false do println(3)\nprintln(4)\nfor x <- [1] do println(x)\nprintln(5)\n}",
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.unwrap();
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function")
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block")
+    };
+    assert_eq!(block.statements.len(), 6);
+    let Stmt::If(stmt) = &block.statements[0] else {
+        panic!("expected if")
+    };
+    assert_eq!(stmt.then_block.statements.len(), 1);
+    let Stmt::While(stmt) = &block.statements[2] else {
+        panic!("expected while")
+    };
+    assert_eq!(stmt.body.statements.len(), 1);
+    let Stmt::For(stmt) = &block.statements[4] else {
+        panic!("expected for")
+    };
+    assert_eq!(stmt.body.statements.len(), 1);
+}
+
+#[test]
+fn short_if_else_binds_to_the_nearest_if() {
+    let result = parse("fn run(a Bool, b Bool) { if a then if b then println(1) else println(2) }");
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.unwrap();
+    let Item::Function(function) = &program.items[0] else {
+        panic!("expected function")
+    };
+    let CallableBody::Block(block) = &function.body else {
+        panic!("expected block")
+    };
+    let Stmt::If(outer) = &block.statements[0] else {
+        panic!("expected outer if")
+    };
+    assert!(outer.else_branch.is_none());
+    let Stmt::If(inner) = &outer.then_block.statements[0] else {
+        panic!("expected inner if")
+    };
+    assert!(inner.else_branch.is_some());
+}
+
+#[test]
+fn rejects_wrong_or_missing_short_body_markers() {
+    for source in [
+        "fn run() { if true: println(1) }",
+        "fn run() { while true: break }",
+        "fn run() { for x <- [1]: println(x) }",
+        "fn run() { if true do println(1) }",
+        "fn run() { while true then break }",
+        "fn run() { for { x <- [1] } then println(x) }",
+        "fn run() { if true then }",
+        "fn run() { while true do }",
+        "fn run() Int = if true then 1",
+    ] {
+        let result = parse(source);
+        assert!(
+            !result.diagnostics.is_empty(),
+            "unexpectedly parsed: {source}"
+        );
+    }
+    let result = parse("fn run() { then = 1 }");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message == "then is a keyword")
+    );
+}
+
+#[test]
 fn parses_single_generator_do_bodies_and_block_shorthand() {
     for source in [
         r#"

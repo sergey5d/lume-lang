@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*if expression requires 'else'.*
+
+fn main() {
+    value = if true then 1
+}

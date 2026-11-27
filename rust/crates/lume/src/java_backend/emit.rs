@@ -2550,7 +2550,11 @@ impl<'a> SourceBodyEmitter<'a> {
                             bindings,
                             binding_types,
                         )?;
-                        let value_ty = self.expr_type(&statement.values[0], bindings)?;
+                        let value_ty = self.expr_type_with_binding_types(
+                            &statement.values[0],
+                            bindings,
+                            binding_types,
+                        )?;
                         if (type_is_int_like(&target_ty) && type_is_int_like(&value_ty))
                             || (is_named_builtin(&target_ty, "Decimal")
                                 && is_named_builtin(&value_ty, "Decimal"))
@@ -5090,9 +5094,18 @@ impl<'a> SourceBodyEmitter<'a> {
             bindings,
             binding_types,
         )?;
+        let literal_condition = match statement.condition_clauses.as_slice() {
+            [core::IfConditionClause::Expr(expr)] => Some(expr),
+            _ => None,
+        };
         out.push_str(indent);
         out.push_str("while (");
-        out.push_str(&condition);
+        // Lume permits zero-iteration loops; Java rejects a constant-false body.
+        if matches!(literal_condition, Some(core::Expr::Bool { value: false, .. })) {
+            out.push_str("Boolean.FALSE");
+        } else {
+            out.push_str(&condition);
+        }
         out.push_str(") {\n");
         self.emit_statement_block(
             out,

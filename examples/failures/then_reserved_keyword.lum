@@ -1,0 +1,6 @@
+# FAIL_REGEX:
+# .*then is a keyword.*
+
+fn main() {
+    then = 1
+}

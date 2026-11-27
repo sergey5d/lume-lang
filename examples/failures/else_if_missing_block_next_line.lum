@@ -1,5 +1,5 @@
 # FAIL_REGEX:
-# expected '\{' after if condition
+# expected 'then' or '\{' after if condition
 
 fn main() Int {
     if false {

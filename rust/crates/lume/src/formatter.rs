@@ -1440,6 +1440,7 @@ fn ends_with_continuation(kind: TokenKind) -> bool {
             | TokenKind::Pipe
             | TokenKind::Keyword(crate::Keyword::As)
             | TokenKind::Keyword(crate::Keyword::Do)
+            | TokenKind::Keyword(crate::Keyword::Then)
             | TokenKind::Keyword(crate::Keyword::Else)
             | TokenKind::Keyword(crate::Keyword::Is)
             | TokenKind::Keyword(crate::Keyword::When)
@@ -1929,6 +1930,18 @@ fn main() {
         assert_eq!(
             result.text,
             "fn pairs(left [Int], right [Int]) {\n    for {\n        source <- left\n        target <- right\n    } do\n        if source != target {\n            println(source, target)\n        }\n    println(\"done\")\n}\n"
+        );
+    }
+
+    #[test]
+    fn formats_then_and_while_do_bodies_without_changing_scope() {
+        assert_formatted(
+            "fn run(flag Bool) Unit {\nif flag then println( 1 ) else if !flag then println(2) else println(3)\nwhile flag do\nif flag then break\nprintln(4)\nif flag then\nprintln(5)\nelse println(6)\nprintln(7)\n}\nfn choose(flag Bool) Int = if flag then 1 else 2\n",
+            "fn run(flag Bool) {\n    if flag then println(1) else if !flag then println(2) else println(3)\n    while flag do\n        if flag then break\n    println(4)\n    if flag then\n        println(5)\n    else println(6)\n    println(7)\n}\nfn choose(flag Bool) Int = if flag then 1 else 2\n",
+        );
+        assert_formatted(
+            "fn nested(a Bool, b Bool) {\nif a then if b then println(1) else println(2)\nprintln(3)\n}\n",
+            "fn nested(a Bool, b Bool) {\n    if a then if b then println(1) else println(2)\n    println(3)\n}\n",
         );
     }
 

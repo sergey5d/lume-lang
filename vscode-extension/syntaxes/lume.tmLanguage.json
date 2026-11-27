@@ -169,7 +169,7 @@
         },
         {
           "name": "keyword.control.lume",
-          "match": "\\b(?:if|else|for|while|do|yield|match|return|break|continue|is|try|defer)\\b"
+          "match": "\\b(?:if|then|else|for|while|do|yield|match|return|break|continue|is|try|defer)\\b"
         },
         {
           "name": "keyword.declaration.getter.lume",

@@ -606,8 +606,8 @@ impl<'a> Parser<'a> {
         } else {
             (None, parsed_clauses)
         };
-        let then_block = self.parse_if_body_block()?;
-        let else_branch = if self.match_keyword(Keyword::Else) {
+        let then_block = self.parse_if_body_block(false)?;
+        let else_branch = if self.match_else_after_body() {
             self.skip_newlines();
             if self.at_keyword(Keyword::If) {
                 Some(ElseBranch::If(Box::new(self.parse_if_stmt()?)))
@@ -643,7 +643,18 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_while_stmt(&mut self) -> Option<WhileStmt> {
         let start = self.consume_keyword(Keyword::While, "expected 'while'")?;
         let condition_clauses = self.parse_condition_clauses("while")?;
-        let body = self.parse_block()?;
+        self.skip_newlines();
+        let body = if self.match_keyword(Keyword::Do) {
+            self.parse_block_or_inline_stmt_body("do")?
+        } else if self.at(TokenKind::LBrace) {
+            self.parse_block()?
+        } else {
+            self.error_at_current(
+                "while_body_required",
+                "expected 'do' or '{' after while condition",
+            );
+            return None;
+        };
         Some(WhileStmt {
             condition_clauses,
             body: body.clone(),
@@ -836,7 +847,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_return_stmt(&mut self) -> Option<ReturnStmt> {
         let start = self.consume_keyword(Keyword::Return, "expected 'return'")?;
-        if self.at(TokenKind::Newline) || self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
+        if self.return_expr_value_is_omitted() {
             return Some(ReturnStmt {
                 value: None,
                 span: start,

@@ -86,7 +86,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Some((token.lexeme, token.span))
         } else {
-            if !self.diagnose_reserved_do() {
+            if !self.diagnose_reserved_control_keyword() {
                 self.error_at_current("expected_identifier", message);
             }
             None
@@ -103,7 +103,7 @@ impl<'a> Parser<'a> {
             self.advance();
             Some((token.lexeme, token.span))
         } else {
-            if !self.diagnose_reserved_do() {
+            if !self.diagnose_reserved_control_keyword() {
                 self.error_at_current("expected_identifier", message);
             }
             None
@@ -142,7 +142,7 @@ impl<'a> Parser<'a> {
             TokenKind::Percent => "%",
             TokenKind::Caret => "^",
             _ => {
-                if !self.diagnose_reserved_do() {
+                if !self.diagnose_reserved_control_keyword() {
                     self.error_at_current("expected_identifier", message);
                 }
                 return None;
@@ -152,11 +152,17 @@ impl<'a> Parser<'a> {
         Some((name.to_string(), token.span))
     }
 
-    pub(super) fn diagnose_reserved_do(&mut self) -> bool {
-        if !self.at_keyword(Keyword::Do) {
+    pub(super) fn diagnose_reserved_control_keyword(&mut self) -> bool {
+        if !matches!(
+            self.current_kind(),
+            TokenKind::Keyword(Keyword::Do | Keyword::Then)
+        ) {
             return false;
         }
-        self.error_at_current("reserved_keyword", "do is a keyword");
+        self.error_at_current(
+            "reserved_keyword",
+            format!("{} is a keyword", self.current().lexeme),
+        );
         true
     }
 
@@ -510,6 +516,7 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
+                TokenKind::Keyword(Keyword::Then | Keyword::Do) if at_top_level => break,
                 TokenKind::AndAnd
                     if at_top_level
                         && (stop_at_any_and
@@ -740,6 +747,7 @@ impl<'a> Parser<'a> {
             TokenKind::Keyword(Keyword::Fn) => "FN",
             TokenKind::Keyword(Keyword::For) => "FOR",
             TokenKind::Keyword(Keyword::Do) => "DO",
+            TokenKind::Keyword(Keyword::Then) => "THEN",
             TokenKind::Keyword(Keyword::Yield) => "YIELD",
             TokenKind::Keyword(Keyword::Continue) => "CONTINUE",
             TokenKind::Keyword(Keyword::Annotation) => "ANNOTATION",

@@ -11,14 +11,15 @@ annotation  as        break     case       class      continue
 defer       do        else      ext        false      fn
 for         get       if        interface  internal   is
 let         match     mix       mixin      module     object
-private     public    reified   return     shape      true
-try         type      use       var        vararg     when
-while       with      yield
+private     public    reified   return     shape      then
+true        try       type      use        var        vararg
+when        while     with      yield
 ```
 
 They are not ordinary identifiers. A grammar rule may explicitly reuse a
 keyword spelling in a limited name position; otherwise using one as a name is
-an error. In particular, `do` introduces an explicit imperative `for` body.
+an error. `then` introduces an `if` body; `do` introduces an imperative `for`
+or `while` body.
 
 ## Naming Conventions
 
@@ -4032,6 +4033,46 @@ not contain `return`, `break`, or `continue`.
 
 ## `if`
 
+### Short Bodies
+
+`then` introduces one statement after an `if` condition. Each `else if` uses
+the same rule; `else` needs no additional separator:
+
+```txt
+if invalid then return
+if value < 0 then println("negative")
+else if value == 0 then println("zero")
+else println("positive")
+
+if let item <- maybeValue then println(item)
+```
+
+An expression `if` requires an `else` and produces a value:
+
+```txt
+label = if active then "enabled" else "disabled"
+```
+
+A body is one complete statement or expression, not an indentation-based
+scope. Multiple statements require braces. Newlines after `then`, `do`, and
+`else` are layout; a newline before `else` is also allowed. An `else` belongs
+to the nearest unmatched `if`; use braces when an outer conditional needs its
+own `else` around a nested conditional.
+
+Short bodies keep ordinary block scope and control flow. Local declarations
+remain inside the body; `return`, `break`, and `continue` target the enclosing
+callable or loop, not a synthetic lambda. Colon is not a control-body marker.
+
+The same one-statement body rule applies to loops:
+
+```txt
+while pending do processNext()
+for item <- items do process(item)
+for { item <- items } do process(item)
+```
+
+### Brace Bodies
+
 Statement form:
 
 ```txt
@@ -5104,12 +5145,15 @@ comprehensions. Those families lower through `map` / `flatMap`, not real
 iteration, and they do not have skip or early-exit states. Choose absence or
 failure explicitly with `match`, `map`, `flatMap`, `None`, `Err`, or `Left`.
 
-Condition-controlled loops use `while`:
+Condition-controlled loops use `while`. Use a brace-delimited body or `do`
+followed by one statement or block (see [Short Bodies](#short-bodies)):
 
 ```txt
 while current < 10 {
     current += 1
 }
+
+while current < 10 do current += 1
 ```
 
 `while let` repeats while a refutable pattern continues to match. The source is
@@ -5979,7 +6023,7 @@ Newline continuation:
 - A named function or method without an explicit return type returns `Unit` in all three forms. Non-`Unit` return types are never inferred from named callable bodies.
 - Getter declarations begin with `get`, omit a parameter list, require a return type, and use the same block or expression body forms.
 - Constructor declarations begin with `new` and use the constructor body forms documented above.
-- A newline after `else` or `yield` is layout. `yield` takes one expression;
+- A newline after `then`, `do`, `else`, or `yield` is layout. `yield` takes one expression;
   expression `else` takes one expression, while statement `else` and
   `let ... else` take one statement or their permitted brace body. Multiple
   statements require an explicit block; indentation does not determine scope.

@@ -101,6 +101,18 @@ object Defaults {
     active: true
 }</code></pre>
 
+        <h2 id="short-bodies">Short guards and loops</h2>
+        <p>Use <code>then</code> for a single-statement conditional body and <code>do</code> for a single-statement loop body. Braced bodies remain valid. Newlines are layout, not indentation-based scope; multiple statements require a block.</p>
+        <pre><code>if invalid then return
+if count == 0 then println("empty")
+else if count == 1 then println("one")
+else println("many")
+
+label = if active then "enabled" else "disabled"
+while pending do processNext()
+for item &lt;- items do process(item)
+for { item &lt;- items } do process(item)</code></pre>
+
         <h2 id="patterns">Pattern matching and destructuring</h2>
         <p><code>let</code> supports irrefutable destructuring directly. Refutable bindings require an <code>else</code> path. <code>if let</code> branches on a pattern, and <code>match</code> handles alternatives exhaustively.</p>
         <pre><code>let { name, location } = ada

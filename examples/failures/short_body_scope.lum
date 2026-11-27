@@ -1,0 +1,7 @@
+# FAIL_REGEX:
+# .*undefined name 'local'.*
+
+fn main() {
+    if true then local = 1
+    println(local)
+}

@@ -13,6 +13,27 @@ export const examples = {
 `,
     },
   },
+  guards: {
+    label: 'Short guards & loops',
+    entry: 'main.lum',
+    files: {
+      'main.lum': `fn describe(value Int) Str =
+    if value < 0 then "negative"
+    else if value == 0 then "zero"
+    else "positive"
+
+fn main() {
+    for value <- [-1, 0, 1] do println(value, describe(value))
+
+    var count = 0
+    while count < 3 do count += 1
+    println("Count:", count)
+
+    if count == 3 then println("Finished")
+}
+`,
+    },
+  },
   records: {
     label: 'Shapes & collections',
     entry: 'main.lum',

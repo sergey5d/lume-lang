@@ -140,11 +140,13 @@ impl<'a> Parser<'a> {
 
     pub(super) fn parse_if_expr(&mut self, start: Span) -> Option<Expr> {
         let condition_clauses = self.parse_condition_clauses("if")?;
-        let then_block = self.parse_if_body_block()?;
-        if !self.match_keyword(Keyword::Else) {
+        self.skip_newlines();
+        let short_body = self.at_keyword(Keyword::Then);
+        let then_block = self.parse_if_body_block(true)?;
+        if !self.match_else_after_body() {
             self.error_at_current(
                 "if_expression_requires_else",
-                "if expression requires 'else'; use statement form 'if condition { ... }' when no value is needed",
+                "if expression requires 'else'; use 'if condition then statement' or 'if condition { ... }' when no value is needed",
             );
             return None;
         }
@@ -153,6 +155,8 @@ impl<'a> Parser<'a> {
             let else_start = self.consume_keyword(Keyword::If, "expected 'if'")?;
             let else_if = self.parse_if_expr(else_start)?;
             ElseExprBranch::If(Box::new(else_if))
+        } else if short_body {
+            ElseExprBranch::Block(self.parse_complete_inline_expr_body("else")?)
         } else {
             ElseExprBranch::Block(self.parse_block_or_inline_expr_body("else")?)
         };
@@ -1042,7 +1046,10 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
         }
-        if self.at(TokenKind::Eof) {
+        if matches!(
+            self.current_kind(),
+            TokenKind::Eof | TokenKind::RBrace | TokenKind::Keyword(Keyword::Else)
+        ) {
             self.error_at_current(
                 "expected_statement",
                 format!("expected statement after {owner}"),
@@ -1067,17 +1074,33 @@ impl<'a> Parser<'a> {
         self.parse_block_or_inline_stmt_body("let else")
     }
 
-    pub(super) fn parse_if_body_block(&mut self) -> Option<Block> {
+    pub(super) fn parse_if_body_block(&mut self, expression_body: bool) -> Option<Block> {
+        self.skip_newlines();
+        if self.match_keyword(Keyword::Then) {
+            return if expression_body {
+                self.parse_complete_inline_expr_body("then")
+            } else {
+                self.parse_block_or_inline_stmt_body("then")
+            };
+        }
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
         }
-        let message = if self.at(TokenKind::Identifier) && self.current().lexeme == "then" {
-            "'then' is unsupported; use 'if condition { ... }'"
-        } else {
-            "expected '{' after if condition"
-        };
-        self.error_at_current("unexpected_token", message);
+        self.error_at_current(
+            "unexpected_token",
+            "expected 'then' or '{' after if condition",
+        );
         None
+    }
+
+    pub(super) fn match_else_after_body(&mut self) -> bool {
+        let checkpoint = self.checkpoint();
+        self.skip_newlines();
+        if self.match_keyword(Keyword::Else) {
+            return true;
+        }
+        self.restore(checkpoint);
+        false
     }
 
     pub(super) fn parse_block_or_inline_expr_body(&mut self, owner: &'static str) -> Option<Block> {
@@ -1085,7 +1108,10 @@ impl<'a> Parser<'a> {
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
         }
-        if self.at(TokenKind::Eof) {
+        if matches!(
+            self.current_kind(),
+            TokenKind::Eof | TokenKind::RBrace | TokenKind::Keyword(Keyword::Else)
+        ) {
             self.error_at_current(
                 "expected_expression",
                 format!("expected expression after {owner}"),
@@ -1098,6 +1124,16 @@ impl<'a> Parser<'a> {
             statements: vec![Stmt::Expr(ExprStmt { expr, span })],
             span,
         })
+    }
+
+    fn parse_complete_inline_expr_body(&mut self, owner: &'static str) -> Option<Block> {
+        self.skip_newlines();
+        if self.at(TokenKind::LBrace) {
+            return self
+                .parse_expression_brace_body_with_continuation()
+                .map(ExpressionBraceBody::into_block);
+        }
+        self.parse_block_or_inline_expr_body(owner)
     }
 
     pub(super) fn parse_extract_or_expr(&mut self) -> Option<Expr> {
@@ -1411,7 +1447,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn return_expr_value_is_omitted(&self) -> bool {
+    pub(super) fn return_expr_value_is_omitted(&self) -> bool {
         matches!(
             self.current_kind(),
             TokenKind::Newline
@@ -1419,6 +1455,7 @@ impl<'a> Parser<'a> {
                 | TokenKind::RParen
                 | TokenKind::RBracket
                 | TokenKind::Comma
+                | TokenKind::Keyword(Keyword::Else)
                 | TokenKind::Eof
         )
     }
@@ -2164,8 +2201,8 @@ impl<'a> Parser<'a> {
                     .parse_expression_brace_body()
                     .map(ExpressionBraceBody::into_expr)
             }),
-            TokenKind::Keyword(Keyword::Do) => {
-                self.diagnose_reserved_do();
+            TokenKind::Keyword(Keyword::Do | Keyword::Then) => {
+                self.diagnose_reserved_control_keyword();
                 None
             }
             _ => {

@@ -1,0 +1,76 @@
+# EXPECT:
+# short bodies ok
+
+module examples/short_bodies
+
+fn classify(value Int) Str =
+    if value < 0 then "negative"
+    else if value == 0 then "zero"
+    else "positive"
+
+fn firstPositive(values [Int]) Int {
+    for value <- values do if value > 0 then return value
+    -1
+}
+
+fn unwrap(value Int?) Int {
+    if let item <- value then return item
+    0
+}
+
+fn bareReturn(done Bool) {
+    if done then return else assert(!done)
+}
+
+fn main() {
+    assert(classify(-1) == "negative")
+    assert(classify(0) == "zero")
+    assert(classify(1) == "positive")
+    assert(firstPositive([-1, 0, 3, 5]) == 3)
+    assert(firstPositive([]) == -1)
+    assert(unwrap(^7) == 7)
+    assert(unwrap(None) == 0)
+    bareReturn(true)
+    bareReturn(false)
+
+    var count = 0
+    while count < 3 do count += 1
+    assert(count == 3)
+    while false do panic("unreachable")
+    while (false) do panic("also unreachable")
+
+    var pending Int? = ^5
+    while let item <- pending do {
+        assert(item == 5)
+        pending := None
+    }
+
+    var total = 0
+    for value <- [0, 1, 2, 3] do
+        if value == 0 then continue
+        else if value == 3 then break
+        else total += value
+    assert(total == 3)
+
+    for let (left, right) <- [(1, 2), (3, 4)] do total += left + right
+    assert(total == 13)
+
+    for { left <- [1, 2] } do total += left
+    assert(total == 16)
+
+    if true then
+        assert(total == 16)
+    total += 1
+    assert(total == 17)
+
+    if true then if false then total += 100 else total += 1
+    assert(total == 18)
+    if false then {
+        if true then total += 100
+    } else total += 2
+    assert(total == 20)
+
+    picked Int = if true then 40 + 2 else 0
+    assert(picked == 42)
+    println("short bodies ok")
+}

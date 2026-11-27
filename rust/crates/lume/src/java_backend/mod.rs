@@ -2295,6 +2295,11 @@ mod tests {
             .unwrap();
         for (path, entrypoint, expected) in [
             (
+                "examples/features/short_bodies.lum",
+                "examples.short_bodies.Short_bodiesMain",
+                "short bodies ok\n",
+            ),
+            (
                 "examples/features/declaration_construction.lum",
                 "examples.declaration_construction.Declaration_constructionMain",
                 "declaration construction ok\n",

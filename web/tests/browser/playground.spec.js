@@ -29,6 +29,7 @@ test('a startup module failure is visible instead of leaving inert controls', as
 
 for (const [example, expected] of [
   ['hello', 'Total: 10'],
+  ['guards', '-1 negative\n0 zero\n1 positive\nCount: 3\nFinished'],
   ['records', 'Total: 20.75'],
   ['modules', 'Price: 20.000'],
   ['json', 'Total: 12'],
@@ -53,6 +54,24 @@ for (const [example, expected] of [
     else await expect(page.locator('#status')).toHaveText('Finished');
   });
 }
+
+test('short bodies preserve scope and control flow before and after formatting', async ({ page }) => {
+  const source = await readFile(new URL('../../../examples/features/short_bodies.lum', import.meta.url), 'utf8');
+  const results = await page.evaluate(async source => {
+    const { LumeClient } = await import('/sdk.js');
+    const sdk = new LumeClient({ timeoutMs: 30_000 });
+    const project = { entry: 'main.lum', files: { 'main.lum': source } };
+    const original = await sdk.run(project);
+    const formatted = await sdk.format(source);
+    const rerun = await sdk.run({ ...project, files: { 'main.lum': formatted.text } });
+    return { original, formatted, rerun };
+  }, source);
+  expect(results.original.diagnostics).toEqual([]);
+  expect(results.original.output).toBe('short bodies ok\n');
+  expect(results.formatted.diagnostics).toEqual([]);
+  expect(results.rerun.diagnostics).toEqual([]);
+  expect(results.rerun.output).toBe(results.original.output);
+});
 
 test('the README order report runs with JSON decoding and error propagation', async ({ page }) => {
   const source = await readFile(new URL('../../../examples/readme_order_report.lum', import.meta.url), 'utf8');
