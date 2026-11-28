@@ -338,13 +338,17 @@ impl Rewrite {
                 fields, methods, ..
             } => {
                 let previous = std::mem::replace(&mut self.receiver_available, false);
+                let mut inner = locals.clone();
                 for field in fields {
                     if let Some(value) = &mut field.initializer {
-                        self.expression(value, locals);
+                        self.expression(value, &inner);
                     }
+                    // Initializers see preceding fields, not their own or later fields.
+                    inner.insert(field.name.clone());
                 }
+                inner.extend(methods.iter().map(|method| method.name.clone()));
                 for method in methods {
-                    self.callable(&mut method.params, method.body.as_mut(), locals);
+                    self.callable(&mut method.params, method.body.as_mut(), &inner);
                 }
                 self.receiver_available = previous;
             }

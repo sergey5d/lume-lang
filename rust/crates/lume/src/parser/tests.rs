@@ -570,6 +570,69 @@ fn parses_then_and_do_short_bodies() {
 }
 
 #[test]
+fn short_if_branches_keep_construction_and_continuation_in_block_bodies() {
+    let result = parse(
+        "fn choose(flag Bool) { x Int } { if flag then { x: 1 } else { x: 2 } }\nfn answer(flag Bool) Int { if flag then { 40 } + 2 else { 0 } + 3 }\nfn member(flag Bool) Int { if flag then { x: 1 }.x else { x: 2 }.x }\n",
+    );
+    assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+    let program = result.program.unwrap();
+    let conditional = |index| {
+        let Item::Function(function) = &program.items[index] else {
+            panic!("expected function")
+        };
+        let CallableBody::Block(block) = &function.body else {
+            panic!("expected block")
+        };
+        let Stmt::If(stmt) = &block.statements[0] else {
+            panic!("expected conditional")
+        };
+        stmt
+    };
+    let branch_expr = |block: &Block| match block.statements.as_slice() {
+        [Stmt::Expr(stmt)] => stmt.expr.clone(),
+        other => panic!("expected one expression, got {other:?}"),
+    };
+    for (index, expected) in [(0, "record"), (1, "binary"), (2, "member")] {
+        let stmt = conditional(index);
+        let Some(ElseBranch::Block(else_block)) = &stmt.else_branch else {
+            panic!("expected else block")
+        };
+        for block in [&stmt.then_block, else_block] {
+            let expr = branch_expr(block);
+            assert!(
+                match expected {
+                    "record" => matches!(expr, Expr::RecordLiteral { .. }),
+                    "binary" => matches!(expr, Expr::Binary { .. }),
+                    "member" => matches!(expr, Expr::Member { .. }),
+                    _ => unreachable!(),
+                },
+                "unexpected {expected} branch: {expr:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn short_if_statement_bodies_keep_empty_blocks_and_control_flow() {
+    for source in [
+        "fn run() { if true then {} }",
+        "fn run() { if true then {} else {} }",
+        "fn run(flag Bool) { if flag then {\n} else {\n} }",
+        "fn run(flag Bool) { if flag then return else println(1) }",
+        "fn run(flag Bool) { var x = 0\nif flag then x += 1 else x += 2 }",
+        "fn run(flag Bool) { while true do if flag then break else continue }",
+        "fn run(flag Bool) { if flag then { value = 1\nprintln(value) } }",
+    ] {
+        let result = parse(source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "{source}\n{:#?}",
+            result.diagnostics
+        );
+    }
+}
+
+#[test]
 fn short_bodies_do_not_consume_following_statements() {
     let result = parse(
         "fn run() {\nif true then println(1)\nprintln(2)\nwhile false do println(3)\nprintln(4)\nfor x <- [1] do println(x)\nprintln(5)\n}",

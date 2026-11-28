@@ -156,7 +156,7 @@ impl<'a> Parser<'a> {
             let else_if = self.parse_if_expr(else_start)?;
             ElseExprBranch::If(Box::new(else_if))
         } else if short_body {
-            ElseExprBranch::Block(self.parse_complete_inline_expr_body("else")?)
+            ElseExprBranch::Block(self.parse_complete_inline_body("else", true)?)
         } else {
             ElseExprBranch::Block(self.parse_block_or_inline_expr_body("else")?)
         };
@@ -1077,11 +1077,7 @@ impl<'a> Parser<'a> {
     pub(super) fn parse_if_body_block(&mut self, expression_body: bool) -> Option<Block> {
         self.skip_newlines();
         if self.match_keyword(Keyword::Then) {
-            return if expression_body {
-                self.parse_complete_inline_expr_body("then")
-            } else {
-                self.parse_block_or_inline_stmt_body("then")
-            };
+            return self.parse_complete_inline_body("then", expression_body);
         }
         if self.at(TokenKind::LBrace) {
             return self.parse_block();
@@ -1126,14 +1122,30 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_complete_inline_expr_body(&mut self, owner: &'static str) -> Option<Block> {
+    pub(super) fn parse_complete_inline_body(
+        &mut self,
+        owner: &'static str,
+        expression_body: bool,
+    ) -> Option<Block> {
         self.skip_newlines();
-        if self.at(TokenKind::LBrace) {
+        let empty_statement_block = !expression_body
+            && self.at(TokenKind::LBrace)
+            && self.tokens[self.index + 1..]
+                .iter()
+                .find(|token| token.kind != TokenKind::Newline)
+                .is_some_and(|token| token.kind == TokenKind::RBrace);
+        // Short branches share expression brace classification and continuation.
+        // Empty braces retain their ordinary empty-block meaning in statements.
+        if self.at(TokenKind::LBrace) && !empty_statement_block {
             return self
                 .parse_expression_brace_body_with_continuation()
                 .map(ExpressionBraceBody::into_block);
         }
-        self.parse_block_or_inline_expr_body(owner)
+        if expression_body {
+            self.parse_block_or_inline_expr_body(owner)
+        } else {
+            self.parse_block_or_inline_stmt_body(owner)
+        }
     }
 
     pub(super) fn parse_extract_or_expr(&mut self) -> Option<Expr> {

@@ -16639,6 +16639,40 @@ fn main() Int {
     }
 
     #[test]
+    fn anonymous_object_members_shadow_enclosing_mixin_aliases() {
+        let accepted = check_path(
+            workspace_root().join("examples/issues/mixin_alias_anonymous_object_members.lum"),
+        )
+        .unwrap();
+        assert!(accepted.diagnostics.is_empty(), "{:#?}", accepted.diagnostics);
+
+        for source in [
+            "mixin Parts {}\nclass Host {\nmix Parts as p\nfn run() Int {\nobj = object {\np Int = 40\ncopy Int = p + 2\nfn read() Int = copy\n}\nobj.read()\n}\n}",
+            "mixin Parts {}\nclass Host {\nmix Parts as p\nfn run() {\nobj = object {\np Int = 1\nfn read() Int {\nnested = object {\np Int = 42\nfn read() Int = p\n}\nnested.read()\n}\n}\n}\n}",
+        ] {
+            let result = check_program(&parse_inline(source));
+            assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        }
+
+        for source in [
+            "mixin Parts {}\nclass Host {\nmix Parts as p\nfn run() {\nobj = object { fn read() Any = p }\n}\n}",
+            "mixin Parts {}\nclass Host {\nmix Parts as p\nfn run() {\nobj = object { p Int = p }\n}\n}",
+            "mixin Parts {}\nclass Host {\nmix Parts as p\nfn run() {\nobj = object {\ncopy Int = p\np Int = 42\n}\n}\n}",
+            "mixin Parts {}\nclass Host {\nmix Parts as p\nfn run() {\nobj = object { p Int = 42 }\nvalue = p\n}\n}",
+        ] {
+            let result = check_program(&parse_inline(source));
+            assert!(
+                result
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == "invalid_mixin_alias_value"),
+                "expected invalid_mixin_alias_value for {source}: {:#?}",
+                result.diagnostics
+            );
+        }
+    }
+
+    #[test]
     fn checks_mixin_constructor_contracts_and_initialization_boundaries() {
         let accepted =
             check_path(workspace_root().join("examples/features/mixin_constructors.lum")).unwrap();

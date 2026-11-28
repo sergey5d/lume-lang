@@ -1,3 +1,5 @@
+use std::collections::{BTreeMap, HashMap};
+
 use crate::{
     Diagnostic, Keyword, SourceFile, Token, TokenKind,
     ast::{
@@ -48,7 +50,8 @@ pub fn format_source(file: &SourceFile) -> FormatResult {
     let program = parsed
         .program
         .expect("a successful parse always produces a program");
-    let canonical_source = canonicalize_syntax(&file.text, &lexed.tokens, &program);
+    let (canonical_source, mut body_layout) =
+        canonicalize_syntax(&file.text, &lexed.tokens, &program);
     let canonical_file = SourceFile::new(file.name.clone(), canonical_source);
     let canonical_lexed = lex(&canonical_file);
     if canonical_lexed.has_errors() {
@@ -58,8 +61,27 @@ pub fn format_source(file: &SourceFile) -> FormatResult {
         };
     }
 
+    if canonical_file.text != file.text {
+        let canonical_parsed = parse_program(&canonical_lexed.tokens);
+        if !canonical_parsed.diagnostics.is_empty() {
+            return FormatResult {
+                text: file.text.clone(),
+                diagnostics: canonical_parsed.diagnostics,
+            };
+        }
+        let mut rules = SourceRewrites::new(&canonical_file.text);
+        collect_program_rewrites(
+            &canonical_parsed
+                .program
+                .expect("canonical source remains valid"),
+            &canonical_lexed.tokens,
+            &mut rules,
+        );
+        body_layout = rules.body_layout;
+    }
+
     FormatResult {
-        text: format_valid_source(&canonical_file.text, &canonical_lexed.tokens),
+        text: format_valid_source(&canonical_file.text, &canonical_lexed.tokens, &body_layout),
         diagnostics: Vec::new(),
     }
 }
@@ -76,9 +98,20 @@ struct SourceRewrites<'a> {
     edits: Vec<SourceEdit>,
     speculative_type_argument: bool,
     option_value_declared: bool,
+    body_layout: BodyLayout,
 }
 
-impl SourceRewrites<'_> {
+impl<'a> SourceRewrites<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            edits: Vec::new(),
+            speculative_type_argument: false,
+            option_value_declared: false,
+            body_layout: BodyLayout::default(),
+        }
+    }
+
     fn bind_value_name(&mut self, name: &str) {
         self.option_value_declared |= name == "Option";
     }
@@ -97,13 +130,8 @@ impl SourceRewrites<'_> {
     }
 }
 
-fn canonicalize_syntax(source: &str, tokens: &[Token], program: &Program) -> String {
-    let mut rewrites = SourceRewrites {
-        source,
-        edits: Vec::new(),
-        speculative_type_argument: false,
-        option_value_declared: false,
-    };
+fn canonicalize_syntax(source: &str, tokens: &[Token], program: &Program) -> (String, BodyLayout) {
+    let mut rewrites = SourceRewrites::new(source);
     collect_program_rewrites(program, tokens, &mut rewrites);
     // Bracket applications can also be indexing. Without name resolution, leave
     // speculative types alone when Option can denote a value in this file.
@@ -119,7 +147,122 @@ fn canonicalize_syntax(source: &str, tokens: &[Token], program: &Program) -> Str
     for edit in rewrites.edits.into_iter().rev() {
         result.replace_range(edit.start..edit.end, edit.replacement);
     }
-    result
+    (result, rewrites.body_layout)
+}
+
+#[derive(Default)]
+struct BodyLayout {
+    owners: BTreeMap<usize, Span>,
+    guides: Vec<BodyGuide>,
+    else_owners: HashMap<usize, usize>,
+    owner_aliases: HashMap<usize, usize>,
+}
+
+// A short body adds indentation until its AST boundary, not just its next line.
+struct BodyGuide {
+    owner: usize,
+    marker: Span,
+    body: Span,
+}
+
+#[derive(Clone, Copy)]
+struct IndentAnchor {
+    indent: usize,
+}
+
+impl BodyLayout {
+    fn body(&mut self, tokens: &[Token], owner: Span, body: Span) {
+        self.owners.insert(owner.start, owner);
+        let Some(marker) = token_immediately_before(tokens, body.start) else {
+            return;
+        };
+        if !matches!(
+            marker.kind,
+            TokenKind::Keyword(Keyword::Then | Keyword::Do | Keyword::Else)
+        ) {
+            return;
+        }
+        let first = tokens.partition_point(|token| token.span.start < body.start);
+        let inline_braces = tokens
+            .get(first)
+            .is_some_and(|token| token.kind == TokenKind::LBrace)
+            && body.start_pos.line == marker.span.start_pos.line;
+        if !inline_braces {
+            self.guides.push(BodyGuide {
+                owner: owner.start,
+                marker: marker.span,
+                body,
+            });
+        }
+    }
+
+    fn else_branch(&mut self, tokens: &[Token], owner: Span, body: Span, else_if: bool) {
+        let Some(marker) = token_immediately_before(tokens, body.start)
+            .filter(|token| token.kind == TokenKind::Keyword(Keyword::Else))
+        else {
+            return;
+        };
+        self.else_owners.insert(marker.span.start, owner.start);
+        if else_if && body.start_pos.line == marker.span.start_pos.line {
+            self.owner_aliases.insert(body.start, owner.start);
+        } else {
+            self.body(tokens, owner, body);
+        }
+    }
+
+    fn enclosing(&self, offset: usize, before_line: Option<usize>) -> Option<&BodyGuide> {
+        self.guides
+            .iter()
+            .filter(|guide| {
+                guide.marker.end <= offset
+                    && offset <= guide.body.end
+                    && before_line.is_none_or(|line| guide.marker.start_pos.line < line)
+            })
+            .max_by_key(|guide| guide.marker.start)
+    }
+
+    fn delta(
+        &self,
+        guide: &BodyGuide,
+        anchors: &HashMap<usize, IndentAnchor>,
+        structural_indents: &HashMap<usize, usize>,
+    ) -> Option<isize> {
+        let owner = anchors.get(&guide.owner)?.indent;
+        let structural = structural_indents.get(&guide.marker.start)?;
+        Some((owner + 1) as isize - *structural as isize)
+    }
+
+    fn register_owners(
+        &self,
+        start: usize,
+        end: usize,
+        default_indent: usize,
+        structural: usize,
+        structural_indents: &HashMap<usize, usize>,
+        anchors: &mut HashMap<usize, IndentAnchor>,
+    ) {
+        for (&offset, _) in self.owners.range(start..end) {
+            let indent = if let Some(parent) = self
+                .owner_aliases
+                .get(&offset)
+                .and_then(|parent| anchors.get(parent))
+            {
+                parent.indent
+            } else {
+                let at_owner = structural_indents
+                    .get(&offset)
+                    .copied()
+                    .unwrap_or(structural);
+                let delta = self
+                    .enclosing(offset, None)
+                    .and_then(|guide| self.delta(guide, anchors, structural_indents))
+                    .unwrap_or(0);
+                (default_indent as isize + at_owner as isize - structural as isize + delta).max(0)
+                    as usize
+            };
+            anchors.insert(offset, IndentAnchor { indent });
+        }
+    }
 }
 
 fn collect_type_rewrites(ty: &TypeRef, tokens: &[Token], rewrites: &mut SourceRewrites<'_>) {
@@ -728,6 +871,19 @@ fn collect_stmt_rewrites(stmt: &Stmt, tokens: &[Token], rewrites: &mut SourceRew
             DeferAction::Block(block) => collect_block_rewrites(block, tokens, rewrites),
         },
         Stmt::If(stmt) => {
+            rewrites
+                .body_layout
+                .body(tokens, stmt.span, stmt.then_block.span);
+            if let Some(branch) = &stmt.else_branch {
+                match branch {
+                    ElseBranch::If(next) => rewrites
+                        .body_layout
+                        .else_branch(tokens, stmt.span, next.span, true),
+                    ElseBranch::Block(block) => rewrites
+                        .body_layout
+                        .else_branch(tokens, stmt.span, block.span, false),
+                }
+            }
             if let Some(pattern) = &stmt.pattern {
                 collect_pattern_rewrites(pattern, tokens, rewrites);
             }
@@ -769,18 +925,23 @@ fn collect_stmt_rewrites(stmt: &Stmt, tokens: &[Token], rewrites: &mut SourceRew
             }
         }
         Stmt::While(stmt) => {
+            rewrites.body_layout.body(tokens, stmt.span, stmt.body.span);
             for clause in &stmt.condition_clauses {
                 collect_condition_clause_rewrites(clause, tokens, rewrites);
             }
             collect_block_rewrites(&stmt.body, tokens, rewrites);
         }
         Stmt::For(stmt) => {
+            rewrites.body_layout.body(tokens, stmt.span, stmt.body.span);
             for binding in &stmt.bindings {
                 collect_for_binding_rewrites(binding, tokens, rewrites);
             }
             collect_block_rewrites(&stmt.body, tokens, rewrites);
         }
         Stmt::LetElse(stmt) => {
+            rewrites
+                .body_layout
+                .else_branch(tokens, stmt.span, stmt.else_block.span, false);
             collect_extraction_binding_rewrite(stmt, tokens, rewrites);
             collect_pattern_rewrites(&stmt.pattern, tokens, rewrites);
             for clause in &stmt.clauses {
@@ -918,8 +1079,19 @@ fn collect_expr_rewrites(expr: &Expr, tokens: &[Token], rewrites: &mut SourceRew
             condition_clauses,
             then_block,
             else_branch,
-            ..
+            span,
         } => {
+            rewrites.body_layout.body(tokens, *span, then_block.span);
+            match else_branch.as_ref() {
+                ElseExprBranch::If(next) => {
+                    rewrites
+                        .body_layout
+                        .else_branch(tokens, *span, next.span(), true)
+                }
+                ElseExprBranch::Block(block) => rewrites
+                    .body_layout
+                    .else_branch(tokens, *span, block.span, false),
+            }
             for clause in condition_clauses {
                 collect_condition_clause_rewrites(clause, tokens, rewrites);
             }
@@ -990,7 +1162,7 @@ struct OpenDelimiter {
     carries_continuation: bool,
 }
 
-fn format_valid_source(source: &str, tokens: &[Token]) -> String {
+fn format_valid_source(source: &str, tokens: &[Token], body_layout: &BodyLayout) -> String {
     let lines = source_lines(source);
     if lines.is_empty() {
         return String::new();
@@ -1026,11 +1198,14 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
     let mut brace_continuations = Vec::new();
     let mut delimiters = Vec::new();
     let mut continuation_pending = false;
+    let mut structural_indents = HashMap::new();
+    let mut anchors = HashMap::new();
 
     for (index, line) in lines.iter().enumerate() {
         let line_tokens = &tokens_by_line[index];
 
         if protected_lines[index] {
+            let structural = structural_indent(brace_depth, &brace_continuations, &delimiters);
             output.push_str(line.content);
             output.push_str(line.ending);
             update_nesting(
@@ -1040,6 +1215,18 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
                 &mut brace_depth,
                 &mut brace_continuations,
                 &mut delimiters,
+                &mut structural_indents,
+            );
+            body_layout.register_owners(
+                line.start,
+                line.start + line.content.len(),
+                line.content
+                    .len()
+                    .saturating_sub(line.content.trim_start().len())
+                    / INDENT.len(),
+                structural,
+                &structural_indents,
+                &mut anchors,
             );
             continuation_pending = line_requests_continuation(line_tokens);
             continue;
@@ -1084,15 +1271,14 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
             .iter()
             .filter(|carried| **carried)
             .count();
-        for _ in 0..line_brace_depth
+        let structural = line_brace_depth
             + carried_continuations
             + usize::from(carries_delimiter_continuation)
-            + usize::from(continuation)
-        {
-            output.push_str(INDENT);
-        }
-        output.push_str(&body);
-        output.push_str(line.ending);
+            + usize::from(has_active_delimiter);
+        let default_indent = line_brace_depth
+            + carried_continuations
+            + usize::from(carries_delimiter_continuation)
+            + usize::from(continuation);
 
         update_nesting(
             line_tokens,
@@ -1101,7 +1287,35 @@ fn format_valid_source(source: &str, tokens: &[Token]) -> String {
             &mut brace_depth,
             &mut brace_continuations,
             &mut delimiters,
+            &mut structural_indents,
         );
+        body_layout.register_owners(
+            line.start,
+            line.start + line.content.len(),
+            default_indent,
+            structural,
+            &structural_indents,
+            &mut anchors,
+        );
+        let delta = body_layout
+            .enclosing(body_start, Some(index + 1))
+            .and_then(|guide| body_layout.delta(guide, &anchors, &structural_indents))
+            .unwrap_or(0);
+        let mut indent = (default_indent as isize + delta).max(0) as usize;
+        if let Some(first) = line_tokens
+            .iter()
+            .find(|token| token.kind != TokenKind::RBrace)
+            && first.kind == TokenKind::Keyword(Keyword::Else)
+            && let Some(owner) = body_layout.else_owners.get(&first.span.start)
+            && let Some(anchor) = anchors.get(owner)
+        {
+            indent = anchor.indent;
+        }
+        for _ in 0..indent {
+            output.push_str(INDENT);
+        }
+        output.push_str(&body);
+        output.push_str(line.ending);
         if !line_tokens.is_empty() {
             continuation_pending = line_requests_continuation(line_tokens);
         }
@@ -1306,9 +1520,14 @@ fn update_nesting(
     braces: &mut usize,
     brace_continuations: &mut Vec<bool>,
     delimiters: &mut Vec<OpenDelimiter>,
+    structural_indents: &mut HashMap<usize, usize>,
 ) {
     let mut carry_continuation = carry_continuation;
     for (index, token) in tokens.iter().enumerate() {
+        structural_indents.insert(
+            token.span.start,
+            structural_indent(*braces, brace_continuations, delimiters),
+        );
         match token.kind {
             TokenKind::LBrace => {
                 let closes_on_line = matching_brace_closes_on_line(tokens, index);
@@ -1345,6 +1564,30 @@ fn update_nesting(
             _ => {}
         }
     }
+}
+
+fn structural_indent(
+    braces: usize,
+    brace_continuations: &[bool],
+    delimiters: &[OpenDelimiter],
+) -> usize {
+    let active = |delimiter: &&OpenDelimiter| {
+        delimiter
+            .suspended_by_brace_depth
+            .is_none_or(|depth| braces < depth)
+    };
+    braces
+        + brace_continuations
+            .iter()
+            .filter(|carried| **carried)
+            .count()
+        + usize::from(delimiters.iter().filter(active).next().is_some())
+        + usize::from(
+            delimiters
+                .iter()
+                .filter(active)
+                .any(|delimiter| delimiter.carries_continuation),
+        )
 }
 
 fn matching_brace_closes_on_line(tokens: &[&Token], opening: usize) -> bool {
@@ -1439,9 +1682,6 @@ fn ends_with_continuation(kind: TokenKind) -> bool {
             | TokenKind::OrOr
             | TokenKind::Pipe
             | TokenKind::Keyword(crate::Keyword::As)
-            | TokenKind::Keyword(crate::Keyword::Do)
-            | TokenKind::Keyword(crate::Keyword::Then)
-            | TokenKind::Keyword(crate::Keyword::Else)
             | TokenKind::Keyword(crate::Keyword::Is)
             | TokenKind::Keyword(crate::Keyword::When)
             | TokenKind::Keyword(crate::Keyword::With)
@@ -1469,6 +1709,22 @@ mod tests {
         let second = format(&result.text);
         assert!(!second.has_errors(), "{:#?}", second.diagnostics);
         assert_eq!(second.text, result.text);
+    }
+
+    fn run(source: &str) -> String {
+        let file = SourceFile::new("test.lum", source);
+        let lexed = lex(&file);
+        assert!(!lexed.has_errors(), "{:#?}", lexed.diagnostics);
+        let parsed = parse_program(&lexed.tokens);
+        assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
+        let program = parsed.program.unwrap();
+        let checked = crate::check_program(&program);
+        assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
+        let lowered = crate::lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let result = crate::run_program(&lowered.program.unwrap());
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        result.output
     }
 
     #[test]
@@ -1576,21 +1832,6 @@ fn main() {
     )
 }
 "#;
-        fn run(source: &str) -> String {
-            let file = SourceFile::new("test.lum", source);
-            let lexed = lex(&file);
-            assert!(!lexed.has_errors(), "{:#?}", lexed.diagnostics);
-            let parsed = parse_program(&lexed.tokens);
-            assert!(parsed.diagnostics.is_empty(), "{:#?}", parsed.diagnostics);
-            let program = parsed.program.unwrap();
-            let checked = crate::check_program(&program);
-            assert!(checked.diagnostics.is_empty(), "{:#?}", checked.diagnostics);
-            let lowered = crate::lower_program(&program);
-            assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
-            let result = crate::run_program(&lowered.program.unwrap());
-            assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
-            result.output
-        }
         let formatted = format(source);
         assert!(!formatted.has_errors(), "{:#?}", formatted.diagnostics);
         let expected = "-1 5 42 3 -1 7 3 5\n";
@@ -1942,6 +2183,79 @@ fn main() {
         assert_formatted(
             "fn nested(a Bool, b Bool) {\nif a then if b then println(1) else println(2)\nprintln(3)\n}\n",
             "fn nested(a Bool, b Bool) {\n    if a then if b then println(1) else println(2)\n    println(3)\n}\n",
+        );
+    }
+
+    #[test]
+    fn formats_complete_short_if_branches_in_block_tails() {
+        assert_formatted(
+            "fn choose(flag Bool) {x Int} {\nif flag then {x:1} else {x:2}\n}\nfn answer(flag Bool) Int {\nif flag then {40} + 2 else {0}\n}\n",
+            "fn choose(flag Bool) { x Int } {\n    if flag then { x: 1 } else { x: 2 }\n}\nfn answer(flag Bool) Int {\n    if flag then { 40 } + 2 else { 0 }\n}\n",
+        );
+    }
+
+    #[test]
+    fn indents_nested_short_if_bodies_and_their_owning_else() {
+        assert_formatted(
+            "fn main() {\nif true then\nif false then\nprintln(\"inner true\")\nelse\nprintln(\"inner else\")\nprintln(\"after\")\n}\n",
+            "fn main() {\n    if true then\n        if false then\n            println(\"inner true\")\n        else\n            println(\"inner else\")\n    println(\"after\")\n}\n",
+        );
+    }
+
+    #[test]
+    fn nested_short_if_formatting_preserves_execution() {
+        let expected = include_str!("../../../../examples/issues/nested_short_if_formatting.lum");
+        let source = expected
+            .lines()
+            .map(str::trim_start)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_formatted(&source, expected);
+        assert_eq!(run(&source), "inner else\nafter\n");
+        assert_eq!(run(&format(&source).text), run(&source));
+    }
+
+    #[test]
+    fn aligns_nested_else_if_chains_with_their_owning_if() {
+        assert_formatted(
+            "fn run(a Bool, b Bool, c Bool) {\nif a then\nif b then\nprintln(1)\nelse if c then\nprintln(2)\nelse\nprintln(3)\nprintln(4)\n}\n",
+            "fn run(a Bool, b Bool, c Bool) {\n    if a then\n        if b then\n            println(1)\n        else if c then\n            println(2)\n        else\n            println(3)\n    println(4)\n}\n",
+        );
+        assert_formatted(
+            "fn run(a Bool, b Bool) {\nif a then if b then\nprintln(1)\nelse\nprintln(2)\nprintln(3)\n}\n",
+            "fn run(a Bool, b Bool) {\n    if a then if b then\n            println(1)\n        else\n            println(2)\n    println(3)\n}\n",
+        );
+    }
+
+    #[test]
+    fn indents_nested_short_loop_bodies_without_extending_their_scope() {
+        assert_formatted(
+            "fn run(values [Int]) {\nwhile true do\nfor value <- values do\nif value == 0 then\ncontinue\nelse\nbreak\nprintln(\"after\")\nfor {\nvalue <- values\n} do\nif value > 0 then\nprintln(value)\nelse\nprintln(0)\nprintln(\"done\")\n}\n",
+            "fn run(values [Int]) {\n    while true do\n        for value <- values do\n            if value == 0 then\n                continue\n            else\n                break\n    println(\"after\")\n    for {\n        value <- values\n    } do\n        if value > 0 then\n            println(value)\n        else\n            println(0)\n    println(\"done\")\n}\n",
+        );
+    }
+
+    #[test]
+    fn anchors_short_expression_branches_to_their_continued_initializer() {
+        assert_formatted(
+            "private fn choose(a Bool, b Bool) Int {\nvalue =\nif a then\nif b then\n1\nelse\n2\nelse\n3\nvalue\n}\n",
+            "fn choose(a Bool, b Bool) Int {\n    value =\n        if a then\n            if b then\n                1\n            else\n                2\n        else\n            3\n    value\n}\n",
+        );
+    }
+
+    #[test]
+    fn keeps_comments_and_call_continuations_inside_short_bodies() {
+        assert_formatted(
+            "fn run(a Bool, b Bool) {\nif a then\n# belongs to the outer body\nif b then\nprintln(\n\"yes\"\n)\nelse\nprintln(\n\"no\"\n)\nprintln(\"done\")\n}\n",
+            "fn run(a Bool, b Bool) {\n    if a then\n        # belongs to the outer body\n        if b then\n            println(\n                \"yes\"\n            )\n        else\n            println(\n                \"no\"\n            )\n    println(\"done\")\n}\n",
+        );
+    }
+
+    #[test]
+    fn indents_braced_short_bodies_on_the_next_line() {
+        assert_formatted(
+            "fn run(a Bool, b Bool) {\nif a then\n{\nif b then\nprintln(1)\nelse\nprintln(2)\n}\nprintln(3)\n}\n",
+            "fn run(a Bool, b Bool) {\n    if a then\n        {\n            if b then\n                println(1)\n            else\n                println(2)\n        }\n    println(3)\n}\n",
         );
     }
 

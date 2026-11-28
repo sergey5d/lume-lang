@@ -606,11 +606,17 @@ impl<'a> Parser<'a> {
         } else {
             (None, parsed_clauses)
         };
+        self.skip_newlines();
+        let short_body = self.at_keyword(Keyword::Then);
         let then_block = self.parse_if_body_block(false)?;
         let else_branch = if self.match_else_after_body() {
             self.skip_newlines();
             if self.at_keyword(Keyword::If) {
                 Some(ElseBranch::If(Box::new(self.parse_if_stmt()?)))
+            } else if short_body {
+                Some(ElseBranch::Block(
+                    self.parse_complete_inline_body("else", false)?,
+                ))
             } else {
                 Some(ElseBranch::Block(
                     self.parse_block_or_inline_stmt_body("else")?,

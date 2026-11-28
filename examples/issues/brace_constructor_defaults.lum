@@ -1,0 +1,76 @@
+# EXPECT:
+# 3 3 3
+# brace constructor defaults ok
+
+module examples/issues/brace_constructor_defaults
+
+class Config {
+    value Int = 1 + 2
+}
+
+object Initializers {
+    var calls Int = 0
+
+    fn next() Int {
+        calls += 1
+        calls
+    }
+}
+
+class Options {
+    first Int = Initializers.next()
+    second Int = this.first + 10
+    text Str = "kept".toUpper()
+    enabled Bool = 1 == 1
+    items [Int] = [Initializers.next()]
+    note Int? = ^3
+    last Int = 40 + 2
+}
+
+class Tagged[T] {
+    label Str = "tag".toUpper()
+    value T
+}
+
+fn main() {
+    cfg Config = {}
+    named = Config {}
+    positional Config = new()
+    println(cfg.value, named.value, positional.value)
+    assert(cfg.value == 3)
+    assert(named.value == 3)
+    assert(positional.value == 3)
+
+    # Omissions between supplied inputs must not become explicit zero/null values.
+    options Options = { second: 0, enabled: false, note: None }
+    assert(options.first == 1)
+    assert(options.second == 0)
+    assert(options.text == "KEPT")
+    assert(!options.enabled)
+    assert(options.items[0] == 2)
+    assert(options.note is None)
+    assert(options.last == 42)
+    assert(Initializers.calls == 2)
+
+    nextOptions Options = { first: 0, last: 0 }
+    assert(nextOptions.first == 0)
+    assert(nextOptions.second == 13)
+    assert(nextOptions.enabled)
+    assert(nextOptions.last == 0)
+    assert(Initializers.calls == 4)
+    nextOptions.items.add(5)
+    assert(options.items.size == 1)
+
+    # Spreads and explicit fields keep their written evaluation order.
+    patch = { second: 7 }
+    spread Options = { ...patch, last: Initializers.next() }
+    assert(spread.first == 6)
+    assert(spread.second == 7)
+    assert(spread.last == 5)
+    assert(Initializers.calls == 7)
+
+    tagged Tagged[Int] = { value: 9 }
+    assert(tagged.label == "TAG")
+    assert(tagged.value == 9)
+    println("brace constructor defaults ok")
+}

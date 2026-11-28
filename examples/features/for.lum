@@ -14,7 +14,7 @@ fn main() Unit {
 
     selected = for value <- [1, 2, 3] yield
         if value == 1 { 5 } else { 7 }
-`
+
     println("for", total)
     println("yield", selected.makeStr(","))
 }

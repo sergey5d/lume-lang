@@ -6793,6 +6793,17 @@ impl<'a> SourceBodyEmitter<'a> {
                 Some(java_string_literal(&decode_lume_string_literal(raw)))
             }
             core::Expr::Unit { .. } => Some("lume.core.LumeUnit.INSTANCE".to_string()),
+            core::Expr::Block { body, .. } => {
+                // A single expression needs no synthetic callable or new control-flow boundary.
+                let [core::Stmt::Expr(statement)] = body.statements.as_slice() else {
+                    return None;
+                };
+                self.emit_expr(&statement.expr, bindings)
+            }
+            core::Expr::RecordLiteral { .. } => {
+                let ty = self.expr_type(expr, bindings)?;
+                self.emit_expr_against(expr, bindings, &ty)
+            }
             core::Expr::TupleLiteral { items, .. } if (2..=8).contains(&items.len()) => {
                 let items = items
                     .iter()
@@ -7965,6 +7976,12 @@ impl<'a> SourceBodyEmitter<'a> {
             return Some(projection);
         }
         match expr {
+            core::Expr::Block { body, .. } => {
+                let [core::Stmt::Expr(statement)] = body.statements.as_slice() else {
+                    return None;
+                };
+                self.emit_expr_against(&statement.expr, bindings, expected)
+            }
             core::Expr::Unary {
                 op: ast::UnaryOp::OptionWrap,
                 expr: value,
@@ -8668,20 +8685,20 @@ impl<'a> SourceBodyEmitter<'a> {
             }
             for (field, value) in constructor_fields.iter().zip(values) {
                 let field_ty = substitute_java_emit_type(&field.ty, &substitution);
-                constructor_args.push(self.emit_expr_against(value, bindings, &field_ty)?);
+                constructor_args.push(Some(self.emit_expr_against(value, bindings, &field_ty)?));
             }
         } else {
-            for field in constructor_fields {
+            for field in &constructor_fields {
                 let field_ty = substitute_java_emit_type(&field.ty, &substitution);
                 if let Some(value) = fields
                     .iter()
                     .find(|value| value.name.as_deref() == Some(field.name.as_str()))
                 {
-                    constructor_args.push(self.emit_expr_against(
+                    constructor_args.push(Some(self.emit_expr_against(
                         &value.value,
                         bindings,
                         &field_ty,
-                    )?);
+                    )?));
                 } else if let Some(spread) = fields.iter().rev().find_map(|value| {
                     let core::Expr::Spread { value, .. } = &value.value else {
                         return None;
@@ -8689,22 +8706,55 @@ impl<'a> SourceBodyEmitter<'a> {
                     self.record_spread_has_field(value, &field.name, bindings)
                         .then_some(value.as_ref())
                 }) {
-                    constructor_args.push(self.emit_record_spread_field(
+                    constructor_args.push(Some(self.emit_record_spread_field(
                         spread,
                         &field.name,
                         &field_ty,
                         bindings,
-                    )?);
+                    )?));
+                } else if type_def.kind == TypeKind::Class && field.has_initializer {
+                    constructor_args.push(None);
                 } else if let Some(initializer) = &field.initializer {
-                    constructor_args.push(java_constant(initializer));
+                    constructor_args.push(Some(java_constant(initializer)));
                 } else if field.has_initializer {
-                    constructor_args.push(java_default_value(&field_ty));
+                    constructor_args.push(Some(java_default_value(&field_ty)));
                 } else {
                     return None;
                 }
             }
         }
 
+        let supplied_count = constructor_args
+            .iter()
+            .rposition(Option::is_some)
+            .map_or(0, |index| index + 1);
+        let constructor_args = if constructor_args[..supplied_count]
+            .iter()
+            .all(Option::is_some)
+        {
+            constructor_args
+                .into_iter()
+                .take(supplied_count)
+                .flatten()
+                .collect::<Vec<_>>()
+        } else {
+            // A sparse named call must preserve omission independently of the
+            // placeholder value, including explicit zero, false, and None.
+            let presence = constructor_args
+                .iter()
+                .map(|arg| if arg.is_some() { "true" } else { "false" })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let mut emitted = vec![format!("new boolean[] {{ {presence} }}")];
+            emitted.extend(constructor_fields.iter().zip(constructor_args).map(
+                |(field, arg)| {
+                    arg.unwrap_or_else(|| {
+                        java_default_value(&substitute_java_emit_type(&field.ty, &substitution))
+                    })
+                },
+            ));
+            emitted
+        };
         let generic = (!args.is_empty()).then_some("<>").unwrap_or("");
         Some(format!(
             "new {}{generic}({})",
@@ -11279,6 +11329,39 @@ fn push_implicit_class_constructors(out: &mut String, ty: &ir::TypeDef, names: &
             out.push_str(" = ");
             out.push_str(&constructor_param_name(field, index));
             out.push_str(";\n");
+        }
+        if ty.mixin_init.is_some() {
+            out.push_str("        this.__lume_mixin_init();\n");
+        }
+        out.push_str("    }\n");
+    }
+
+    if public_fields.iter().any(|field| field.has_initializer) {
+        let mut presence_name = "__lume_supplied".to_string();
+        while public_fields
+            .iter()
+            .any(|field| java_member_name(&field.name) == presence_name)
+        {
+            presence_name.push('_');
+        }
+        out.push_str(&format!("\n    public {name}(boolean[] {presence_name}"));
+        for (index, field) in public_fields.iter().enumerate() {
+            out.push_str(&format!(
+                ", {} {}",
+                names.value_type(&field.ty),
+                constructor_param_name(field, index)
+            ));
+        }
+        out.push_str(") {\n");
+        if has_field_init {
+            out.push_str("        this.__lume_field_init();\n");
+        }
+        for (index, field) in public_fields.iter().enumerate() {
+            out.push_str(&format!(
+                "        if ({presence_name}[{index}]) this.{} = {};\n",
+                java_member_name(&field.name),
+                constructor_param_name(field, index)
+            ));
         }
         if ty.mixin_init.is_some() {
             out.push_str("        this.__lume_mixin_init();\n");

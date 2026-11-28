@@ -2310,6 +2310,11 @@ mod tests {
                 "mixin aliases ok\n",
             ),
             (
+                "examples/issues/mixin_alias_anonymous_object_members.lum",
+                "examples.issues.mixin_alias_anonymous_object_members.Mixin_alias_anonymous_object_membersMain",
+                "mixin alias anonymous object scope ok\n",
+            ),
+            (
                 "examples/features/mixin_constructors.lum",
                 "examples.mixin_constructors.Mixin_constructorsMain",
                 "mixin constructors ok\n",
@@ -2357,6 +2362,47 @@ mod tests {
             assert_eq!(String::from_utf8(result.stdout).unwrap(), expected);
             let _ = fs::remove_dir_all(temp);
         }
+    }
+
+    #[test]
+    fn runs_short_if_expression_block_bodies_on_java_and_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap();
+        let source = root.join("examples/issues/short_if_expression_block_body.lum");
+        let interpreted = run_path(&source, None).expect("run short if block bodies");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "short if block bodies ok\n");
+
+        let temp = temp_path("lume-java-short-if-block-bodies");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let result = generate_java_path(&source, JavaBackendOptions::new(&out))
+            .expect("generate short if block bodies");
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac short if block bodies",
+        );
+        let result = run_checked(
+            Command::new("java").arg("-cp").arg(&classes).arg(
+                "examples.issues.short_if_expression_block_body.Short_if_expression_block_bodyMain",
+            ),
+            "java short if block bodies",
+        );
+        assert_eq!(
+            String::from_utf8(result.stdout).unwrap(),
+            interpreted.output
+        );
+        let _ = fs::remove_dir_all(temp);
     }
 
     #[test]
@@ -4178,6 +4224,52 @@ fn main() Unit {
             );
             let _ = fs::remove_dir_all(temp);
         }
+    }
+
+    #[test]
+    fn brace_construction_preserves_nonconstant_class_defaults() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = root.join("examples/issues/brace_constructor_defaults.lum");
+        let interpreted = run_path(&source, None).expect("run brace defaults");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "3 3 3\nbrace constructor defaults ok\n");
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let temp = temp_path("lume-java-brace-defaults");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(
+            generated.diagnostics.is_empty(),
+            "{:?}",
+            generated.diagnostics
+        );
+        let module = fs::read_to_string(out.join(
+            "examples/issues/brace_constructor_defaults/Brace_constructor_defaultsModule.java",
+        ))
+        .unwrap();
+        assert!(module.contains("Config cfg = new Config();"), "{module}");
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac brace defaults",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.issues.brace_constructor_defaults.Brace_constructor_defaultsMain"),
+            "java brace defaults",
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), interpreted.output);
+        let _ = fs::remove_dir_all(temp);
     }
 
     #[test]

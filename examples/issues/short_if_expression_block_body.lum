@@ -1,0 +1,65 @@
+# EXPECT:
+# short if block bodies ok
+
+module examples/issues/short_if_expression_block_body
+
+fn shapeExpression(flag Bool) { x Int } =
+    if flag then { x: 1 } else { x: 2 }
+
+fn shapeBlock(flag Bool) { x Int } {
+    if flag then { x: 1 } else { x: 2 }
+}
+
+fn arithmeticExpression(flag Bool) Int =
+    if flag then { 40 } + 2 else { 0 }
+
+fn arithmeticBlock(flag Bool) Int {
+    if flag then { 40 } + 2 else { 0 }
+}
+
+fn elseContinuation(flag Bool) Int {
+    if flag then { 1 } else { 40 } + 2
+}
+
+fn memberContinuation(flag Bool) Int {
+    if flag then { x: 1 }.x else { x: 2 }.x
+}
+
+fn nestedBlock(first Bool, second Bool) { x Int } {
+    if first then { x: 1 }
+    else if second then { x: 2 }
+    else { x: 3 }
+}
+
+fn contextualBlock(flag Bool) { items [Int] } {
+    if flag then { items: [] } else { items: [1] }
+}
+
+fn main() {
+    for flag <- [true, false] {
+        assert(shapeExpression(flag) == shapeBlock(flag))
+        assert(arithmeticExpression(flag) == arithmeticBlock(flag))
+    }
+    assert(shapeBlock(true).x == 1)
+    assert(shapeBlock(false).x == 2)
+    assert(arithmeticBlock(true) == 42)
+    assert(arithmeticBlock(false) == 0)
+    assert(elseContinuation(false) == 42)
+    assert(memberContinuation(true) == 1)
+    assert(memberContinuation(false) == 2)
+    assert(nestedBlock(true, false).x == 1)
+    assert(nestedBlock(false, true).x == 2)
+    assert(nestedBlock(false, false).x == 3)
+    assert(contextualBlock(true).items.isEmpty)
+    assert(contextualBlock(false).items[0] == 1)
+
+    # Statement bodies still allow declarations, mutation, and empty blocks.
+    if true then {}
+    if false then {} else {}
+    if true then temporary = 1
+    var total = 0
+    for value <- [0, 1, 2] do
+        if value == 0 then continue else total += value
+    assert(total == 3)
+    println("short if block bodies ok")
+}

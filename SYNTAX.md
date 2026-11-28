@@ -4053,6 +4053,10 @@ An expression `if` requires an `else` and produces a value:
 label = if active then "enabled" else "disabled"
 ```
 
+Short branch expressions use the same brace classification and continuation
+rules in expression bodies and block tails. Labeled braces construct a value;
+postfix and infix operations after a brace expression remain inside that branch.
+
 A body is one complete statement or expression, not an indentation-based
 scope. Multiple statements require braces. Newlines after `then`, `do`, and
 `else` are layout; a newline before `else` is also allowed. An `else` belongs

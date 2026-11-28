@@ -1,0 +1,66 @@
+# EXPECT:
+# mixin alias anonymous object scope ok
+
+module examples/issues/mixin_alias_anonymous_object_members
+
+mixin Parts {
+    fn other() Int = 7
+}
+
+class FieldValue {
+    fn other() Int = 45
+}
+
+class Host {
+    mix Parts as p
+
+    fn readField() Int {
+        obj = object {
+            p Int = 42
+            fn read() Int = p
+        }
+        obj.read()
+    }
+
+    fn readGetter() Int {
+        obj = object {
+            fn read() Int = p
+            get p Int = 43
+        }
+        obj.read()
+    }
+
+    fn readMethod() Int {
+        obj = object {
+            fn read() Int = p()
+            fn p() Int = 44
+        }
+        obj.read()
+    }
+
+    fn callFieldMember() Int {
+        obj = object {
+            p FieldValue = FieldValue()
+            fn read() Int = p.other()
+        }
+        obj.read()
+    }
+
+    fn outerAlias() Int {
+        obj = object {
+            p Int = 42
+            fn read() Int = this.p
+        }
+        obj.read() + p.other()
+    }
+}
+
+fn main() {
+    host = Host()
+    assert(host.readField() == 42)
+    assert(host.readGetter() == 43)
+    assert(host.readMethod() == 44)
+    assert(host.callFieldMember() == 45)
+    assert(host.outerAlias() == 49)
+    println("mixin alias anonymous object scope ok")
+}

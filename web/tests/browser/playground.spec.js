@@ -73,6 +73,47 @@ test('short bodies preserve scope and control flow before and after formatting',
   expect(results.rerun.output).toBe(results.original.output);
 });
 
+test('short if block tails keep shape construction and expression continuation', async ({ page }) => {
+  const source = await readFile(new URL('../../../examples/issues/short_if_expression_block_body.lum', import.meta.url), 'utf8');
+  const results = await page.evaluate(async source => {
+    const { LumeClient } = await import('/sdk.js');
+    const sdk = new LumeClient({ timeoutMs: 30_000 });
+    const project = { entry: 'main.lum', files: { 'main.lum': source } };
+    const original = await sdk.run(project);
+    const formatted = await sdk.format(source);
+    const rerun = await sdk.run({ ...project, files: { 'main.lum': formatted.text } });
+    return { original, formatted, rerun };
+  }, source);
+  expect(results.original.diagnostics).toEqual([]);
+  expect(results.original.output).toBe('short if block bodies ok\n');
+  expect(results.formatted.diagnostics).toEqual([]);
+  expect(results.rerun.diagnostics).toEqual([]);
+  expect(results.rerun.output).toBe(results.original.output);
+});
+
+test('nested short conditionals format according to their actual else ownership', async ({ page }) => {
+  const expected = await readFile(new URL('../../../examples/issues/nested_short_if_formatting.lum', import.meta.url), 'utf8');
+  const source = expected.split('\n').map(line => line.trimStart()).join('\n');
+  const results = await page.evaluate(async source => {
+    const { LumeClient } = await import('/sdk.js');
+    const sdk = new LumeClient({ timeoutMs: 30_000 });
+    const project = { entry: 'main.lum', files: { 'main.lum': source } };
+    const original = await sdk.run(project);
+    const formatted = await sdk.format(source);
+    const second = await sdk.format(formatted.text);
+    const rerun = await sdk.run({ ...project, files: { 'main.lum': formatted.text } });
+    return { original, formatted, second, rerun };
+  }, source);
+  expect(results.original.diagnostics).toEqual([]);
+  expect(results.original.output).toBe('inner else\nafter\n');
+  expect(results.formatted.diagnostics).toEqual([]);
+  expect(results.formatted.text).toBe(expected);
+  expect(results.second.diagnostics).toEqual([]);
+  expect(results.second.text).toBe(results.formatted.text);
+  expect(results.rerun.diagnostics).toEqual([]);
+  expect(results.rerun.output).toBe(results.original.output);
+});
+
 test('the README order report runs with JSON decoding and error propagation', async ({ page }) => {
   const source = await readFile(new URL('../../../examples/readme_order_report.lum', import.meta.url), 'utf8');
   const result = await page.evaluate(async source => {
@@ -96,6 +137,16 @@ test('mixin aliases select original implementations on the consuming receiver', 
   }, files);
   expect(result.diagnostics).toEqual([]);
   expect(result.output).toBe('mixin aliases ok\n');
+});
+
+test('anonymous object members shadow enclosing mixin aliases', async ({ page }) => {
+  const source = await readFile(new URL('../../../examples/issues/mixin_alias_anonymous_object_members.lum', import.meta.url), 'utf8');
+  const result = await page.evaluate(async source => {
+    const { LumeClient } = await import('/sdk.js');
+    return new LumeClient({ timeoutMs: 30_000 }).run({ entry: 'main.lum', files: { 'main.lum': source } });
+  }, source);
+  expect(result.diagnostics).toEqual([]);
+  expect(result.output).toBe('mixin alias anonymous object scope ok\n');
 });
 
 test('typed declarations construct classes without propagating class targets', async ({ page }) => {

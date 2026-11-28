@@ -1,0 +1,40 @@
+# EXPECT:
+# inner else
+# after
+
+module examples/issues/nested_short_if_formatting
+
+fn choose(first Bool, second Bool) Int {
+    value =
+        if first then
+            if second then
+                1
+            else
+                2
+        else
+            3
+    value
+}
+
+fn main() {
+    if true then
+        if false then
+            println("inner true")
+        else
+            println("inner else")
+    println("after")
+
+    assert(choose(true, true) == 1)
+    assert(choose(true, false) == 2)
+    assert(choose(false, true) == 3)
+
+    var total = 0
+    for value <- [0, 1, 2] do
+        if value == 0 then
+            continue
+        else if value == 1 then
+            total += 1
+        else
+            total += 2
+    assert(total == 3)
+}
