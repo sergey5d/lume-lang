@@ -207,12 +207,74 @@ test('formatting, located diagnostics, and Unicode selection work', async ({ pag
   await editor.fill('fn main(){println( 1 )}');
   await page.getByRole('button', { name: 'Format', exact: true }).click();
   await expect(page.locator('#status')).toHaveText('Formatted', { timeout: 30_000 });
-  await expect(editor).toHaveValue(/println\(1\)/);
+  await expect(editor).toContainText('println(1)');
   await editor.fill('fn main() {\n    text = "😀"\n    println(missing)\n}');
   await page.getByRole('button', { name: 'Check', exact: true }).click();
   await expect(page.locator('#diagnostics')).toContainText('undefined_name', { timeout: 30_000 });
   await page.locator('.diagnostic').filter({ hasText: 'undefined_name' }).first().click();
-  expect(await editor.evaluate(element => element.value.slice(element.selectionStart, element.selectionEnd))).toBe('missing');
+  expect(await page.evaluate(() => window.getSelection().toString())).toBe('missing');
+});
+
+test('CodeMirror highlights Lume without interpreting comments and strings as code', async ({ page }) => {
+  const editor = page.getByLabel('Source editor');
+  await editor.fill('public fn main() {\n    # public fn if\n    text Str = "public fn if"\n    amount = 12.5d\n}');
+  await expect(editor.locator('.lume-keyword')).toHaveText(['public', 'fn']);
+  await expect(editor.locator('.lume-comment')).toHaveText('# public fn if');
+  await expect(editor.locator('.lume-string')).toHaveText('"public fn if"');
+  await expect(editor.locator('.lume-number')).toHaveText('12.5d');
+  await expect(editor.locator('.lume-type')).toHaveText('Str');
+  await expect(page.locator('.cm-lineNumbers')).toContainText('5');
+  await expect(page.locator('.cm-editor')).toHaveCount(1);
+});
+
+test('editor history stays with its file and formatting can be undone', async ({ page }) => {
+  await page.getByLabel('Choose an example').selectOption('modules');
+  const editor = page.getByLabel('Source editor');
+  const firstFile = await page.getByRole('tab').first().textContent();
+  const secondFile = await page.getByRole('tab').nth(1).textContent();
+  await editor.fill('fn main(){println( 42 )}');
+  await page.getByRole('button', { name: 'Format', exact: true }).click();
+  await expect(page.locator('#status')).toHaveText('Formatted', { timeout: 30_000 });
+  await expect(editor).toContainText('println(42)');
+  await page.getByRole('tab', { name: secondFile, exact: true }).click();
+  await editor.fill('# other file');
+  await page.getByRole('tab', { name: firstFile, exact: true }).click();
+  await expect(editor).toContainText('println(42)');
+  await editor.press('ControlOrMeta+z');
+  await expect(editor).toHaveText('fn main(){println( 42 )}');
+  await page.getByRole('tab', { name: secondFile, exact: true }).click();
+  await expect(editor).toHaveText('# other file');
+  await page.getByLabel('Choose an example').selectOption('hello');
+  await expect(editor).not.toContainText('# other file');
+  await expect(editor).not.toContainText('println( 42 )');
+});
+
+test('keyboard editing, bracket matching, and run shortcut remain available', async ({ page }) => {
+  const editor = page.getByLabel('Source editor');
+  await editor.fill('fn main() {\nprintln(7)\n}');
+  await editor.press('ControlOrMeta+Home');
+  await editor.press('ArrowDown');
+  await editor.press('Home');
+  await editor.press('Tab');
+  await expect(editor.locator('.cm-line').nth(1)).toHaveText(/^ {4}println\(7\)$/);
+  await editor.press('Shift+Tab');
+  await expect(editor.locator('.cm-line').nth(1)).toHaveText('println(7)');
+  await editor.press('ControlOrMeta+End');
+  await expect(editor.locator('.cm-matchingBracket')).toHaveCount(2);
+  await editor.press('ControlOrMeta+Enter');
+  await expect(page.locator('#status')).toHaveText('Finished', { timeout: 30_000 });
+  await expect(page.getByLabel('Program output')).toHaveText('7');
+  await expect(editor.locator('.cm-line')).toHaveCount(3);
+});
+
+test('long code scrolls within the editor on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const editor = page.getByLabel('Source editor');
+  await editor.fill(`# ${'source '.repeat(100)}\n${'fn main() {}\n'.repeat(80)}`);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  const scroller = page.locator('.cm-scroller');
+  expect(await scroller.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await scroller.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
 });
 
 test('native files are rejected before executing any output', async ({ page }) => {

@@ -4,12 +4,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "serve": "node scripts/serve.mjs",
-    "test": "node --test tests/sdk.test.mjs",
-    "test:browser": "playwright test"
+    "build": "npm run build:editor && node scripts/build.mjs",
+    "build:editor": "node scripts/build-editor.mjs",
+    "serve": "npm run build:editor && node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "npm run build:editor && playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.56.1"
+    "@playwright/test": "^1.56.1",
+    "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.44.2",
+    "@lezer/highlight": "^1.2.5"
   }
 }

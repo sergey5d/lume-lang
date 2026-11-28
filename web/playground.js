@@ -1,16 +1,17 @@
 import { LumeClient, byteOffsetToUtf16 } from './sdk.js';
 import { examples } from './examples.js';
+import { createSourceEditor } from './pkg/editor.js';
 
 const client = new LumeClient();
 const element = id => document.getElementById(id);
-const editor = element('editor');
 let project;
 let activeFile;
 let operation;
+const editor = createSourceEditor(element('editor'), text => { project.files[activeFile] = text; });
 
 function selectFile(path) {
   activeFile = path;
-  editor.value = project.files[path];
+  editor.open(path, project.files[path]);
   for (const tab of element('files').children) tab.setAttribute('aria-selected', String(tab.dataset.path === path));
 }
 
@@ -37,6 +38,7 @@ function setStatus(text, state = 'idle') {
 function loadExample(key) {
   operation?.abort();
   const { entry, files } = examples[key];
+  editor.reset();
   project = { entry, files: { ...files } };
   activeFile = entry;
   renderFiles();
@@ -53,14 +55,6 @@ for (const [key, example] of Object.entries(examples)) {
   element('examples').append(option);
 }
 element('examples').addEventListener('change', event => loadExample(event.target.value));
-editor.addEventListener('input', () => { project.files[activeFile] = editor.value; });
-editor.addEventListener('keydown', event => {
-  if (event.key === 'Tab') {
-    event.preventDefault();
-    editor.setRangeText('    ', editor.selectionStart, editor.selectionEnd, 'end');
-    project.files[activeFile] = editor.value;
-  }
-});
 
 element('add-file').addEventListener('click', () => {
   const path = prompt('Project file path, for example helpers.lum');
@@ -84,9 +78,7 @@ function renderDiagnostics(diagnostics, warnings) {
     button.addEventListener('click', () => {
       if (!Object.hasOwn(project.files, diagnostic.path)) return;
       selectFile(diagnostic.path);
-      editor.focus();
-      editor.setSelectionRange(byteOffsetToUtf16(editor.value, diagnostic.span.start), byteOffsetToUtf16(editor.value, diagnostic.span.end));
-      editor.scrollTop = Math.max(0, (diagnostic.span.line - 5) * 23);
+      editor.select(byteOffsetToUtf16(editor.text, diagnostic.span.start), byteOffsetToUtf16(editor.text, diagnostic.span.end));
     });
     element('diagnostics').append(button);
   }
@@ -122,7 +114,7 @@ async function perform(action) {
         return;
       }
       project.files[sourcePath] = result.text;
-      if (activeFile === sourcePath) editor.value = result.text;
+      editor.replace(sourcePath, result.text);
     }
     if (action === 'run') {
       element('output').textContent = result.output || (result.ok ? 'Program completed without output.' : '');
@@ -156,4 +148,3 @@ document.addEventListener('keydown', event => {
 window.addEventListener('pagehide', () => client.dispose());
 loadExample('hello');
 for (const id of ['examples', 'add-file', 'check', 'format', 'run']) element(id).disabled = false;
-editor.readOnly = false;

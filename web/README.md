@@ -18,6 +18,7 @@ version. Currently:
 ```sh
 cargo install wasm-bindgen-cli --version 0.2.130 --locked
 cd web
+npm ci
 npm run build
 npm run serve
 ```
@@ -31,6 +32,12 @@ The build uses rustup's compiler explicitly, even
 when a Homebrew Rust installation appears first on `PATH`. Set
 `LUME_RUST_TOOLCHAIN` or `WASM_BINDGEN` to override the toolchain or CLI executable.
 Generated assets live in `web/pkg/` and are not committed.
+
+The playground uses a minimal CodeMirror 6 editor with highlighting, line numbers,
+bracket matching, and per-file undo history. The editor is bundled locally; it
+does not load scripts from a CDN. Its keyword list is generated from the Rust
+lexer during the build. `npm run build:editor` rebuilds only the editor without
+recompiling Wasm; `npm run serve` also builds it before starting the server.
 
 For deployment, publish this directory's static `.html`, `.css`, `.js`, and
 `pkg/` assets. No application server, JVM, shared memory, or cross-origin isolation

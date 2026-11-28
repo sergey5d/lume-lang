@@ -36,8 +36,7 @@
       <div class="panes">
         <section class="source-pane" aria-label="Project source">
           <div class="file-bar"><div id="files" class="files" role="tablist" aria-label="Project files"></div><button id="add-file" class="add-file" aria-label="Add a project file" disabled>+</button></div>
-          <label class="sr-only" for="editor">Source editor</label>
-          <textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" wrap="off" aria-label="Source editor" readonly></textarea>
+          <div id="editor"><textarea spellcheck="false" wrap="off" aria-label="Source editor" readonly></textarea></div>
           <div class="source-footer"><span id="entry-label"></span><span>CTRL / &#8984; + ENTER TO RUN</span></div>
         </section>
         <section class="result-pane" aria-label="Execution results">
@@ -59,7 +58,7 @@
       element.dataset.state = 'error';
       document.getElementById('output').textContent = message;
       for (const id of ['examples', 'add-file', 'check', 'format', 'run', 'stop']) document.getElementById(id).disabled = true;
-      document.getElementById('editor').readOnly = true;
+      document.getElementById('editor').inert = true;
     };
     if (location.protocol === 'file:') {
       document.getElementById('startup-error').hidden = false;
