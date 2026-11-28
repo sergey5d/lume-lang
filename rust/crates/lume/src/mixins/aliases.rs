@@ -2,6 +2,21 @@ use std::collections::HashSet;
 
 use crate::{ast::*, diagnostic::Diagnostic};
 
+// ':' cannot occur in a source identifier, so this marker cannot capture user names.
+const DEFERRED_VALUE_PREFIX: &str = "__lume_mixin_alias_value:";
+
+pub(crate) fn deferred_value_alias(name: &str) -> Option<&str> {
+    name.strip_prefix(DEFERRED_VALUE_PREFIX)
+}
+
+pub(crate) fn invalid_value(alias: &str, span: crate::source::Span) -> Diagnostic {
+    Diagnostic::error(
+        "invalid_mixin_alias_value",
+        format!("mixin alias '{alias}' is an implementation selector, not a value; use '{alias}.member' on the consuming class receiver"),
+        span,
+    )
+}
+
 pub(crate) fn member_name(alias: &str, member: &str) -> String {
     format!("__lume_mixin_alias_{}_{alias}_{member}", alias.len())
 }
@@ -28,6 +43,7 @@ pub(crate) fn rewrite(class: &mut TypeDecl) -> Vec<Diagnostic> {
         aliases,
         diagnostics: Vec::new(),
         receiver_available: true,
+        defer_alias_values: false,
     };
     for adoption in &mut class.mixins {
         rewrite.arguments(&mut adoption.args, &HashSet::new());
@@ -52,6 +68,7 @@ struct Rewrite {
     aliases: HashSet<String>,
     diagnostics: Vec<Diagnostic>,
     receiver_available: bool,
+    defer_alias_values: bool,
 }
 
 impl Rewrite {
@@ -245,11 +262,11 @@ impl Rewrite {
             Expr::Identifier { name, span }
                 if self.aliases.contains(name) && !locals.contains(name) =>
             {
-                self.diagnostics.push(Diagnostic::error(
-                    "invalid_mixin_alias_value",
-                    format!("mixin alias '{name}' is an implementation selector, not a value; use '{name}.member' on the consuming class receiver"),
-                    *span,
-                ));
+                if self.defer_alias_values {
+                    *name = format!("{DEFERRED_VALUE_PREFIX}{name}");
+                } else {
+                    self.diagnostics.push(invalid_value(name, *span));
+                }
             }
             Expr::ListLiteral { items, .. } | Expr::TupleLiteral { items, .. } => {
                 self.expressions(items, locals);
@@ -264,10 +281,19 @@ impl Rewrite {
                 self.expressions(values, locals);
             }
             Expr::Index {
-                receiver, index, ..
+                receiver,
+                index,
+                explicit_type_args,
+                ..
             } => {
                 self.expression(receiver, locals);
+                // The parser retains both bracket interpretations. Leave the
+                // TypeRefs alone and diagnose alias values only if the checker
+                // selects the index expression instead of generic application.
+                let previous = self.defer_alias_values;
+                self.defer_alias_values |= explicit_type_args.is_some();
                 self.expression(index, locals);
+                self.defer_alias_values = previous;
             }
             Expr::Spread { value, .. } | Expr::Try { value, .. } => self.expression(value, locals),
             Expr::Unary { expr, .. } => self.expression(expr, locals),

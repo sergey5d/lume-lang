@@ -7393,6 +7393,7 @@ impl<'a> FunctionLowerer<'a> {
                             call_callee,
                             &normalized_args,
                             expected,
+                            &explicit_type_args,
                             has_shape_spread,
                         )
                     })
@@ -7921,9 +7922,11 @@ impl<'a> FunctionLowerer<'a> {
         callee: &Expr,
         args: &[core::CallArg],
         expected: Option<&ir::Type>,
+        explicit_type_args: &[ir::Type],
         shape_expansion: bool,
     ) -> Option<Vec<Option<ExpectedArgSpec>>> {
-        let specs = self.call_expected_arg_specs_inner(callee, args, expected);
+        let specs =
+            self.call_expected_arg_specs_inner(callee, args, expected, explicit_type_args);
         if !shape_expansion
             || specs.as_ref().is_some_and(|specs| {
                 specs
@@ -8027,6 +8030,7 @@ impl<'a> FunctionLowerer<'a> {
         callee: &Expr,
         ordered_args: &[core::CallArg],
         expected: Option<&ir::Type>,
+        explicit_type_args: &[ir::Type],
     ) -> Option<Vec<Option<ExpectedArgSpec>>> {
         if let Some(fields) =
             expected.and_then(|expected| self.enum_case_expected_arg_types(callee, expected))
@@ -8112,7 +8116,12 @@ impl<'a> FunctionLowerer<'a> {
                     }
                     return self.function_expected_arg_specs(id, &subst);
                 }
-                if let Some(specs) = self.constructor_expected_arg_specs(name, ordered_args) {
+                if let Some(specs) = self.constructor_expected_arg_specs(
+                    name,
+                    ordered_args,
+                    expected,
+                    explicit_type_args,
+                ) {
                     return Some(specs);
                 }
                 if let Some(specs) = self.enum_case_expected_arg_specs(None, name) {
@@ -8202,10 +8211,23 @@ impl<'a> FunctionLowerer<'a> {
         &self,
         name: &str,
         args: &[core::CallArg],
+        expected: Option<&ir::Type>,
+        explicit_type_args: &[ir::Type],
     ) -> Option<Vec<Option<ExpectedArgSpec>>> {
         let ty = self.program.types.iter().find(|ty| {
             ty.name == name && matches!(ty.kind, ast::TypeKind::Class | ast::TypeKind::Record)
         })?;
+        // Instantiate callback types before lowering arguments and retaining source call specs.
+        let mut subst = match expected {
+            Some(ir::Type::Named { name, args }) if name == &ty.name => ir_type_subst(ty, args),
+            _ => HashMap::new(),
+        };
+        subst.extend(
+            ty.type_params
+                .iter()
+                .cloned()
+                .zip(explicit_type_args.iter().cloned()),
+        );
         let explicit = ty
             .methods
             .iter()
@@ -8220,7 +8242,8 @@ impl<'a> FunctionLowerer<'a> {
             .max_by_key(|(score, _)| *score)
             .map(|(_, id)| id);
         if let Some(id) = explicit {
-            return self.function_expected_arg_specs(id, &HashMap::new());
+            self.infer_function_call_subst(id, args, &mut subst);
+            return self.function_expected_arg_specs(id, &subst);
         }
         if ty.methods.iter().copied().any(|id| {
             self.program
@@ -8230,20 +8253,40 @@ impl<'a> FunctionLowerer<'a> {
             return None;
         }
 
+        let fields = ty
+            .fields
+            .iter()
+            .filter(|field| {
+                if ty.kind == ast::TypeKind::Class {
+                    !field.from_mixin && field.visibility == ast::Visibility::Default
+                } else {
+                    field.visibility != ast::Visibility::Private
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut positional = 0;
+        for arg in args {
+            let field = if let Some(name) = &arg.name {
+                fields.iter().find(|field| field.name == *name).copied()
+            } else {
+                let field = fields.get(positional).copied();
+                positional += 1;
+                field
+            };
+            if let Some(field) = field {
+                let expected = substitute_ir_type(&field.ty, &subst);
+                let actual =
+                    self.infer_expr_type_against_with_overrides(&arg.value, &expected, &[]);
+                infer_ir_type_subst(&expected, &actual, &mut subst, self.program);
+            }
+        }
         Some(
-            ty.fields
-                .iter()
-                .filter(|field| {
-                    if ty.kind == ast::TypeKind::Class {
-                        !field.from_mixin && field.visibility == ast::Visibility::Default
-                    } else {
-                        field.visibility != ast::Visibility::Private
-                    }
-                })
+            fields
+                .into_iter()
                 .map(|field| {
                     Some(ExpectedArgSpec {
                         name: Some(field.name.clone()),
-                        ty: field.ty.clone(),
+                        ty: substitute_ir_type(&field.ty, &subst),
                         variadic: false,
                         default: field.initializer.clone(),
                     })
@@ -12700,6 +12743,58 @@ fn main(values Vector[Int], pairs Map[Str, Int], optional Option[Int]) Unit {
             lowered.core_bodies.get(&choose.id),
             Some(core::CallableBody::Expr(core::Expr::If { .. }))
         ));
+    }
+
+    #[test]
+    fn retains_instantiated_generic_constructor_callback_types() {
+        let program = parse_inline(
+            r#"
+            class Box[T] {
+                callback fn(T) T
+                new(callback fn(T) T) { this.callback = callback }
+            }
+            class CallbackField[T] {
+                callback fn(T) T
+            }
+            fn main() {
+                positional Box[Int] = Box[Int](v => v + 1)
+                inferred = Box[Int](v => v + 2)
+                braces Box[Int] = { callback: v => v + 3 }
+                contextual Box[Int] = new(v => v + 4)
+                implicit = CallbackField[Int](v => v + 5)
+                implicitBraces CallbackField[Int] = { callback: v => v + 6 }
+                inferredType = Box((v Int) => v + 7)
+            }
+            "#,
+        );
+        let lowered = lower_program(&program);
+        assert!(lowered.diagnostics.is_empty(), "{:#?}", lowered.diagnostics);
+        let ir = lowered.program.expect("ir program");
+        let main = ir.entry.expect("main");
+        let calls = ir
+            .source_calls
+            .iter()
+            .filter(|call| call.function == main)
+            .collect::<Vec<_>>();
+        assert_eq!(calls.len(), 6);
+        let callback = ir::Type::Function {
+            params: vec![ir::Type::named("Int")],
+            ret: Box::new(ir::Type::named("Int")),
+        };
+        for call in calls {
+            assert_eq!(call.param_specs.len(), 1, "{call:#?}");
+            assert_eq!(call.param_specs[0].as_ref().unwrap().ty, callback, "{call:#?}");
+        }
+        let lambdas = ir
+            .functions
+            .iter()
+            .filter(|function| matches!(function.kind, ir::FunctionKind::Lambda))
+            .collect::<Vec<_>>();
+        assert_eq!(lambdas.len(), 7);
+        for lambda in lambdas {
+            assert_eq!(lambda.return_ty, ir::Type::named("Int"));
+            assert_eq!(lambda.locals[lambda.params[0].0].ty, ir::Type::named("Int"));
+        }
     }
 
     #[test]

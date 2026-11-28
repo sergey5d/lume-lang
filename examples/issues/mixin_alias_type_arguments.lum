@@ -1,0 +1,77 @@
+# EXPECT:
+# mixin alias type arguments ok
+
+module examples/issues/mixin_alias_type_arguments
+
+mixin IdentityParts {
+    fn identity[T](value T) T = value
+    fn pair[A, B](left A, right B) (A, B) = (left, right)
+    fn index() Int = 0
+}
+
+fn keep[T](value T) T = value
+
+class Host {
+    mix IdentityParts as Int
+
+    fn run() Int = Int.identity[Int](42)
+    fn inferred() Int = Int.identity(42)
+    fn optional() Int? {
+        value Int? = ^42
+        Int.identity[Int?](value)
+    }
+    fn vector() [Int] = Int.identity[[Int]]([42])
+    fn externalGeneric() Int = keep[Int](42)
+    fn constructor() [Int] = Vector[Int]()
+    fn nested() [Int] = Int.identity[Vector[Int]]([42])
+    fn pair() (Int, Int) = Int.pair[Int, Int](41, 42)
+
+    fn callback() Int {
+        source fn(Int) Int = value => value + 1
+        callback = Int.identity[fn(Int) Int](source)
+        callback(41)
+    }
+
+    fn indexed() Int = [42][Int.index()]
+
+    fn shadowedIndex(Int Int) Int = [42][Int]
+
+    fn shadowedHandler(Int Int) Int {
+        handlers [fn() Int] = [{ => 42 }]
+        handlers[Int]()
+    }
+}
+
+class GenericHost[T] {
+    mix IdentityParts as T
+    value T
+
+    fn run() T = T.identity[T](value)
+    fn nested() [T] = T.identity[Vector[T]]([value])
+}
+
+class MethodHost {
+    mix IdentityParts as T
+
+    fn run[T](value T) T = T.identity[T](value)
+}
+
+fn main() {
+    host = Host()
+    assert(host.run() == 42)
+    assert(host.inferred() == 42)
+    assert(host.optional()! == 42)
+    assert(host.vector()[0] == 42)
+    assert(host.externalGeneric() == 42)
+    assert(host.constructor().isEmpty)
+    assert(host.nested()[0] == 42)
+    assert(host.pair()[1] == 42)
+    assert(host.callback() == 42)
+    assert(host.indexed() == 42)
+    assert(host.shadowedIndex(0) == 42)
+    assert(host.shadowedHandler(0) == 42)
+    assert(GenericHost(42).run() == 42)
+    assert(GenericHost("text").nested()[0] == "text")
+    assert(MethodHost().run[Int](42) == 42)
+    println("mixin alias type arguments ok")
+}

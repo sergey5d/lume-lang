@@ -5786,6 +5786,11 @@ impl<'a> Checker<'a> {
     fn check_expr_against(&mut self, expr: &Expr, expected: &Ty) -> Ty {
         match expr {
             Expr::Identifier { name, span } => {
+                if let Some(alias) = crate::mixins::aliases::deferred_value_alias(name) {
+                    self.diagnostics
+                        .push(crate::mixins::aliases::invalid_value(alias, *span));
+                    return Ty::Unknown;
+                }
                 if let Some(value) = self.lookup_scoped_value(name) {
                     return value.ty;
                 }
@@ -16635,6 +16640,42 @@ fn main() Int {
                 "expected {code} for {source}: {:#?}",
                 result.diagnostics
             );
+        }
+    }
+
+    #[test]
+    fn mixin_aliases_do_not_capture_explicit_type_arguments() {
+        let accepted = check_path(
+            workspace_root().join("examples/issues/mixin_alias_type_arguments.lum"),
+        )
+        .unwrap();
+        assert!(accepted.diagnostics.is_empty(), "{:#?}", accepted.diagnostics);
+        let ordinary_name = check_program(&parse_inline(
+            "fn main() {\n__lume_mixin_alias_value_Int = 42\nassert(__lume_mixin_alias_value_Int == 42)\n}",
+        ));
+        assert!(ordinary_name.diagnostics.is_empty(), "{:#?}", ordinary_name.diagnostics);
+    }
+
+    #[test]
+    fn mixin_aliases_are_not_values_in_ambiguous_bracket_expressions() {
+        for source in [
+            "mixin Parts {}\nclass Host {\nmix Parts as Int\nfn run() Int = [42][Int]\n}",
+            "mixin Parts {}\nclass Host {\nmix Parts as T\nfn run() {\nvalues = [42]\nvalues[T] := 0\n}\n}",
+            "mixin Parts {}\nclass Host {\nmix Parts as Int\nfn run() Int {\nhandlers [fn() Int] = [{ => 42 }]\nhandlers[Int]()\n}\n}",
+            "mixin Parts { fn identity[T](value T) T = value }\nclass Host {\nmix Parts as Int\nfn run() Int = Int.identity[Int](Int)\n}",
+        ] {
+            let result = check_program(&parse_inline(source));
+            let diagnostic = result
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "invalid_mixin_alias_value")
+                .unwrap_or_else(|| {
+                    panic!(
+                        "expected alias-value error for {source}: {:#?}",
+                        result.diagnostics
+                    )
+                });
+            assert!(!diagnostic.message.contains("__lume_mixin_alias_value:"));
         }
     }
 

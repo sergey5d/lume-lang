@@ -12558,6 +12558,15 @@ fn main() Unit {
     }
 
     #[test]
+    fn runs_mixin_aliases_with_colliding_type_argument_names() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = root.join("examples/issues/mixin_alias_type_arguments.lum");
+        let run = run_path(&source, None).expect("run mixin alias type arguments");
+        assert!(run.diagnostics.is_empty(), "{:#?}", run.diagnostics);
+        assert_eq!(run.output, "mixin alias type arguments ok\n");
+    }
+
+    #[test]
     fn runs_anonymous_object_members_shadowing_mixin_aliases() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let source = root.join("examples/issues/mixin_alias_anonymous_object_members.lum");

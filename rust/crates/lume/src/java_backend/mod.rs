@@ -2315,6 +2315,11 @@ mod tests {
                 "mixin alias anonymous object scope ok\n",
             ),
             (
+                "examples/issues/mixin_alias_type_arguments.lum",
+                "examples.issues.mixin_alias_type_arguments.Mixin_alias_type_argumentsMain",
+                "mixin alias type arguments ok\n",
+            ),
+            (
                 "examples/features/mixin_constructors.lum",
                 "examples.mixin_constructors.Mixin_constructorsMain",
                 "mixin constructors ok\n",
@@ -4224,6 +4229,43 @@ fn main() Unit {
             );
             let _ = fs::remove_dir_all(temp);
         }
+    }
+
+    #[test]
+    fn generic_constructor_callbacks_match_interpreter() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let source = root.join("examples/issues/generic_constructor_callbacks.lum");
+        let interpreted = run_path(&source, None).expect("run generic constructor callbacks");
+        assert!(
+            interpreted.diagnostics.is_empty(),
+            "{:?}",
+            interpreted.diagnostics
+        );
+        assert_eq!(interpreted.output, "generic constructor callbacks ok\n");
+        if !command_available("javac") || !command_available("java") {
+            return;
+        }
+        let temp = temp_path("lume-java-generic-constructor-callbacks");
+        let out = temp.join("out");
+        let classes = temp.join("classes");
+        let generated = generate_java_path(&source, JavaBackendOptions::new(&out)).unwrap();
+        assert!(generated.diagnostics.is_empty(), "{:?}", generated.diagnostics);
+        let mut sources = core_runtime_sources();
+        collect_java_sources(&out, &mut sources).unwrap();
+        fs::create_dir_all(&classes).unwrap();
+        run_checked(
+            Command::new("javac").arg("-d").arg(&classes).args(&sources),
+            "javac generic constructor callbacks",
+        );
+        let output = run_checked(
+            Command::new("java")
+                .arg("-cp")
+                .arg(&classes)
+                .arg("examples.issues.generic_constructor_callbacks.Generic_constructor_callbacksMain"),
+            "java generic constructor callbacks",
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), interpreted.output);
+        let _ = fs::remove_dir_all(temp);
     }
 
     #[test]

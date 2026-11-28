@@ -149,6 +149,27 @@ test('anonymous object members shadow enclosing mixin aliases', async ({ page })
   expect(result.output).toBe('mixin alias anonymous object scope ok\n');
 });
 
+test('mixin aliases do not capture type arguments or become index values', async ({ page }) => {
+  const source = await readFile(new URL('../../../examples/issues/mixin_alias_type_arguments.lum', import.meta.url), 'utf8');
+  const results = await page.evaluate(async source => {
+    const { LumeClient } = await import('/sdk.js');
+    const sdk = new LumeClient({ timeoutMs: 30_000 });
+    const valid = await sdk.run({ entry: 'main.lum', files: { 'main.lum': source } });
+    const invalid = await sdk.check({ entry: 'main.lum', files: { 'main.lum': `
+mixin Parts {}
+class Host {
+    mix Parts as Int
+    fn run() Int = [42][Int]
+}
+fn main() { println(Host().run()) }
+` } });
+    return { valid, invalid };
+  }, source);
+  expect(results.valid.diagnostics).toEqual([]);
+  expect(results.valid.output).toBe('mixin alias type arguments ok\n');
+  expect(results.invalid.diagnostics.some(diagnostic => diagnostic.code === 'invalid_mixin_alias_value')).toBe(true);
+});
+
 test('typed declarations construct classes without propagating class targets', async ({ page }) => {
   const source = await readFile(new URL('../../../examples/features/declaration_construction.lum', import.meta.url), 'utf8');
   const result = await page.evaluate(async source => {
